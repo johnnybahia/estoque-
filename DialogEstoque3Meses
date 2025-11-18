@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body { font-family: Arial, sans-serif; padding: 20px; }
+      .item-input { margin: 5px 0; padding: 6px; width: 100%; box-sizing: border-box; }
+      button { margin-top: 10px; padding: 8px 12px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+      th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
+      th { background: #f4f4f4; }
+    </style>
+  </head>
+  <body>
+    <h2>Estoque 3 Meses</h2>
+    <p>Insira até 20 itens:</p>
+    <form id="form">
+      <? for (var i = 1; i <= 20; i++) { ?>
+        <input type="text" name="item<?= i ?>" class="item-input" placeholder="Item <?= i ?>" list="itemList">
+      <? } ?>
+      <button type="button" onclick="submitForm()">Gerar Relatório</button>
+    </form>
+
+    <div id="results"></div>
+
+    <datalist id="itemList">
+      <? var list = JSON.parse(itemList); list.forEach(function(item) { ?>
+        <option value="<?= item ?>">
+      <? }); ?>
+    </datalist>
+
+    <script>
+      // Coleta os dados do formulário e chama o Apps Script
+      function submitForm() {
+        var form = document.getElementById('form');
+        var data = {};
+        new FormData(form).forEach(function(val, key) {
+          if (val && val.trim()) data[key] = val.trim();
+        });
+        // Chama a função do Code.gs
+        google.script.run
+          .withSuccessHandler(showResults)
+          .processEstoque3Meses(data);
+      }
+
+      // Insere o HTML retornado (tabela com 5 colunas) na div de resultados
+      function showResults(html) {
+        document.getElementById('results').innerHTML = html;
+      }
+    </script>
+  </body>
+</html>
