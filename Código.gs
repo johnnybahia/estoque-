@@ -806,52 +806,56 @@ function invalidateAllAutocompleteCache() {
 
 /**
  * getAllAutocompleteData: Busca todos os dados de autocomplete em uma única operação.
- * OTIMIZADO: Consolida 4 leituras em 2 leituras (SEM cache - dados muito grandes)
+ * OTIMIZADO: Itens vêm da coluna B do ESTOQUE (produtos realmente usados, sem duplicatas)
  */
 function getAllAutocompleteData() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  // 1ª Leitura: DADOS (itens e grupos)
+  // 1ª Leitura: DADOS (apenas grupos)
   var sheetDados = ss.getSheetByName("DADOS");
-  var items = [], groups = [];
+  var groups = [];
   if (sheetDados) {
     var lastRowDados = sheetDados.getLastRow();
     if (lastRowDados >= 1) {
-      var dadosData = sheetDados.getRange(1, 1, lastRowDados, 4).getValues();
+      var dadosData = sheetDados.getRange(1, 4, lastRowDados, 1).getDisplayValues();
       for (var i = 0; i < dadosData.length; i++) {
         if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
-          items.push(dadosData[i][0].toString().trim());
-        }
-        if (dadosData[i][3] && dadosData[i][3].toString().trim() !== "") {
-          groups.push(dadosData[i][3].toString().trim());
+          groups.push(dadosData[i][0].toString().trim());
         }
       }
     }
   }
 
-  // 2ª Leitura: ESTOQUE (NFs e Obs)
+  // 2ª Leitura: ESTOQUE (itens da coluna B, NFs e Obs)
   var sheetEstoque = ss.getSheetByName("ESTOQUE");
-  var nfs = [], obs = [];
+  var items = [], nfs = [], obs = [];
   if (sheetEstoque) {
     var lastRowEstoque = sheetEstoque.getLastRow();
     if (lastRowEstoque >= 2) {
-      var estoqueData = sheetEstoque.getRange(2, 4, lastRowEstoque - 1, 2).getValues();
+      // Lê colunas B (Item), D (NF), E (Obs) - usa getDisplayValues para forçar TEXTO
+      var estoqueData = sheetEstoque.getRange(2, 2, lastRowEstoque - 1, 4).getDisplayValues();
       for (var j = 0; j < estoqueData.length; j++) {
+        // Coluna B (Item) - índice 0
         if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
-          nfs.push(estoqueData[j][0]);
+          items.push(estoqueData[j][0].toString().trim());
         }
-        if (estoqueData[j][1] && estoqueData[j][1].toString().trim() !== "") {
-          obs.push(estoqueData[j][1]);
+        // Coluna D (NF) - índice 2
+        if (estoqueData[j][2] && estoqueData[j][2].toString().trim() !== "") {
+          nfs.push(estoqueData[j][2]);
+        }
+        // Coluna E (Obs) - índice 3
+        if (estoqueData[j][3] && estoqueData[j][3].toString().trim() !== "") {
+          obs.push(estoqueData[j][3]);
         }
       }
     }
   }
 
   return {
-    items: Array.from(new Set(items)),
-    groups: Array.from(new Set(groups)),
-    nfs: Array.from(new Set(nfs)),
-    obs: Array.from(new Set(obs))
+    items: Array.from(new Set(items)),        // Remove duplicatas
+    groups: Array.from(new Set(groups)),      // Remove duplicatas
+    nfs: Array.from(new Set(nfs)),            // Remove duplicatas
+    obs: Array.from(new Set(obs))             // Remove duplicatas
   };
 }
 
@@ -2218,52 +2222,56 @@ function invalidateAllAutocompleteCache() {
 
 /**
  * getAllAutocompleteData: Busca todos os dados de autocomplete em uma única operação.
- * OTIMIZADO: Consolida 4 leituras em 2 leituras (SEM cache - dados muito grandes)
+ * OTIMIZADO: Itens vêm da coluna B do ESTOQUE (produtos realmente usados, sem duplicatas)
  */
 function getAllAutocompleteData() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  // 1ª Leitura: DADOS (itens e grupos)
+  // 1ª Leitura: DADOS (apenas grupos)
   var sheetDados = ss.getSheetByName("DADOS");
-  var items = [], groups = [];
+  var groups = [];
   if (sheetDados) {
     var lastRowDados = sheetDados.getLastRow();
     if (lastRowDados >= 1) {
-      var dadosData = sheetDados.getRange(1, 1, lastRowDados, 4).getValues();
+      var dadosData = sheetDados.getRange(1, 4, lastRowDados, 1).getDisplayValues();
       for (var i = 0; i < dadosData.length; i++) {
         if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
-          items.push(dadosData[i][0].toString().trim());
-        }
-        if (dadosData[i][3] && dadosData[i][3].toString().trim() !== "") {
-          groups.push(dadosData[i][3].toString().trim());
+          groups.push(dadosData[i][0].toString().trim());
         }
       }
     }
   }
 
-  // 2ª Leitura: ESTOQUE (NFs e Obs)
+  // 2ª Leitura: ESTOQUE (itens da coluna B, NFs e Obs)
   var sheetEstoque = ss.getSheetByName("ESTOQUE");
-  var nfs = [], obs = [];
+  var items = [], nfs = [], obs = [];
   if (sheetEstoque) {
     var lastRowEstoque = sheetEstoque.getLastRow();
     if (lastRowEstoque >= 2) {
-      var estoqueData = sheetEstoque.getRange(2, 4, lastRowEstoque - 1, 2).getValues();
+      // Lê colunas B (Item), D (NF), E (Obs) - usa getDisplayValues para forçar TEXTO
+      var estoqueData = sheetEstoque.getRange(2, 2, lastRowEstoque - 1, 4).getDisplayValues();
       for (var j = 0; j < estoqueData.length; j++) {
+        // Coluna B (Item) - índice 0
         if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
-          nfs.push(estoqueData[j][0]);
+          items.push(estoqueData[j][0].toString().trim());
         }
-        if (estoqueData[j][1] && estoqueData[j][1].toString().trim() !== "") {
-          obs.push(estoqueData[j][1]);
+        // Coluna D (NF) - índice 2
+        if (estoqueData[j][2] && estoqueData[j][2].toString().trim() !== "") {
+          nfs.push(estoqueData[j][2]);
+        }
+        // Coluna E (Obs) - índice 3
+        if (estoqueData[j][3] && estoqueData[j][3].toString().trim() !== "") {
+          obs.push(estoqueData[j][3]);
         }
       }
     }
   }
 
   return {
-    items: Array.from(new Set(items)),
-    groups: Array.from(new Set(groups)),
-    nfs: Array.from(new Set(nfs)),
-    obs: Array.from(new Set(obs))
+    items: Array.from(new Set(items)),        // Remove duplicatas
+    groups: Array.from(new Set(groups)),      // Remove duplicatas
+    nfs: Array.from(new Set(nfs)),            // Remove duplicatas
+    obs: Array.from(new Set(obs))             // Remove duplicatas
   };
 }
 
