@@ -878,11 +878,14 @@ function getLastRegistration(item, currentRow) {
     return { lastDate: null, lastStock: 0, lastGroup: null };
   }
 
-  // Lê TODA a planilha para garantir que encontre o item
+  // Lê TODA a planilha como TEXTO (getDisplayValues) para evitar problemas de formato
   var startRow = 2;
   var numRows = lastRow - startRow + 1;
   Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow + " (" + numRows + " linhas)");
-  var data = sheetEstoque.getRange(startRow, 1, numRows, 9).getValues();
+
+  // USA getDisplayValues() para forçar conversão para texto
+  var data = sheetEstoque.getRange(startRow, 1, numRows, 9).getDisplayValues();
+  Logger.log("Usando getDisplayValues() para forçar formato de TEXTO");
 
   var result = { lastDate: null, lastStock: 0, lastGroup: null };
   var itemNormalized = normalize(item);
@@ -893,19 +896,20 @@ function getLastRegistration(item, currentRow) {
     var rowNum = startRow + i;
     if (rowNum >= currentRow) continue;
 
-    var currentItem = data[i][1]; // Coluna B (Item)
-    if (currentItem) {
+    var currentItem = data[i][1]; // Coluna B (Item) - agora em formato TEXTO
+    if (currentItem && currentItem.toString().trim() !== "") {
       var currentItemNormalized = normalize(currentItem);
 
       if (currentItemNormalized === itemNormalized) {
         encontrados++;
         result.lastGroup = data[i][0];  // Coluna A (Grupo)
-        result.lastDate = data[i][2];   // Coluna C (Data)
-        result.lastStock = data[i][8];  // Coluna I (Novo Saldo)
+        result.lastDate = data[i][2];   // Coluna C (Data) - como texto
+        result.lastStock = data[i][8];  // Coluna I (Novo Saldo) - como texto
         Logger.log("✓ ENCONTRADO na linha " + rowNum);
         Logger.log("  Grupo: '" + result.lastGroup + "'");
         Logger.log("  Data: " + result.lastDate);
         Logger.log("  Estoque: " + result.lastStock);
+        Logger.log("  Item raw: '" + currentItem + "'");
         break;
       }
     }
@@ -2286,11 +2290,14 @@ function getLastRegistration(item, currentRow) {
     return { lastDate: null, lastStock: 0, lastGroup: null };
   }
 
-  // Lê TODA a planilha para garantir que encontre o item
+  // Lê TODA a planilha como TEXTO (getDisplayValues) para evitar problemas de formato
   var startRow = 2;
   var numRows = lastRow - startRow + 1;
   Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow + " (" + numRows + " linhas)");
-  var data = sheetEstoque.getRange(startRow, 1, numRows, 9).getValues();
+
+  // USA getDisplayValues() para forçar conversão para texto
+  var data = sheetEstoque.getRange(startRow, 1, numRows, 9).getDisplayValues();
+  Logger.log("Usando getDisplayValues() para forçar formato de TEXTO");
 
   var result = { lastDate: null, lastStock: 0, lastGroup: null };
   var itemNormalized = normalize(item);
@@ -2301,19 +2308,20 @@ function getLastRegistration(item, currentRow) {
     var rowNum = startRow + i;
     if (rowNum >= currentRow) continue;
 
-    var currentItem = data[i][1]; // Coluna B (Item)
-    if (currentItem) {
+    var currentItem = data[i][1]; // Coluna B (Item) - agora em formato TEXTO
+    if (currentItem && currentItem.toString().trim() !== "") {
       var currentItemNormalized = normalize(currentItem);
 
       if (currentItemNormalized === itemNormalized) {
         encontrados++;
         result.lastGroup = data[i][0];  // Coluna A (Grupo)
-        result.lastDate = data[i][2];   // Coluna C (Data)
-        result.lastStock = data[i][8];  // Coluna I (Novo Saldo)
+        result.lastDate = data[i][2];   // Coluna C (Data) - como texto
+        result.lastStock = data[i][8];  // Coluna I (Novo Saldo) - como texto
         Logger.log("✓ ENCONTRADO na linha " + rowNum);
         Logger.log("  Grupo: '" + result.lastGroup + "'");
         Logger.log("  Data: " + result.lastDate);
         Logger.log("  Estoque: " + result.lastStock);
+        Logger.log("  Item raw: '" + currentItem + "'");
         break;
       }
     }
@@ -3481,9 +3489,9 @@ function debugBuscarItemNaEstoque(itemBuscado) {
 
   Logger.log("Total de linhas na ESTOQUE: " + lastRow);
 
-  // Lê TODA a coluna B (Item)
-  var data = sheetEstoque.getRange(2, 1, lastRow - 1, 2).getValues();
-  Logger.log("Lendo colunas A (Grupo) e B (Item)");
+  // Lê TODA a coluna B (Item) - USA getDisplayValues para forçar TEXTO
+  var data = sheetEstoque.getRange(2, 1, lastRow - 1, 2).getDisplayValues();
+  Logger.log("Lendo colunas A (Grupo) e B (Item) como TEXTO");
 
   var itemNormalized = normalize(itemBuscado);
   Logger.log("Item normalizado buscado: '" + itemNormalized + "'");
@@ -3495,7 +3503,7 @@ function debugBuscarItemNaEstoque(itemBuscado) {
     var grupo = data[i][0];
     var item = data[i][1];
 
-    if (item) {
+    if (item && item.toString().trim() !== "") {
       var itemStr = item.toString();
       var itemNorm = normalize(itemStr);
 
