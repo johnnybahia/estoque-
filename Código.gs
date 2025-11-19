@@ -793,10 +793,10 @@ function invalidateCache(keys) {
 
 /**
  * invalidateAllAutocompleteCache: Invalida todos os caches de autocomplete.
+ * NOTA: autocompleteData não usa cache (dados muito grandes para cache do Google)
  */
 function invalidateAllAutocompleteCache() {
   invalidateCache([
-    "autocompleteData",
     "itemList",
     "groupList",
     "nfList",
@@ -806,55 +806,53 @@ function invalidateAllAutocompleteCache() {
 
 /**
  * getAllAutocompleteData: Busca todos os dados de autocomplete em uma única operação.
- * OTIMIZADO: Consolida 4 leituras em 2 leituras + cache de 10 segundos
+ * OTIMIZADO: Consolida 4 leituras em 2 leituras (SEM cache - dados muito grandes)
  */
 function getAllAutocompleteData() {
-  return getCachedData("autocompleteData", function() {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
 
-    // 1ª Leitura: DADOS (itens e grupos)
-    var sheetDados = ss.getSheetByName("DADOS");
-    var items = [], groups = [];
-    if (sheetDados) {
-      var lastRowDados = sheetDados.getLastRow();
-      if (lastRowDados >= 1) {
-        var dadosData = sheetDados.getRange(1, 1, lastRowDados, 4).getValues();
-        for (var i = 0; i < dadosData.length; i++) {
-          if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
-            items.push(dadosData[i][0].toString().trim());
-          }
-          if (dadosData[i][3] && dadosData[i][3].toString().trim() !== "") {
-            groups.push(dadosData[i][3].toString().trim());
-          }
+  // 1ª Leitura: DADOS (itens e grupos)
+  var sheetDados = ss.getSheetByName("DADOS");
+  var items = [], groups = [];
+  if (sheetDados) {
+    var lastRowDados = sheetDados.getLastRow();
+    if (lastRowDados >= 1) {
+      var dadosData = sheetDados.getRange(1, 1, lastRowDados, 4).getValues();
+      for (var i = 0; i < dadosData.length; i++) {
+        if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
+          items.push(dadosData[i][0].toString().trim());
+        }
+        if (dadosData[i][3] && dadosData[i][3].toString().trim() !== "") {
+          groups.push(dadosData[i][3].toString().trim());
         }
       }
     }
+  }
 
-    // 2ª Leitura: ESTOQUE (NFs e Obs)
-    var sheetEstoque = ss.getSheetByName("ESTOQUE");
-    var nfs = [], obs = [];
-    if (sheetEstoque) {
-      var lastRowEstoque = sheetEstoque.getLastRow();
-      if (lastRowEstoque >= 2) {
-        var estoqueData = sheetEstoque.getRange(2, 4, lastRowEstoque - 1, 2).getValues();
-        for (var j = 0; j < estoqueData.length; j++) {
-          if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
-            nfs.push(estoqueData[j][0]);
-          }
-          if (estoqueData[j][1] && estoqueData[j][1].toString().trim() !== "") {
-            obs.push(estoqueData[j][1]);
-          }
+  // 2ª Leitura: ESTOQUE (NFs e Obs)
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  var nfs = [], obs = [];
+  if (sheetEstoque) {
+    var lastRowEstoque = sheetEstoque.getLastRow();
+    if (lastRowEstoque >= 2) {
+      var estoqueData = sheetEstoque.getRange(2, 4, lastRowEstoque - 1, 2).getValues();
+      for (var j = 0; j < estoqueData.length; j++) {
+        if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
+          nfs.push(estoqueData[j][0]);
+        }
+        if (estoqueData[j][1] && estoqueData[j][1].toString().trim() !== "") {
+          obs.push(estoqueData[j][1]);
         }
       }
     }
+  }
 
-    return {
-      items: Array.from(new Set(items)),
-      groups: Array.from(new Set(groups)),
-      nfs: Array.from(new Set(nfs)),
-      obs: Array.from(new Set(obs))
-    };
-  }, 10); // Cache de 10 segundos
+  return {
+    items: Array.from(new Set(items)),
+    groups: Array.from(new Set(groups)),
+    nfs: Array.from(new Set(nfs)),
+    obs: Array.from(new Set(obs))
+  };
 }
 
 /**
@@ -1327,9 +1325,6 @@ function processEstoque(formData) {
   
   PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
   backupEstoqueData();
-
-  // Invalida cache de autocomplete para sempre ter dados atuais
-  invalidateAllAutocompleteCache();
 
   // Verifica se passou mais de 20 dias desde a última data de registro
   if (lastReg.lastDate) {
@@ -2180,10 +2175,10 @@ function invalidateCache(keys) {
 
 /**
  * invalidateAllAutocompleteCache: Invalida todos os caches de autocomplete.
+ * NOTA: autocompleteData não usa cache (dados muito grandes para cache do Google)
  */
 function invalidateAllAutocompleteCache() {
   invalidateCache([
-    "autocompleteData",
     "itemList",
     "groupList",
     "nfList",
@@ -2193,55 +2188,53 @@ function invalidateAllAutocompleteCache() {
 
 /**
  * getAllAutocompleteData: Busca todos os dados de autocomplete em uma única operação.
- * OTIMIZADO: Consolida 4 leituras em 2 leituras + cache de 10 segundos
+ * OTIMIZADO: Consolida 4 leituras em 2 leituras (SEM cache - dados muito grandes)
  */
 function getAllAutocompleteData() {
-  return getCachedData("autocompleteData", function() {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
 
-    // 1ª Leitura: DADOS (itens e grupos)
-    var sheetDados = ss.getSheetByName("DADOS");
-    var items = [], groups = [];
-    if (sheetDados) {
-      var lastRowDados = sheetDados.getLastRow();
-      if (lastRowDados >= 1) {
-        var dadosData = sheetDados.getRange(1, 1, lastRowDados, 4).getValues();
-        for (var i = 0; i < dadosData.length; i++) {
-          if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
-            items.push(dadosData[i][0].toString().trim());
-          }
-          if (dadosData[i][3] && dadosData[i][3].toString().trim() !== "") {
-            groups.push(dadosData[i][3].toString().trim());
-          }
+  // 1ª Leitura: DADOS (itens e grupos)
+  var sheetDados = ss.getSheetByName("DADOS");
+  var items = [], groups = [];
+  if (sheetDados) {
+    var lastRowDados = sheetDados.getLastRow();
+    if (lastRowDados >= 1) {
+      var dadosData = sheetDados.getRange(1, 1, lastRowDados, 4).getValues();
+      for (var i = 0; i < dadosData.length; i++) {
+        if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
+          items.push(dadosData[i][0].toString().trim());
+        }
+        if (dadosData[i][3] && dadosData[i][3].toString().trim() !== "") {
+          groups.push(dadosData[i][3].toString().trim());
         }
       }
     }
+  }
 
-    // 2ª Leitura: ESTOQUE (NFs e Obs)
-    var sheetEstoque = ss.getSheetByName("ESTOQUE");
-    var nfs = [], obs = [];
-    if (sheetEstoque) {
-      var lastRowEstoque = sheetEstoque.getLastRow();
-      if (lastRowEstoque >= 2) {
-        var estoqueData = sheetEstoque.getRange(2, 4, lastRowEstoque - 1, 2).getValues();
-        for (var j = 0; j < estoqueData.length; j++) {
-          if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
-            nfs.push(estoqueData[j][0]);
-          }
-          if (estoqueData[j][1] && estoqueData[j][1].toString().trim() !== "") {
-            obs.push(estoqueData[j][1]);
-          }
+  // 2ª Leitura: ESTOQUE (NFs e Obs)
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  var nfs = [], obs = [];
+  if (sheetEstoque) {
+    var lastRowEstoque = sheetEstoque.getLastRow();
+    if (lastRowEstoque >= 2) {
+      var estoqueData = sheetEstoque.getRange(2, 4, lastRowEstoque - 1, 2).getValues();
+      for (var j = 0; j < estoqueData.length; j++) {
+        if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
+          nfs.push(estoqueData[j][0]);
+        }
+        if (estoqueData[j][1] && estoqueData[j][1].toString().trim() !== "") {
+          obs.push(estoqueData[j][1]);
         }
       }
     }
+  }
 
-    return {
-      items: Array.from(new Set(items)),
-      groups: Array.from(new Set(groups)),
-      nfs: Array.from(new Set(nfs)),
-      obs: Array.from(new Set(obs))
-    };
-  }, 10); // Cache de 10 segundos
+  return {
+    items: Array.from(new Set(items)),
+    groups: Array.from(new Set(groups)),
+    nfs: Array.from(new Set(nfs)),
+    obs: Array.from(new Set(obs))
+  };
 }
 
 /**
