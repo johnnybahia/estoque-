@@ -1192,7 +1192,7 @@ function processEstoque(formData) {
   
   PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
   backupEstoqueData();
-  
+
   // Verifica se passou mais de 20 dias desde a última data de registro
   if (lastReg.lastDate) {
     var lastDate = new Date(lastReg.lastDate);
@@ -1210,6 +1210,15 @@ function processEstoque(formData) {
       }
     }
   }
+
+  // Verifica se houve ENTRADA de estoque - aviso para atualização
+  if (parseFloat(formData.entrada) > 0) {
+    var lastColumn = sheetEstoque.getLastColumn();
+    sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("yellow");
+    showCustomDialog("⚠️ ENTRADA DE ESTOQUE REGISTRADA!\n\nÉ NECESSÁRIO ATUALIZAR O ESTOQUE DESTE ITEM PARA EVITAR FUROS DE ESTOQUE.\n\nRealize uma contagem física e registre uma atualização completa do saldo.");
+    return;
+  }
+
   // Se não entrou no critério, não exibe diálogo de sucesso para agilizar o cadastro.
 }
 
