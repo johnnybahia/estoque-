@@ -860,37 +860,62 @@ function getAllAutocompleteData() {
  * OTIMIZADO: Lê apenas as últimas 2000 linhas da planilha ESTOQUE
  */
 function getLastRegistration(item, currentRow) {
+  Logger.log("=== getLastRegistration INICIADO ===");
+  Logger.log("Item buscado: '" + item + "'");
+  Logger.log("CurrentRow: " + currentRow);
+
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetEstoque = ss.getSheetByName("ESTOQUE");
   if (!sheetEstoque) {
-    Logger.log("getLastRegistration: Aba ESTOQUE não encontrada.");
+    Logger.log("ERRO: Aba ESTOQUE não encontrada!");
     return { lastDate: null, lastStock: 0, lastGroup: null };
   }
 
   var lastRow = sheetEstoque.getLastRow();
-  if (lastRow < 2) return { lastDate: null, lastStock: 0, lastGroup: null };
+  Logger.log("Última linha da planilha: " + lastRow);
+  if (lastRow < 2) {
+    Logger.log("Planilha vazia - sem dados");
+    return { lastDate: null, lastStock: 0, lastGroup: null };
+  }
 
   // Lê apenas as últimas 2000 linhas: Grupo (A), Item (B), Data (C), Novo Saldo (I)
   var startRow = Math.max(2, lastRow - 2000);
   var numRows = lastRow - startRow + 1;
+  Logger.log("Lendo linhas de " + startRow + " até " + lastRow + " (" + numRows + " linhas)");
   var data = sheetEstoque.getRange(startRow, 1, numRows, 9).getValues();
 
   var result = { lastDate: null, lastStock: 0, lastGroup: null };
+  var itemNormalized = normalize(item);
+  Logger.log("Item normalizado: '" + itemNormalized + "'");
 
-  Logger.log("getLastRegistration: Procurando por " + normalize(item));
+  var encontrados = 0;
   for (var i = data.length - 1; i >= 0; i--) {
     var rowNum = startRow + i;
     if (rowNum >= currentRow) continue;
+
     var currentItem = data[i][1]; // Coluna B (Item)
-    Logger.log("Linha " + rowNum + ": " + normalize(currentItem));
-    if (currentItem && normalize(currentItem) === normalize(item)) {
-      result.lastGroup = data[i][0];  // Coluna A (Grupo)
-      result.lastDate = data[i][2];   // Coluna C (Data)
-      result.lastStock = data[i][8];  // Coluna I (Novo Saldo)
-      Logger.log("getLastRegistration: Encontrado na linha " + rowNum + " - Grupo=" + result.lastGroup + " Data=" + result.lastDate + " Estoque=" + result.lastStock);
-      break;
+    if (currentItem) {
+      var currentItemNormalized = normalize(currentItem);
+
+      if (currentItemNormalized === itemNormalized) {
+        encontrados++;
+        result.lastGroup = data[i][0];  // Coluna A (Grupo)
+        result.lastDate = data[i][2];   // Coluna C (Data)
+        result.lastStock = data[i][8];  // Coluna I (Novo Saldo)
+        Logger.log("✓ ENCONTRADO na linha " + rowNum);
+        Logger.log("  Grupo: '" + result.lastGroup + "'");
+        Logger.log("  Data: " + result.lastDate);
+        Logger.log("  Estoque: " + result.lastStock);
+        break;
+      }
     }
   }
+
+  if (encontrados === 0) {
+    Logger.log("✗ NENHUM REGISTRO ENCONTRADO para o item '" + item + "'");
+  }
+
+  Logger.log("=== getLastRegistration FINALIZADO ===");
   return result;
 }
 
@@ -2243,37 +2268,62 @@ function getAllAutocompleteData() {
  * OTIMIZADO: Lê apenas as últimas 2000 linhas da planilha ESTOQUE
  */
 function getLastRegistration(item, currentRow) {
+  Logger.log("=== getLastRegistration INICIADO ===");
+  Logger.log("Item buscado: '" + item + "'");
+  Logger.log("CurrentRow: " + currentRow);
+
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetEstoque = ss.getSheetByName("ESTOQUE");
   if (!sheetEstoque) {
-    Logger.log("getLastRegistration: Aba ESTOQUE não encontrada.");
+    Logger.log("ERRO: Aba ESTOQUE não encontrada!");
     return { lastDate: null, lastStock: 0, lastGroup: null };
   }
 
   var lastRow = sheetEstoque.getLastRow();
-  if (lastRow < 2) return { lastDate: null, lastStock: 0, lastGroup: null };
+  Logger.log("Última linha da planilha: " + lastRow);
+  if (lastRow < 2) {
+    Logger.log("Planilha vazia - sem dados");
+    return { lastDate: null, lastStock: 0, lastGroup: null };
+  }
 
   // Lê apenas as últimas 2000 linhas: Grupo (A), Item (B), Data (C), Novo Saldo (I)
   var startRow = Math.max(2, lastRow - 2000);
   var numRows = lastRow - startRow + 1;
+  Logger.log("Lendo linhas de " + startRow + " até " + lastRow + " (" + numRows + " linhas)");
   var data = sheetEstoque.getRange(startRow, 1, numRows, 9).getValues();
 
   var result = { lastDate: null, lastStock: 0, lastGroup: null };
+  var itemNormalized = normalize(item);
+  Logger.log("Item normalizado: '" + itemNormalized + "'");
 
-  Logger.log("getLastRegistration: Procurando por " + normalize(item));
+  var encontrados = 0;
   for (var i = data.length - 1; i >= 0; i--) {
     var rowNum = startRow + i;
     if (rowNum >= currentRow) continue;
+
     var currentItem = data[i][1]; // Coluna B (Item)
-    Logger.log("Linha " + rowNum + ": " + normalize(currentItem));
-    if (currentItem && normalize(currentItem) === normalize(item)) {
-      result.lastGroup = data[i][0];  // Coluna A (Grupo)
-      result.lastDate = data[i][2];   // Coluna C (Data)
-      result.lastStock = data[i][8];  // Coluna I (Novo Saldo)
-      Logger.log("getLastRegistration: Encontrado na linha " + rowNum + " - Grupo=" + result.lastGroup + " Data=" + result.lastDate + " Estoque=" + result.lastStock);
-      break;
+    if (currentItem) {
+      var currentItemNormalized = normalize(currentItem);
+
+      if (currentItemNormalized === itemNormalized) {
+        encontrados++;
+        result.lastGroup = data[i][0];  // Coluna A (Grupo)
+        result.lastDate = data[i][2];   // Coluna C (Data)
+        result.lastStock = data[i][8];  // Coluna I (Novo Saldo)
+        Logger.log("✓ ENCONTRADO na linha " + rowNum);
+        Logger.log("  Grupo: '" + result.lastGroup + "'");
+        Logger.log("  Data: " + result.lastDate);
+        Logger.log("  Estoque: " + result.lastStock);
+        break;
+      }
     }
   }
+
+  if (encontrados === 0) {
+    Logger.log("✗ NENHUM REGISTRO ENCONTRADO para o item '" + item + "'");
+  }
+
+  Logger.log("=== getLastRegistration FINALIZADO ===");
   return result;
 }
 
