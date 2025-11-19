@@ -103,11 +103,17 @@
          if (item === "") {
            document.getElementById("lastInfo").innerHTML = "";
            document.getElementById("alertInfo").innerHTML = "";
+           document.getElementById("group").value = "";
            return;
          }
          var currentRow = Number(document.getElementById("currentRow").value);
          google.script.run.withSuccessHandler(function(result) {
            if (result.lastDate) {
+             // Auto-preenche o grupo baseado no último registro
+             if (result.lastGroup) {
+               document.getElementById("group").value = result.lastGroup;
+             }
+
              var lastDate = new Date(result.lastDate);
              var options = { day: '2-digit', month: '2-digit', year: 'numeric' };
              var formattedDate = lastDate.toLocaleDateString("pt-BR", options);
@@ -121,6 +127,8 @@
                document.getElementById("alertInfo").innerHTML = "";
              }
            } else {
+             // Sem histórico - limpa o grupo para usuário preencher
+             document.getElementById("group").value = "";
              document.getElementById("lastInfo").innerHTML = "Sem histórico.";
              document.getElementById("alertInfo").innerHTML = "";
            }
@@ -157,15 +165,15 @@
       }
       
       function resetForm() {
-         document.getElementById("group").value = "";
          document.getElementById("item").value = "";
+         document.getElementById("group").value = "";
          document.getElementById("nf").value = "";
          document.getElementById("obs").value = "";
          document.getElementById("entrada").value = "";
          document.getElementById("saida").value = "";
          document.getElementById("lastInfo").innerHTML = "";
          document.getElementById("alertInfo").innerHTML = "";
-         document.getElementById("group").focus();
+         document.getElementById("item").focus();
          google.script.run.withSuccessHandler(function(row){
             document.getElementById("currentRow").value = row;
          }).getNextRow();
@@ -187,16 +195,16 @@
   <body>
     <div class="container">
       <h3>Cadastro de Estoque</h3>
-      
-      <label>Grupo:</label>
-      <input list="groupList" id="group" placeholder="Grupo" required>
-      <datalist id="groupList"></datalist>
-      
+
       <label>Produto:</label>
       <input list="itemList" id="item" placeholder="Produto" oninput="checkLastRegistration()" onblur="checkLastRegistration()" required>
       <datalist id="itemList"></datalist>
       <div id="lastInfo" class="info"></div>
       <div id="alertInfo" class="alert"></div>
+
+      <label>Grupo:</label>
+      <input list="groupList" id="group" placeholder="Grupo (preenchido automaticamente)" required>
+      <datalist id="groupList"></datalist>
       
       <label>NF/Pedido:</label>
       <input list="nfList" id="nf" placeholder="Nota/Pedido" required>
