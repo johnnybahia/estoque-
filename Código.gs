@@ -878,10 +878,10 @@ function getLastRegistration(item, currentRow) {
     return { lastDate: null, lastStock: 0, lastGroup: null };
   }
 
-  // Lê apenas as últimas 2000 linhas: Grupo (A), Item (B), Data (C), Novo Saldo (I)
-  var startRow = Math.max(2, lastRow - 2000);
+  // Lê TODA a planilha para garantir que encontre o item
+  var startRow = 2;
   var numRows = lastRow - startRow + 1;
-  Logger.log("Lendo linhas de " + startRow + " até " + lastRow + " (" + numRows + " linhas)");
+  Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow + " (" + numRows + " linhas)");
   var data = sheetEstoque.getRange(startRow, 1, numRows, 9).getValues();
 
   var result = { lastDate: null, lastStock: 0, lastGroup: null };
@@ -2286,10 +2286,10 @@ function getLastRegistration(item, currentRow) {
     return { lastDate: null, lastStock: 0, lastGroup: null };
   }
 
-  // Lê apenas as últimas 2000 linhas: Grupo (A), Item (B), Data (C), Novo Saldo (I)
-  var startRow = Math.max(2, lastRow - 2000);
+  // Lê TODA a planilha para garantir que encontre o item
+  var startRow = 2;
   var numRows = lastRow - startRow + 1;
-  Logger.log("Lendo linhas de " + startRow + " até " + lastRow + " (" + numRows + " linhas)");
+  Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow + " (" + numRows + " linhas)");
   var data = sheetEstoque.getRange(startRow, 1, numRows, 9).getValues();
 
   var result = { lastDate: null, lastStock: 0, lastGroup: null };
