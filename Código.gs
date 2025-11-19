@@ -3467,3 +3467,95 @@ function gerarListagemVermelho() {
 
   return 'CORES DESATUALIZADAS atualizada com ' + resultados.length + ' registro(s) mais recente(s) por produto.';
 }
+
+/**
+ * DEBUG: Busca e mostra TODOS os registros de um item na ESTOQUE
+ * Use esta função para verificar se o item existe e como está escrito
+ */
+function debugBuscarItemNaEstoque(itemBuscado) {
+  Logger.log("=== DEBUG: Buscando '" + itemBuscado + "' na ESTOQUE ===");
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  var lastRow = sheetEstoque.getLastRow();
+
+  Logger.log("Total de linhas na ESTOQUE: " + lastRow);
+
+  // Lê TODA a coluna B (Item)
+  var data = sheetEstoque.getRange(2, 1, lastRow - 1, 2).getValues();
+  Logger.log("Lendo colunas A (Grupo) e B (Item)");
+
+  var itemNormalized = normalize(itemBuscado);
+  Logger.log("Item normalizado buscado: '" + itemNormalized + "'");
+
+  var encontrados = [];
+  var semelhantes = [];
+
+  for (var i = 0; i < data.length; i++) {
+    var grupo = data[i][0];
+    var item = data[i][1];
+
+    if (item) {
+      var itemStr = item.toString();
+      var itemNorm = normalize(itemStr);
+
+      // Exato
+      if (itemNorm === itemNormalized) {
+        encontrados.push({
+          linha: i + 2,
+          grupo: grupo,
+          item: itemStr,
+          itemNorm: itemNorm
+        });
+      }
+      // Semelhante (contém parte do nome)
+      else if (itemNorm.indexOf(itemNormalized) >= 0 || itemNormalized.indexOf(itemNorm) >= 0) {
+        semelhantes.push({
+          linha: i + 2,
+          grupo: grupo,
+          item: itemStr,
+          itemNorm: itemNorm
+        });
+      }
+    }
+  }
+
+  Logger.log("\n========================================");
+  Logger.log("RESULTADOS:");
+  Logger.log("========================================");
+
+  if (encontrados.length > 0) {
+    Logger.log("\n✓ ENCONTRADOS " + encontrados.length + " registros EXATOS:");
+    for (var j = 0; j < Math.min(10, encontrados.length); j++) {
+      var reg = encontrados[j];
+      Logger.log("  Linha " + reg.linha + ": Grupo='" + reg.grupo + "' | Item='" + reg.item + "'");
+    }
+    if (encontrados.length > 10) {
+      Logger.log("  ... e mais " + (encontrados.length - 10) + " registros");
+    }
+  } else {
+    Logger.log("\n✗ NENHUM registro EXATO encontrado");
+  }
+
+  if (semelhantes.length > 0) {
+    Logger.log("\n≈ ENCONTRADOS " + semelhantes.length + " registros SEMELHANTES:");
+    for (var k = 0; k < Math.min(10, semelhantes.length); k++) {
+      var sem = semelhantes[k];
+      Logger.log("  Linha " + sem.linha + ": Grupo='" + sem.grupo + "' | Item='" + sem.item + "'");
+    }
+    if (semelhantes.length > 10) {
+      Logger.log("  ... e mais " + (semelhantes.length - 10) + " registros");
+    }
+  }
+
+  Logger.log("\n========================================");
+  Logger.log("TOTAL: " + encontrados.length + " exatos, " + semelhantes.length + " semelhantes");
+  Logger.log("========================================");
+
+  return {
+    exatos: encontrados.length,
+    semelhantes: semelhantes.length,
+    amostraExatos: encontrados.slice(0, 5),
+    amostraSemelhantes: semelhantes.slice(0, 5)
+  };
+}

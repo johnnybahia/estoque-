@@ -66,15 +66,13 @@
       var groupList = JSON.parse('<?= groupList ?>');
       var nfList = JSON.parse('<?= nfList ?>');
       var obsList = JSON.parse('<?= obsList ?>');
-      
+
+      // Ordena listas alfabeticamente para facilitar busca
+      itemList.sort();
+      groupList.sort();
+
       function populateDatalists() {
-         var itemDatalist = document.getElementById("itemList");
-         itemDatalist.innerHTML = "";
-         itemList.forEach(function(item) {
-           var option = document.createElement("option");
-           option.value = item;
-           itemDatalist.appendChild(option);
-         });
+         // Popula lista de grupos (menor, pode ser completa)
          var groupDatalist = document.getElementById("groupList");
          groupDatalist.innerHTML = "";
          groupList.forEach(function(group) {
@@ -82,6 +80,7 @@
            option.value = group;
            groupDatalist.appendChild(option);
          });
+
          var nfDatalist = document.getElementById("nfList");
          nfDatalist.innerHTML = "";
          nfList.forEach(function(nf) {
@@ -89,6 +88,7 @@
            option.value = nf;
            nfDatalist.appendChild(option);
          });
+
          var obsDatalist = document.getElementById("obsList");
          obsDatalist.innerHTML = "";
          obsList.forEach(function(obs) {
@@ -96,8 +96,65 @@
            option.value = obs;
            obsDatalist.appendChild(option);
          });
+
+         // Produtos: filtrados dinamicamente (não preenche aqui)
+         updateItemAutocomplete("");
+      }
+
+      /**
+       * Filtra produtos dinamicamente conforme usuário digita
+       * Mostra apenas primeiros 50 resultados para performance
+       */
+      function updateItemAutocomplete(searchText) {
+         var itemDatalist = document.getElementById("itemList");
+         itemDatalist.innerHTML = "";
+
+         if (searchText === "") {
+           // Vazio: mostra primeiros 50 itens
+           itemList.slice(0, 50).forEach(function(item) {
+             var option = document.createElement("option");
+             option.value = item;
+             itemDatalist.appendChild(option);
+           });
+           return;
+         }
+
+         var search = searchText.toLowerCase();
+         var matches = [];
+         var startsWith = [];
+         var contains = [];
+
+         // Separa em duas categorias: começa com vs contém
+         for (var i = 0; i < itemList.length && matches.length < 50; i++) {
+           var item = itemList[i];
+           var itemLower = item.toLowerCase();
+
+           if (itemLower.startsWith(search)) {
+             startsWith.push(item);
+           } else if (itemLower.indexOf(search) >= 0) {
+             contains.push(item);
+           }
+         }
+
+         // Prioriza itens que COMEÇAM com o texto, depois os que CONTÊM
+         matches = startsWith.concat(contains).slice(0, 50);
+
+         matches.forEach(function(item) {
+           var option = document.createElement("option");
+           option.value = item;
+           itemDatalist.appendChild(option);
+         });
       }
       
+      /**
+       * Atualiza autocomplete do produto conforme usuário digita
+       */
+      function onItemInput() {
+         var item = document.getElementById("item").value.trim();
+         updateItemAutocomplete(item);
+         checkLastRegistration();
+      }
+
       function checkLastRegistration() {
          var item = document.getElementById("item").value.trim();
          if (item === "") {
@@ -197,7 +254,7 @@
       <h3>Cadastro de Estoque</h3>
 
       <label>Produto:</label>
-      <input list="itemList" id="item" placeholder="Produto" oninput="checkLastRegistration()" onblur="checkLastRegistration()" required>
+      <input list="itemList" id="item" placeholder="Produto" oninput="onItemInput()" onblur="checkLastRegistration()" required>
       <datalist id="itemList"></datalist>
       <div id="lastInfo" class="info"></div>
       <div id="alertInfo" class="alert"></div>
