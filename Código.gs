@@ -1331,7 +1331,7 @@ function processEstoque(formData) {
   
   // Recupera último registro para cálculo de saldo e data
   var lastReg = getLastRegistration(formData.item, nextRow);
-  var previousSaldo = lastReg.lastStock || 0;
+  var previousSaldo = parseFloat(lastReg.lastStock) || 0;
   var newSaldo = previousSaldo + parseFloat(formData.entrada) - parseFloat(formData.saida);
   var rowData = [
     formData.group,
