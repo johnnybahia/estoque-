@@ -294,6 +294,7 @@
       width: 100%;
       border-collapse: collapse;
       background: var(--white);
+      table-layout: auto;
     }
 
     table th,
@@ -301,7 +302,22 @@
       padding: 0.75rem;
       text-align: left;
       border-bottom: 1px solid var(--border-color);
+      white-space: nowrap;
+      min-width: 100px;
     }
+
+    /* Larguras específicas para colunas */
+    table th:nth-child(1), table td:nth-child(1) { min-width: 120px; } /* Grupo */
+    table th:nth-child(2), table td:nth-child(2) { min-width: 200px; } /* Item */
+    table th:nth-child(3), table td:nth-child(3) { min-width: 110px; } /* Data */
+    table th:nth-child(4), table td:nth-child(4) { min-width: 100px; } /* NF */
+    table th:nth-child(5), table td:nth-child(5) { min-width: 150px; white-space: normal; } /* Obs */
+    table th:nth-child(6), table td:nth-child(6) { min-width: 100px; text-align: right; } /* Saldo Ant */
+    table th:nth-child(7), table td:nth-child(7) { min-width: 80px; text-align: right; } /* Entrada */
+    table th:nth-child(8), table td:nth-child(8) { min-width: 80px; text-align: right; } /* Saída */
+    table th:nth-child(9), table td:nth-child(9) { min-width: 80px; text-align: right; } /* Saldo */
+    table th:nth-child(10), table td:nth-child(10) { min-width: 140px; } /* Alterado Em */
+    table th:nth-child(11), table td:nth-child(11) { min-width: 120px; } /* Alterado Por */
 
     table th {
       background: var(--light-bg);
@@ -312,7 +328,56 @@
     }
 
     table tr:hover {
-      background: var(--light-bg);
+      opacity: 0.9;
+    }
+
+    /* Cores das linhas (vermelho e amarelo) */
+    table tr.row-red {
+      background-color: #ff0000 !important;
+      color: white;
+    }
+
+    table tr.row-red:hover {
+      background-color: #cc0000 !important;
+    }
+
+    table tr.row-yellow {
+      background-color: #ffff00 !important;
+      color: black;
+    }
+
+    table tr.row-yellow:hover {
+      background-color: #e6e600 !important;
+    }
+
+    /* Print styles */
+    @media print {
+      .header, .sidebar, .sidebar-toggle, .btn, .form-group, .content-card h2, #localizarMessage {
+        display: none !important;
+      }
+
+      .main-content {
+        margin-left: 0 !important;
+        padding: 0 !important;
+      }
+
+      .table-container {
+        overflow: visible !important;
+      }
+
+      table {
+        page-break-inside: auto;
+        font-size: 10pt;
+      }
+
+      table tr {
+        page-break-inside: avoid;
+        page-break-after: auto;
+      }
+
+      table th {
+        position: static;
+      }
     }
 
     /* Login Screen */
@@ -649,7 +714,17 @@
               </div>
             </form>
             <div id="localizarResults" class="table-container" style="display: none;">
-              <h3>Resultados da Busca</h3>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 1rem;">
+                <h3 style="margin: 0;">Resultados da Busca (<span id="totalResults">0</span> registros)</h3>
+                <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                  <label for="printDataInicio" style="margin: 0;">Período:</label>
+                  <input type="date" id="printDataInicio" style="padding: 0.5rem;">
+                  <span>até</span>
+                  <input type="date" id="printDataFim" style="padding: 0.5rem;">
+                  <button class="btn btn-success" onclick="printResults(true)" style="padding: 0.5rem 1rem;">🖨️ Imprimir Período</button>
+                  <button class="btn btn-primary" onclick="printResults(false)" style="padding: 0.5rem 1rem;">🖨️ Imprimir Tudo</button>
+                </div>
+              </div>
               <div id="localizarTableContainer"></div>
             </div>
           </div>
@@ -1126,6 +1201,7 @@
           if (result.success && result.data) {
             displayTable('localizarTableContainer', result.data);
             document.getElementById('localizarResults').style.display = 'block';
+            document.getElementById('totalResults').textContent = result.data.rows.length;
           } else {
             showMessage('localizarMessage', result.message || 'Nenhum resultado encontrado', 'warning');
             document.getElementById('localizarResults').style.display = 'none';
@@ -1134,7 +1210,7 @@
         .withFailureHandler(function(error) {
           showMessage('localizarMessage', 'Erro: ' + error.message, 'error');
         })
-        .buscarProduto(item);
+        .buscarProduto(item, null, null);
 
       return false;
     }
@@ -1146,6 +1222,7 @@
           if (result.success && result.data) {
             displayTable('localizarTableContainer', result.data);
             document.getElementById('localizarResults').style.display = 'block';
+            document.getElementById('totalResults').textContent = result.data.rows.length;
           } else {
             showMessage('localizarMessage', result.message || 'Erro ao buscar produtos', 'error');
           }
@@ -1153,7 +1230,58 @@
         .withFailureHandler(function(error) {
           showMessage('localizarMessage', 'Erro: ' + error.message, 'error');
         })
-        .mostrarTodosProdutos();
+        .mostrarTodosProdutos(null, null);
+    }
+
+    // Print results
+    function printResults(filterByDate) {
+      const item = document.getElementById('localizarItem').value;
+
+      if (filterByDate) {
+        const dataInicio = document.getElementById('printDataInicio').value;
+        const dataFim = document.getElementById('printDataFim').value;
+
+        if (!dataInicio || !dataFim) {
+          alert('Por favor, selecione o período para impressão.');
+          return;
+        }
+
+        // Busca com filtro de data
+        if (item) {
+          google.script.run
+            .withSuccessHandler(function(result) {
+              if (result.success && result.data) {
+                displayTable('localizarTableContainer', result.data);
+                document.getElementById('totalResults').textContent = result.data.rows.length;
+                setTimeout(() => window.print(), 500);
+              } else {
+                showMessage('localizarMessage', 'Nenhum resultado no período selecionado', 'warning');
+              }
+            })
+            .withFailureHandler(function(error) {
+              showMessage('localizarMessage', 'Erro: ' + error.message, 'error');
+            })
+            .buscarProduto(item, dataInicio, dataFim);
+        } else {
+          google.script.run
+            .withSuccessHandler(function(result) {
+              if (result.success && result.data) {
+                displayTable('localizarTableContainer', result.data);
+                document.getElementById('totalResults').textContent = result.data.rows.length;
+                setTimeout(() => window.print(), 500);
+              } else {
+                showMessage('localizarMessage', 'Nenhum resultado no período selecionado', 'warning');
+              }
+            })
+            .withFailureHandler(function(error) {
+              showMessage('localizarMessage', 'Erro: ' + error.message, 'error');
+            })
+            .mostrarTodosProdutos(dataInicio, dataFim);
+        }
+      } else {
+        // Imprime tudo que está sendo exibido
+        setTimeout(() => window.print(), 100);
+      }
     }
 
     // Handle Listagem Estoque
@@ -1366,7 +1494,7 @@
         .limparFiltroEstoqueWebApp();
     }
 
-    // Display table from data
+    // Display table from data with row colors
     function displayTable(containerId, data) {
       const container = document.getElementById(containerId);
 
@@ -1381,8 +1509,19 @@
       });
       html += '</tr></thead><tbody>';
 
-      data.rows.forEach(row => {
-        html += '<tr>';
+      data.rows.forEach((row, index) => {
+        // Determina a classe CSS baseada na cor de fundo
+        let rowClass = '';
+        if (data.colors && data.colors[index]) {
+          const color = data.colors[index].toLowerCase();
+          if (color === '#ff0000' || color === 'red' || color === '#f00') {
+            rowClass = ' class="row-red"';
+          } else if (color === '#ffff00' || color === 'yellow' || color === '#ff0') {
+            rowClass = ' class="row-yellow"';
+          }
+        }
+
+        html += '<tr' + rowClass + '>';
         row.forEach(cell => {
           html += '<td>' + (cell !== null && cell !== undefined ? cell : '') + '</td>';
         });

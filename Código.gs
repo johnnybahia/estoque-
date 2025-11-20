@@ -3796,8 +3796,9 @@ function insertGroup(grupo) {
 
 /**
  * buscarProduto: Wrapper para localizar produto via web app
+ * Retorna dados ordenados do mais novo para o mais antigo, com cores das linhas
  */
-function buscarProduto(item) {
+function buscarProduto(item, dataInicio, dataFim) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheetEstoque = ss.getSheetByName("ESTOQUE");
@@ -3812,13 +3813,33 @@ function buscarProduto(item) {
     }
 
     var data = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getDisplayValues();
+    var backgrounds = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getBackgrounds();
     var results = [];
     var itemNormalized = normalize(item);
 
+    // Filtra por item e data (se fornecida)
     for (var i = 0; i < data.length; i++) {
       var currentItem = normalize(data[i][1]);
       if (currentItem.indexOf(itemNormalized) >= 0) {
-        results.push(data[i]);
+        // Verifica filtro de data
+        if (dataInicio && dataFim) {
+          var dataMovimento = new Date(data[i][2]);
+          var inicio = new Date(dataInicio);
+          var fim = new Date(dataFim);
+          inicio.setHours(0, 0, 0, 0);
+          fim.setHours(23, 59, 59, 999);
+
+          if (dataMovimento < inicio || dataMovimento > fim) {
+            continue; // Pula este registro
+          }
+        }
+
+        // Adiciona dados com cor de fundo
+        results.push({
+          row: data[i],
+          background: backgrounds[i][0], // Cor da primeira coluna (toda linha tem mesma cor)
+          date: new Date(data[i][2]) // Para ordenação
+        });
       }
     }
 
@@ -3826,11 +3847,25 @@ function buscarProduto(item) {
       return { success: false, message: "Produto não encontrado" };
     }
 
+    // Ordena do mais novo para o mais antigo
+    results.sort(function(a, b) {
+      return b.date - a.date;
+    });
+
+    // Extrai apenas as linhas e cores
+    var sortedRows = [];
+    var rowColors = [];
+    for (var j = 0; j < results.length; j++) {
+      sortedRows.push(results[j].row);
+      rowColors.push(results[j].background);
+    }
+
     return {
       success: true,
       data: {
         headers: ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"],
-        rows: results
+        rows: sortedRows,
+        colors: rowColors
       }
     };
   } catch (error) {
@@ -3841,8 +3876,9 @@ function buscarProduto(item) {
 
 /**
  * mostrarTodosProdutos: Retorna todos os produtos do estoque
+ * Ordenados do mais novo para o mais antigo, com cores
  */
-function mostrarTodosProdutos() {
+function mostrarTodosProdutos(dataInicio, dataFim) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheetEstoque = ss.getSheetByName("ESTOQUE");
@@ -3856,13 +3892,50 @@ function mostrarTodosProdutos() {
       return { success: false, message: "Nenhum dado encontrado" };
     }
 
-    var data = sheetEstoque.getRange(2, 1, Math.min(1000, lastRow - 1), 11).getDisplayValues();
+    var data = sheetEstoque.getRange(2, 1, Math.min(5000, lastRow - 1), 11).getDisplayValues();
+    var backgrounds = sheetEstoque.getRange(2, 1, Math.min(5000, lastRow - 1), 11).getBackgrounds();
+    var results = [];
+
+    // Filtra por data (se fornecida)
+    for (var i = 0; i < data.length; i++) {
+      if (dataInicio && dataFim) {
+        var dataMovimento = new Date(data[i][2]);
+        var inicio = new Date(dataInicio);
+        var fim = new Date(dataFim);
+        inicio.setHours(0, 0, 0, 0);
+        fim.setHours(23, 59, 59, 999);
+
+        if (dataMovimento < inicio || dataMovimento > fim) {
+          continue; // Pula este registro
+        }
+      }
+
+      results.push({
+        row: data[i],
+        background: backgrounds[i][0],
+        date: new Date(data[i][2])
+      });
+    }
+
+    // Ordena do mais novo para o mais antigo
+    results.sort(function(a, b) {
+      return b.date - a.date;
+    });
+
+    // Extrai apenas as linhas e cores
+    var sortedRows = [];
+    var rowColors = [];
+    for (var j = 0; j < results.length; j++) {
+      sortedRows.push(results[j].row);
+      rowColors.push(results[j].background);
+    }
 
     return {
       success: true,
       data: {
         headers: ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"],
-        rows: data
+        rows: sortedRows,
+        colors: rowColors
       }
     };
   } catch (error) {
