@@ -329,9 +329,21 @@
     table th:nth-child(6), table td:nth-child(6) { min-width: 70px; text-align: right; } /* Saldo Ant */
     table th:nth-child(7), table td:nth-child(7) { min-width: 60px; text-align: right; } /* Entrada */
     table th:nth-child(8), table td:nth-child(8) { min-width: 60px; text-align: right; } /* Saída */
-    table th:nth-child(9), table td:nth-child(9) { min-width: 60px; text-align: right; } /* Saldo */
+    table th:nth-child(9), table td:nth-child(9) {
+      min-width: 70px;
+      text-align: right;
+      font-weight: 700;
+      background-color: #e3f2fd;
+      font-size: 0.9rem;
+    } /* Saldo - DESTACADO */
     table th:nth-child(10), table td:nth-child(10) { min-width: 110px; font-size: 0.8rem; } /* Alterado Em */
     table th:nth-child(11), table td:nth-child(11) { min-width: 90px; } /* Alterado Por */
+
+    /* Destaque especial para cabeçalho da coluna SALDO */
+    table th:nth-child(9) {
+      background-color: #2196f3 !important;
+      color: white !important;
+    }
 
     table th {
       background: var(--light-bg);
@@ -357,6 +369,14 @@
       background-color: #cc0000 !important;
     }
 
+    /* Mantém destaque na coluna SALDO mesmo em linhas vermelhas */
+    table tr.row-red td:nth-child(9) {
+      background-color: #d32f2f !important;
+      font-weight: 700;
+      border-left: 2px solid white;
+      border-right: 2px solid white;
+    }
+
     table tr.row-yellow {
       background-color: #ffff00 !important;
       color: black;
@@ -364,6 +384,14 @@
 
     table tr.row-yellow:hover {
       background-color: #e6e600 !important;
+    }
+
+    /* Mantém destaque na coluna SALDO mesmo em linhas amarelas */
+    table tr.row-yellow td:nth-child(9) {
+      background-color: #fdd835 !important;
+      font-weight: 700;
+      border-left: 2px solid #f57f17;
+      border-right: 2px solid #f57f17;
     }
 
     /* Print styles */
