@@ -103,7 +103,7 @@
     }
 
     .sidebar-toggle {
-      display: none;
+      display: block;
       position: fixed;
       top: 70px;
       left: 10px;
@@ -114,6 +114,16 @@
       padding: 0.5rem 1rem;
       border-radius: 4px;
       cursor: pointer;
+      transition: left 0.3s;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    }
+
+    .sidebar-toggle:hover {
+      background: #2980b9;
+    }
+
+    .sidebar-toggle.shifted {
+      left: 260px;
     }
 
     .sidebar nav ul {
@@ -476,12 +486,16 @@
         transform: translateX(-100%);
       }
 
-      .sidebar.show {
+      .sidebar:not(.hidden) {
         transform: translateX(0);
       }
 
       .sidebar-toggle {
-        display: block;
+        left: 10px !important;
+      }
+
+      .sidebar-toggle.shifted {
+        left: 10px !important;
       }
 
       .main-content {
@@ -574,8 +588,8 @@
       </div>
     </header>
 
-    <!-- Sidebar Toggle (Mobile) -->
-    <button class="sidebar-toggle" onclick="toggleSidebar()">☰ Menu</button>
+    <!-- Sidebar Toggle -->
+    <button class="sidebar-toggle shifted" onclick="toggleSidebar()">✕ Esconder Menu</button>
 
     <!-- Container -->
     <div class="container">
@@ -998,10 +1012,22 @@
       setTimeout(() => msgElement.classList.remove('show'), 5000);
     }
 
-    // Toggle sidebar (mobile)
+    // Toggle sidebar
     function toggleSidebar() {
-      document.getElementById('sidebar').classList.toggle('show');
-      document.getElementById('mainContent').classList.toggle('expanded');
+      const sidebar = document.getElementById('sidebar');
+      const mainContent = document.getElementById('mainContent');
+      const toggleBtn = document.querySelector('.sidebar-toggle');
+
+      sidebar.classList.toggle('hidden');
+      mainContent.classList.toggle('expanded');
+      toggleBtn.classList.toggle('shifted');
+
+      // Altera o texto do botão
+      if (sidebar.classList.contains('hidden')) {
+        toggleBtn.innerHTML = '☰ Mostrar Menu';
+      } else {
+        toggleBtn.innerHTML = '✕ Esconder Menu';
+      }
     }
 
     // Show module
@@ -1020,9 +1046,15 @@
       });
       document.querySelector('[data-module="' + moduleName + '"]').classList.add('active');
 
-      // Hide sidebar on mobile
+      // Hide sidebar on mobile or when needed
       if (window.innerWidth <= 768) {
-        document.getElementById('sidebar').classList.remove('show');
+        const sidebar = document.getElementById('sidebar');
+        const mainContent = document.getElementById('mainContent');
+        const toggleBtn = document.querySelector('.sidebar-toggle');
+
+        sidebar.classList.add('hidden');
+        mainContent.classList.add('expanded');
+        toggleBtn.innerHTML = '☰ Mostrar Menu';
       }
     }
 

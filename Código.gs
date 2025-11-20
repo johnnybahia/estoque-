@@ -3813,6 +3813,7 @@ function buscarProduto(item, dataInicio, dataFim) {
     }
 
     var data = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getDisplayValues();
+    var dataValues = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getValues(); // Para pegar datas como Date
     var backgrounds = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getBackgrounds();
     var results = [];
     var itemNormalized = normalize(item);
@@ -3821,9 +3822,11 @@ function buscarProduto(item, dataInicio, dataFim) {
     for (var i = 0; i < data.length; i++) {
       var currentItem = normalize(data[i][1]);
       if (currentItem.indexOf(itemNormalized) >= 0) {
+        // Pega a data como objeto Date (não string)
+        var dataMovimento = dataValues[i][2];
+
         // Verifica filtro de data
         if (dataInicio && dataFim) {
-          var dataMovimento = new Date(data[i][2]);
           var inicio = new Date(dataInicio);
           var fim = new Date(dataFim);
           inicio.setHours(0, 0, 0, 0);
@@ -3838,7 +3841,7 @@ function buscarProduto(item, dataInicio, dataFim) {
         results.push({
           row: data[i],
           background: backgrounds[i][0], // Cor da primeira coluna (toda linha tem mesma cor)
-          date: new Date(data[i][2]) // Para ordenação
+          date: dataMovimento // Para ordenação (usa Date object real)
         });
       }
     }
@@ -3847,9 +3850,9 @@ function buscarProduto(item, dataInicio, dataFim) {
       return { success: false, message: "Produto não encontrado" };
     }
 
-    // Ordena do mais novo para o mais antigo
+    // Ordena do mais novo para o mais antigo (descendente)
     results.sort(function(a, b) {
-      return b.date - a.date;
+      return b.date.getTime() - a.date.getTime();
     });
 
     // Extrai apenas as linhas e cores
@@ -3893,13 +3896,15 @@ function mostrarTodosProdutos(dataInicio, dataFim) {
     }
 
     var data = sheetEstoque.getRange(2, 1, Math.min(5000, lastRow - 1), 11).getDisplayValues();
+    var dataValues = sheetEstoque.getRange(2, 1, Math.min(5000, lastRow - 1), 11).getValues(); // Para pegar datas como Date
     var backgrounds = sheetEstoque.getRange(2, 1, Math.min(5000, lastRow - 1), 11).getBackgrounds();
     var results = [];
 
     // Filtra por data (se fornecida)
     for (var i = 0; i < data.length; i++) {
+      var dataMovimento = dataValues[i][2]; // Usa Date object real
+
       if (dataInicio && dataFim) {
-        var dataMovimento = new Date(data[i][2]);
         var inicio = new Date(dataInicio);
         var fim = new Date(dataFim);
         inicio.setHours(0, 0, 0, 0);
@@ -3913,13 +3918,13 @@ function mostrarTodosProdutos(dataInicio, dataFim) {
       results.push({
         row: data[i],
         background: backgrounds[i][0],
-        date: new Date(data[i][2])
+        date: dataMovimento // Usa Date object real
       });
     }
 
-    // Ordena do mais novo para o mais antigo
+    // Ordena do mais novo para o mais antigo (descendente)
     results.sort(function(a, b) {
-      return b.date - a.date;
+      return b.date.getTime() - a.date.getTime();
     });
 
     // Extrai apenas as linhas e cores
