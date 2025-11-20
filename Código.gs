@@ -4007,22 +4007,33 @@ function buscarProduto(item, dataInicio, dataFim) {
  */
 function carregarTodosOsDadosEstoque() {
   try {
+    Logger.log("=== carregarTodosOsDadosEstoque INICIADO ===");
+
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheetEstoque = ss.getSheetByName("ESTOQUE");
 
     if (!sheetEstoque) {
+      Logger.log("ERRO: Sheet ESTOQUE não encontrada");
       return { success: false, message: "Sheet ESTOQUE não encontrada" };
     }
 
     var lastRow = sheetEstoque.getLastRow();
+    Logger.log("Total de linhas na planilha: " + lastRow);
+
     if (lastRow < 2) {
-      return { success: false, data: [] };
+      Logger.log("Planilha vazia - retornando array vazio");
+      return { success: true, data: [], headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"] };
     }
 
-    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
-    var dataValues = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getValues();
-    var backgrounds = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getBackgrounds();
+    // Limita a 10.000 linhas para evitar timeout
+    var maxRows = Math.min(lastRow - 1, 10000);
+    Logger.log("Carregando " + maxRows + " linhas de dados");
 
+    var data = sheetEstoque.getRange(2, 1, maxRows, 13).getDisplayValues();
+    var dataValues = sheetEstoque.getRange(2, 1, maxRows, 13).getValues();
+    var backgrounds = sheetEstoque.getRange(2, 1, maxRows, 13).getBackgrounds();
+
+    Logger.log("Dados carregados - processando...");
     var allData = [];
 
     for (var i = 0; i < data.length; i++) {
@@ -4033,13 +4044,17 @@ function carregarTodosOsDadosEstoque() {
       });
     }
 
+    Logger.log("Processamento concluído - " + allData.length + " registros");
+    Logger.log("=== carregarTodosOsDadosEstoque FINALIZADO COM SUCESSO ===");
+
     return {
       success: true,
       data: allData,
       headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"]
     };
   } catch (error) {
-    Logger.log("Erro carregarTodosOsDadosEstoque: " + error);
+    Logger.log("ERRO CRÍTICO em carregarTodosOsDadosEstoque: " + error);
+    Logger.log("Stack trace: " + error.stack);
     return { success: false, message: "Erro ao carregar dados: " + error.message };
   }
 }

@@ -1197,57 +1197,65 @@
 
     // Load all estoque data for instant client-side filtering
     function loadAllEstoqueData(showFeedback) {
-      console.log('Carregando todos os dados do estoque...');
+      console.log('=== loadAllEstoqueData INICIADO ===');
+      console.log('ShowFeedback:', showFeedback);
 
-      // Mostra indicador de carregamento apenas se solicitado
-      if (showFeedback) {
-        const statusMsg = document.createElement('div');
-        statusMsg.id = 'dataLoadingStatus';
-        statusMsg.style.cssText = 'position:fixed;top:80px;right:20px;background:#4CAF50;color:white;padding:10px 20px;border-radius:4px;box-shadow:0 2px 5px rgba(0,0,0,0.3);z-index:9999;';
-        statusMsg.textContent = '🔄 Atualizando dados...';
-        document.body.appendChild(statusMsg);
-      }
+      // Mostra indicador de carregamento sempre
+      const statusMsg = document.createElement('div');
+      statusMsg.id = 'dataLoadingStatus';
+      statusMsg.style.cssText = 'position:fixed;top:80px;right:20px;background:#2196f3;color:white;padding:10px 20px;border-radius:4px;box-shadow:0 2px 5px rgba(0,0,0,0.3);z-index:9999;font-size:14px;';
+      statusMsg.textContent = '🔄 Carregando dados do estoque...';
+      document.body.appendChild(statusMsg);
+
+      console.log('Chamando google.script.run.carregarTodosOsDadosEstoque()...');
 
       google.script.run
         .withSuccessHandler(function(result) {
-          if (result.success) {
+          console.log('SUCCESS Handler chamado');
+          console.log('Result:', result);
+
+          if (result && result.success) {
             allEstoqueData = result.data;
             estoqueHeaders = result.headers;
-            console.log('Dados do estoque carregados: ' + allEstoqueData.length + ' registros');
+            console.log('✅ Dados do estoque carregados com sucesso!');
+            console.log('Total de registros: ' + (allEstoqueData ? allEstoqueData.length : 0));
 
-            // Remove indicador e mostra sucesso
-            if (showFeedback) {
-              const statusMsg = document.getElementById('dataLoadingStatus');
-              if (statusMsg) {
-                statusMsg.textContent = '✅ Dados atualizados!';
-                statusMsg.style.background = '#4CAF50';
-                setTimeout(() => statusMsg.remove(), 2000);
-              }
+            const statusMsg = document.getElementById('dataLoadingStatus');
+            if (statusMsg) {
+              statusMsg.textContent = '✅ ' + allEstoqueData.length + ' registros carregados!';
+              statusMsg.style.background = '#4CAF50';
+              setTimeout(() => statusMsg.remove(), 3000);
             }
           } else {
-            console.error('Erro ao carregar dados do estoque:', result.message);
-            if (showFeedback) {
-              const statusMsg = document.getElementById('dataLoadingStatus');
-              if (statusMsg) {
-                statusMsg.textContent = '❌ Erro ao atualizar';
-                statusMsg.style.background = '#f44336';
-                setTimeout(() => statusMsg.remove(), 3000);
-              }
+            console.error('❌ Erro retornado do servidor:', result ? result.message : 'Resposta vazia');
+
+            const statusMsg = document.getElementById('dataLoadingStatus');
+            if (statusMsg) {
+              statusMsg.textContent = '❌ Erro: ' + (result ? result.message : 'Resposta vazia');
+              statusMsg.style.background = '#f44336';
+              setTimeout(() => statusMsg.remove(), 5000);
             }
           }
         })
         .withFailureHandler(function(error) {
-          console.error('Erro ao carregar dados do estoque:', error);
-          if (showFeedback) {
-            const statusMsg = document.getElementById('dataLoadingStatus');
-            if (statusMsg) {
-              statusMsg.textContent = '❌ Erro ao atualizar';
-              statusMsg.style.background = '#f44336';
-              setTimeout(() => statusMsg.remove(), 3000);
-            }
+          console.error('❌ FAILURE Handler chamado');
+          console.error('Erro completo:', error);
+          console.error('Tipo de erro:', typeof error);
+          console.error('Mensagem:', error.message);
+
+          const statusMsg = document.getElementById('dataLoadingStatus');
+          if (statusMsg) {
+            statusMsg.textContent = '❌ Falha ao carregar: ' + (error.message || error);
+            statusMsg.style.background = '#f44336';
+            setTimeout(() => statusMsg.remove(), 5000);
           }
+
+          // Alerta para o usuário
+          alert('Erro ao carregar dados do estoque:\n\n' + (error.message || error) + '\n\nVerifique as permissões do script e tente novamente.');
         })
         .carregarTodosOsDadosEstoque();
+
+      console.log('Chamada ao servidor enviada. Aguardando resposta...');
     }
 
     // Normalize string for search (remove accents, lowercase)
