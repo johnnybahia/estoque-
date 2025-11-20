@@ -506,6 +506,12 @@
       border: 1px solid #ffeaa7;
     }
 
+    .message.info {
+      background: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+
     /* Responsive Design */
     @media (max-width: 768px) {
       .header h1 {
@@ -1504,22 +1510,48 @@
       return false;
     }
 
-    // Handle Localizar Produto (CLIENT-SIDE - INSTANT!)
+    // Handle Localizar Produto (HYBRID - INSTANT for recent, FULL for old records)
     function handleLocalizarProduto(event) {
       event.preventDefault();
 
       const item = document.getElementById('localizarItem').value;
 
-      // Filtra no lado do cliente (INSTANTÂNEO!)
+      if (!item || item.trim() === '') {
+        showMessage('localizarMessage', 'Por favor, informe um item para buscar', 'warning');
+        return false;
+      }
+
+      // PASSO 1: Busca rápida nos 2000 registros mais recentes (INSTANTÂNEO!)
       const result = filterEstoqueData(item, null, null);
 
-      if (result.success && result.data) {
+      if (result.success && result.data && result.data.rows.length > 0) {
+        // ✅ Encontrou nos registros recentes - mostra imediatamente
         displayTable('localizarTableContainer', result.data);
         document.getElementById('localizarResults').style.display = 'block';
         document.getElementById('totalResults').textContent = result.data.rows.length;
+        showMessage('localizarMessage', '✅ ' + result.data.rows.length + ' registros encontrados (busca rápida)', 'success');
       } else {
-        showMessage('localizarMessage', result.message || 'Nenhum resultado encontrado', 'warning');
+        // ⚠️ Não encontrou nos registros recentes - busca em TODO o histórico
+        showMessage('localizarMessage', '🔍 Buscando no histórico completo... Aguarde.', 'info');
         document.getElementById('localizarResults').style.display = 'none';
+
+        // PASSO 2: Busca no servidor em TODAS as 43k+ linhas
+        google.script.run
+          .withSuccessHandler(function(serverResult) {
+            if (serverResult.success && serverResult.data) {
+              displayTable('localizarTableContainer', serverResult.data);
+              document.getElementById('localizarResults').style.display = 'block';
+              document.getElementById('totalResults').textContent = serverResult.data.rows.length;
+              showMessage('localizarMessage', '✅ ' + serverResult.data.rows.length + ' registros encontrados (busca completa)', 'success');
+            } else {
+              showMessage('localizarMessage', serverResult.message || 'Nenhum resultado encontrado em todo o histórico', 'warning');
+              document.getElementById('localizarResults').style.display = 'none';
+            }
+          })
+          .withFailureHandler(function(error) {
+            showMessage('localizarMessage', 'Erro ao buscar no histórico: ' + error.message, 'error');
+          })
+          .buscarProduto(item, null, null);
       }
 
       return false;
