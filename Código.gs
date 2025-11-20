@@ -3607,8 +3607,10 @@ function debugBuscarItemNaEstoque(itemBuscado) {
 
 /**
  * loginUser: Autentica usuário no Web App
+ * Verifica usuário e senha na sheet USUÁRIOS
+ * Formato da sheet: Coluna A = Usuário, Coluna B = Senha
  */
-function loginUser(email, password) {
+function loginUser(username, password) {
   try {
     // Verifica credenciais no sheet USUÁRIOS
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -3618,17 +3620,22 @@ function loginUser(email, password) {
       return { success: false, message: "Sheet USUÁRIOS não encontrada" };
     }
 
-    var data = sheetUsuarios.getRange(2, 1, sheetUsuarios.getLastRow() - 1, 2).getValues();
+    var lastRow = sheetUsuarios.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum usuário cadastrado" };
+    }
+
+    var data = sheetUsuarios.getRange(2, 1, lastRow - 1, 2).getValues();
 
     for (var i = 0; i < data.length; i++) {
-      if (data[i][0] === email && data[i][1] === password) {
+      if (data[i][0] === username && data[i][1] === password) {
         // Login bem-sucedido
-        PropertiesService.getUserProperties().setProperty("loggedUser", email);
-        return { success: true, user: email };
+        PropertiesService.getUserProperties().setProperty("loggedUser", username);
+        return { success: true, user: username };
       }
     }
 
-    return { success: false, message: "Email ou senha incorretos" };
+    return { success: false, message: "Usuário ou senha incorretos" };
   } catch (error) {
     Logger.log("Erro loginUser: " + error);
     return { success: false, message: "Erro ao fazer login: " + error.message };

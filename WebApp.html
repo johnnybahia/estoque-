@@ -476,12 +476,12 @@
       <div id="loginMessage" class="message"></div>
       <form id="loginForm" onsubmit="return handleLogin(event)">
         <div class="form-group">
-          <label for="loginEmail">Email</label>
-          <input type="email" id="loginEmail" required autofocus>
+          <label for="loginUser">Usuário</label>
+          <input type="text" id="loginUser" required autofocus placeholder="Digite seu usuário">
         </div>
         <div class="form-group">
           <label for="loginPassword">Senha</label>
-          <input type="password" id="loginPassword" required>
+          <input type="password" id="loginPassword" required placeholder="Digite sua senha">
         </div>
         <button type="submit" class="btn btn-primary" style="width: 100%;">Entrar</button>
       </form>
@@ -861,7 +861,7 @@
     // Login handler
     function handleLogin(event) {
       event.preventDefault();
-      const email = document.getElementById('loginEmail').value;
+      const username = document.getElementById('loginUser').value;
       const password = document.getElementById('loginPassword').value;
 
       showLoading(true);
@@ -884,7 +884,7 @@
           showLoading(false);
           showMessage('loginMessage', 'Erro ao fazer login: ' + error.message, 'error');
         })
-        .loginUser(email, password);
+        .loginUser(username, password);
 
       return false;
     }
