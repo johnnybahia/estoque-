@@ -3627,19 +3627,66 @@ function loginUser(username, password) {
 
     var data = sheetUsuarios.getRange(2, 1, lastRow - 1, 2).getValues();
 
+    // Remove espaços extras e converte para string
+    var usernameClean = String(username).trim();
+    var passwordClean = String(password).trim();
+
+    Logger.log("Tentativa de login - Usuário: '" + usernameClean + "' | Senha: '" + passwordClean + "'");
+
     for (var i = 0; i < data.length; i++) {
-      if (data[i][0] === username && data[i][1] === password) {
+      var dbUser = String(data[i][0]).trim();
+      var dbPass = String(data[i][1]).trim();
+
+      Logger.log("Comparando com linha " + (i+2) + " - Usuário: '" + dbUser + "' | Senha: '" + dbPass + "'");
+
+      if (dbUser === usernameClean && dbPass === passwordClean) {
         // Login bem-sucedido
-        PropertiesService.getUserProperties().setProperty("loggedUser", username);
-        return { success: true, user: username };
+        Logger.log("Login bem-sucedido!");
+        PropertiesService.getUserProperties().setProperty("loggedUser", usernameClean);
+        return { success: true, user: usernameClean };
       }
     }
 
+    Logger.log("Login falhou - credenciais não encontradas");
     return { success: false, message: "Usuário ou senha incorretos" };
   } catch (error) {
     Logger.log("Erro loginUser: " + error);
     return { success: false, message: "Erro ao fazer login: " + error.message };
   }
+}
+
+/**
+ * debugUsuarios: Função para debugar usuários cadastrados
+ * Execute esta função no Apps Script para ver os usuários na aba USUÁRIOS
+ */
+function debugUsuarios() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetUsuarios = ss.getSheetByName("USUÁRIOS");
+
+  if (!sheetUsuarios) {
+    Logger.log("❌ Sheet USUÁRIOS não encontrada!");
+    return;
+  }
+
+  var lastRow = sheetUsuarios.getLastRow();
+  Logger.log("📊 Total de linhas: " + lastRow);
+
+  if (lastRow < 2) {
+    Logger.log("❌ Nenhum usuário cadastrado (sheet vazia)");
+    return;
+  }
+
+  var data = sheetUsuarios.getRange(1, 1, lastRow, 2).getValues();
+
+  Logger.log("\n=== USUÁRIOS CADASTRADOS ===");
+  for (var i = 0; i < data.length; i++) {
+    var user = String(data[i][0]);
+    var pass = String(data[i][1]);
+    Logger.log("Linha " + (i+1) + ":");
+    Logger.log("  Usuário: '" + user + "' (length: " + user.length + ")");
+    Logger.log("  Senha: '" + pass + "' (length: " + pass.length + ")");
+  }
+  Logger.log("=========================\n");
 }
 
 /**
