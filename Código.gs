@@ -4019,16 +4019,16 @@ function carregarTodosOsDadosEstoque() {
       return { success: false, data: [] };
     }
 
-    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getDisplayValues();
-    var dataValues = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getValues();
-    var backgrounds = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getBackgrounds();
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
+    var dataValues = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getValues();
+    var backgrounds = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getBackgrounds();
 
     var allData = [];
 
     for (var i = 0; i < data.length; i++) {
       allData.push({
         row: data[i],
-        date: dataValues[i][2], // Date object para ordenação
+        date: dataValues[i][3], // Date object para ordenação - Coluna D (índice 3)
         background: backgrounds[i][0]
       });
     }
@@ -4036,7 +4036,7 @@ function carregarTodosOsDadosEstoque() {
     return {
       success: true,
       data: allData,
-      headers: ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"]
+      headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"]
     };
   } catch (error) {
     Logger.log("Erro carregarTodosOsDadosEstoque: " + error);
