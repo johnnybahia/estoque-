@@ -3878,6 +3878,49 @@ function buscarProduto(item, dataInicio, dataFim) {
 }
 
 /**
+ * carregarTodosOsDadosEstoque: Carrega TODOS os dados do estoque de uma vez
+ * Para filtros instantâneos no lado do cliente
+ */
+function carregarTodosOsDadosEstoque() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, data: [] };
+    }
+
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getDisplayValues();
+    var dataValues = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getValues();
+    var backgrounds = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getBackgrounds();
+
+    var allData = [];
+
+    for (var i = 0; i < data.length; i++) {
+      allData.push({
+        row: data[i],
+        date: dataValues[i][2], // Date object para ordenação
+        background: backgrounds[i][0]
+      });
+    }
+
+    return {
+      success: true,
+      data: allData,
+      headers: ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"]
+    };
+  } catch (error) {
+    Logger.log("Erro carregarTodosOsDadosEstoque: " + error);
+    return { success: false, message: "Erro ao carregar dados: " + error.message };
+  }
+}
+
+/**
  * mostrarTodosProdutos: Retorna todos os produtos do estoque
  * Ordenados do mais novo para o mais antigo, com cores
  */

@@ -974,6 +974,8 @@
     // Global variables
     let currentUser = null;
     let autocompleteData = null;
+    let allEstoqueData = null; // Armazena TODOS os dados do estoque para filtros instantâneos
+    let estoqueHeaders = null;
 
     // Initialize app
     window.onload = function() {
@@ -999,6 +1001,7 @@
             document.getElementById('mainApp').style.display = 'block';
             loadDashboardData();
             loadAutocompleteData();
+            loadAllEstoqueData(); // Carrega todos os dados para filtros instantâneos
           } else {
             showMessage('loginMessage', result.message || 'Login falhou', 'error');
           }
@@ -1118,6 +1121,97 @@
           console.error('Erro ao carregar autocomplete:', error);
         })
         .getAllAutocompleteData();
+    }
+
+    // Load all estoque data for instant client-side filtering
+    function loadAllEstoqueData() {
+      console.log('Carregando todos os dados do estoque...');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            allEstoqueData = result.data;
+            estoqueHeaders = result.headers;
+            console.log('Dados do estoque carregados: ' + allEstoqueData.length + ' registros');
+          } else {
+            console.error('Erro ao carregar dados do estoque:', result.message);
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.error('Erro ao carregar dados do estoque:', error);
+        })
+        .carregarTodosOsDadosEstoque();
+    }
+
+    // Normalize string for search (remove accents, lowercase)
+    function normalizeString(str) {
+      if (!str) return '';
+      return str.toString()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+    }
+
+    // Client-side filter function (INSTANT!)
+    function filterEstoqueData(itemFilter, dataInicio, dataFim) {
+      if (!allEstoqueData) {
+        console.error('Dados do estoque ainda não foram carregados');
+        return { success: false, message: 'Dados ainda não carregados. Aguarde...' };
+      }
+
+      const itemNormalized = normalizeString(itemFilter);
+      let results = [];
+
+      // Filtra por item e data
+      for (let i = 0; i < allEstoqueData.length; i++) {
+        const record = allEstoqueData[i];
+        const currentItem = normalizeString(record.row[1]); // Coluna Item
+
+        // Verifica se o item corresponde (se filtro foi fornecido)
+        if (itemFilter && itemFilter.trim() !== '' && currentItem.indexOf(itemNormalized) < 0) {
+          continue;
+        }
+
+        // Verifica filtro de data
+        if (dataInicio && dataFim) {
+          const recordDate = new Date(record.date);
+          const inicio = new Date(dataInicio);
+          const fim = new Date(dataFim);
+          inicio.setHours(0, 0, 0, 0);
+          fim.setHours(23, 59, 59, 999);
+
+          if (recordDate < inicio || recordDate > fim) {
+            continue; // Pula este registro
+          }
+        }
+
+        results.push(record);
+      }
+
+      if (results.length === 0) {
+        return { success: false, message: 'Nenhum resultado encontrado' };
+      }
+
+      // Ordena do mais novo para o mais antigo
+      results.sort(function(a, b) {
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
+      });
+
+      // Prepara o resultado no formato esperado
+      const rows = [];
+      const colors = [];
+      for (let j = 0; j < results.length; j++) {
+        rows.push(results[j].row);
+        colors.push(results[j].background);
+      }
+
+      return {
+        success: true,
+        data: {
+          headers: estoqueHeaders,
+          rows: rows,
+          colors: colors
+        }
+      };
     }
 
     // Populate autocomplete datalist
@@ -1256,50 +1350,42 @@
       return false;
     }
 
-    // Handle Localizar Produto
+    // Handle Localizar Produto (CLIENT-SIDE - INSTANT!)
     function handleLocalizarProduto(event) {
       event.preventDefault();
 
       const item = document.getElementById('localizarItem').value;
 
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success && result.data) {
-            displayTable('localizarTableContainer', result.data);
-            document.getElementById('localizarResults').style.display = 'block';
-            document.getElementById('totalResults').textContent = result.data.rows.length;
-          } else {
-            showMessage('localizarMessage', result.message || 'Nenhum resultado encontrado', 'warning');
-            document.getElementById('localizarResults').style.display = 'none';
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('localizarMessage', 'Erro: ' + error.message, 'error');
-        })
-        .buscarProduto(item, null, null);
+      // Filtra no lado do cliente (INSTANTÂNEO!)
+      const result = filterEstoqueData(item, null, null);
+
+      if (result.success && result.data) {
+        displayTable('localizarTableContainer', result.data);
+        document.getElementById('localizarResults').style.display = 'block';
+        document.getElementById('totalResults').textContent = result.data.rows.length;
+      } else {
+        showMessage('localizarMessage', result.message || 'Nenhum resultado encontrado', 'warning');
+        document.getElementById('localizarResults').style.display = 'none';
+      }
 
       return false;
     }
 
-    // Show all products
+    // Show all products (CLIENT-SIDE - INSTANT!)
     function showAllProducts() {
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success && result.data) {
-            displayTable('localizarTableContainer', result.data);
-            document.getElementById('localizarResults').style.display = 'block';
-            document.getElementById('totalResults').textContent = result.data.rows.length;
-          } else {
-            showMessage('localizarMessage', result.message || 'Erro ao buscar produtos', 'error');
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('localizarMessage', 'Erro: ' + error.message, 'error');
-        })
-        .mostrarTodosProdutos(null, null);
+      // Filtra no lado do cliente sem filtro de item (mostra tudo)
+      const result = filterEstoqueData('', null, null);
+
+      if (result.success && result.data) {
+        displayTable('localizarTableContainer', result.data);
+        document.getElementById('localizarResults').style.display = 'block';
+        document.getElementById('totalResults').textContent = result.data.rows.length;
+      } else {
+        showMessage('localizarMessage', result.message || 'Erro ao buscar produtos', 'error');
+      }
     }
 
-    // Print results
+    // Print results (CLIENT-SIDE - INSTANT!)
     function printResults(filterByDate) {
       const item = document.getElementById('localizarItem').value;
 
@@ -1312,37 +1398,15 @@
           return;
         }
 
-        // Busca com filtro de data
-        if (item) {
-          google.script.run
-            .withSuccessHandler(function(result) {
-              if (result.success && result.data) {
-                displayTable('localizarTableContainer', result.data);
-                document.getElementById('totalResults').textContent = result.data.rows.length;
-                setTimeout(() => window.print(), 500);
-              } else {
-                showMessage('localizarMessage', 'Nenhum resultado no período selecionado', 'warning');
-              }
-            })
-            .withFailureHandler(function(error) {
-              showMessage('localizarMessage', 'Erro: ' + error.message, 'error');
-            })
-            .buscarProduto(item, dataInicio, dataFim);
+        // Filtra no lado do cliente com data (INSTANTÂNEO!)
+        const result = filterEstoqueData(item, dataInicio, dataFim);
+
+        if (result.success && result.data) {
+          displayTable('localizarTableContainer', result.data);
+          document.getElementById('totalResults').textContent = result.data.rows.length;
+          setTimeout(() => window.print(), 500);
         } else {
-          google.script.run
-            .withSuccessHandler(function(result) {
-              if (result.success && result.data) {
-                displayTable('localizarTableContainer', result.data);
-                document.getElementById('totalResults').textContent = result.data.rows.length;
-                setTimeout(() => window.print(), 500);
-              } else {
-                showMessage('localizarMessage', 'Nenhum resultado no período selecionado', 'warning');
-              }
-            })
-            .withFailureHandler(function(error) {
-              showMessage('localizarMessage', 'Erro: ' + error.message, 'error');
-            })
-            .mostrarTodosProdutos(dataInicio, dataFim);
+          showMessage('localizarMessage', 'Nenhum resultado no período selecionado', 'warning');
         }
       } else {
         // Imprime tudo que está sendo exibido
