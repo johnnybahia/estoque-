@@ -4018,39 +4018,53 @@ function carregarTodosOsDadosEstoque() {
     }
 
     var lastRow = sheetEstoque.getLastRow();
-    Logger.log("Total de linhas na planilha: " + lastRow);
+    var lastCol = sheetEstoque.getLastColumn();
+    Logger.log("Total de linhas: " + lastRow + ", Total de colunas: " + lastCol);
 
     if (lastRow < 2) {
       Logger.log("Planilha vazia - retornando array vazio");
       return { success: true, data: [], headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"] };
     }
 
+    // Detecta automaticamente o número de colunas (11 ou 13)
+    var numCols = lastCol >= 13 ? 13 : 11;
+    Logger.log("Usando estrutura de " + numCols + " colunas");
+
     // Limita a 10.000 linhas para evitar timeout
     var maxRows = Math.min(lastRow - 1, 10000);
     Logger.log("Carregando " + maxRows + " linhas de dados");
 
-    var data = sheetEstoque.getRange(2, 1, maxRows, 13).getDisplayValues();
-    var dataValues = sheetEstoque.getRange(2, 1, maxRows, 13).getValues();
-    var backgrounds = sheetEstoque.getRange(2, 1, maxRows, 13).getBackgrounds();
+    var data = sheetEstoque.getRange(2, 1, maxRows, numCols).getDisplayValues();
+    var dataValues = sheetEstoque.getRange(2, 1, maxRows, numCols).getValues();
+    var backgrounds = sheetEstoque.getRange(2, 1, maxRows, numCols).getBackgrounds();
 
     Logger.log("Dados carregados - processando...");
     var allData = [];
 
+    // Define índice da coluna Data baseado no número de colunas
+    var dateColIndex = (numCols === 13) ? 3 : 2;  // Coluna D (índice 3) para 13 cols, C (índice 2) para 11 cols
+
     for (var i = 0; i < data.length; i++) {
       allData.push({
         row: data[i],
-        date: dataValues[i][3], // Date object para ordenação - Coluna D (índice 3)
+        date: dataValues[i][dateColIndex],
         background: backgrounds[i][0]
       });
     }
 
     Logger.log("Processamento concluído - " + allData.length + " registros");
+
+    // Headers baseados no número de colunas
+    var headers = (numCols === 13)
+      ? ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"]
+      : ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"];
+
     Logger.log("=== carregarTodosOsDadosEstoque FINALIZADO COM SUCESSO ===");
 
     return {
       success: true,
       data: allData,
-      headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"]
+      headers: headers
     };
   } catch (error) {
     Logger.log("ERRO CRÍTICO em carregarTodosOsDadosEstoque: " + error);
