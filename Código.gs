@@ -3,6 +3,31 @@
 // ==============================
 
 /**
+ * doGet: Função principal do Web App
+ * Serve a interface web quando alguém acessa a URL do Web App
+ */
+function doGet(e) {
+  var template = HtmlService.createTemplateFromFile('WebApp');
+
+  // Passa parâmetros da URL para o template, se houver
+  template.params = e.parameter;
+
+  return template.evaluate()
+    .setTitle('Sistema de Gestão de Estoque')
+    .setFaviconUrl('https://www.gstatic.com/images/branding/product/1x/drive_2020q4_48dp.png')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/**
+ * include: Função helper para incluir arquivos HTML parciais
+ * Permite modularizar o código HTML
+ */
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+/**
  * Atualiza o menu principal e adiciona um menu separado para processar cores.
  */
 function updateMenus() {
@@ -3574,4 +3599,311 @@ function debugBuscarItemNaEstoque(itemBuscado) {
     amostraExatos: encontrados.slice(0, 5),
     amostraSemelhantes: semelhantes.slice(0, 5)
   };
+}
+
+// ========================================
+// WEB APP FUNCTIONS
+// ========================================
+
+/**
+ * loginUser: Autentica usuário no Web App
+ */
+function loginUser(email, password) {
+  try {
+    // Verifica credenciais no sheet USUÁRIOS
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetUsuarios = ss.getSheetByName("USUÁRIOS");
+
+    if (!sheetUsuarios) {
+      return { success: false, message: "Sheet USUÁRIOS não encontrada" };
+    }
+
+    var data = sheetUsuarios.getRange(2, 1, sheetUsuarios.getLastRow() - 1, 2).getValues();
+
+    for (var i = 0; i < data.length; i++) {
+      if (data[i][0] === email && data[i][1] === password) {
+        // Login bem-sucedido
+        PropertiesService.getUserProperties().setProperty("loggedUser", email);
+        return { success: true, user: email };
+      }
+    }
+
+    return { success: false, message: "Email ou senha incorretos" };
+  } catch (error) {
+    Logger.log("Erro loginUser: " + error);
+    return { success: false, message: "Erro ao fazer login: " + error.message };
+  }
+}
+
+/**
+ * logoutUser: Remove autenticação do usuário
+ */
+function logoutUser() {
+  PropertiesService.getUserProperties().deleteProperty("loggedUser");
+  return { success: true };
+}
+
+/**
+ * getDashboardData: Retorna dados estatísticos para o dashboard
+ */
+function getDashboardData() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var sheetDados = ss.getSheetByName("DADOS");
+
+    if (!sheetEstoque || !sheetDados) {
+      return { success: false };
+    }
+
+    // Total de itens únicos
+    var dataEstoque = sheetEstoque.getRange(2, 2, sheetEstoque.getLastRow() - 1, 1).getValues();
+    var uniqueItems = new Set();
+    dataEstoque.forEach(function(row) {
+      if (row[0]) uniqueItems.add(row[0]);
+    });
+
+    // Total de grupos
+    var dataGrupos = sheetDados.getRange(2, 4, sheetDados.getLastRow() - 1, 1).getValues();
+    var uniqueGroups = new Set();
+    dataGrupos.forEach(function(row) {
+      if (row[0]) uniqueGroups.add(row[0]);
+    });
+
+    // Entradas e saídas de hoje
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var dataMovimentos = sheetEstoque.getRange(2, 3, sheetEstoque.getLastRow() - 1, 5).getValues();
+
+    var recentEntries = 0;
+    var recentExits = 0;
+
+    dataMovimentos.forEach(function(row) {
+      var dataMovimento = new Date(row[0]);
+      dataMovimento.setHours(0, 0, 0, 0);
+
+      if (dataMovimento.getTime() === today.getTime()) {
+        var entrada = parseFloat(row[3]) || 0;
+        var saida = parseFloat(row[4]) || 0;
+
+        if (entrada > 0) recentEntries++;
+        if (saida > 0) recentExits++;
+      }
+    });
+
+    return {
+      success: true,
+      totalItems: uniqueItems.size,
+      totalGroups: uniqueGroups.size,
+      recentEntries: recentEntries,
+      recentExits: recentExits
+    };
+  } catch (error) {
+    Logger.log("Erro getDashboardData: " + error);
+    return { success: false };
+  }
+}
+
+/**
+ * insertGroup: Wrapper para inserir grupo via web app
+ */
+function insertGroup(grupo) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetDados = ss.getSheetByName("DADOS");
+
+    if (!sheetDados) {
+      return { success: false, message: "Sheet DADOS não encontrada" };
+    }
+
+    // Verifica se grupo já existe
+    var lastRow = sheetDados.getLastRow();
+    var existingGroups = sheetDados.getRange(2, 4, Math.max(1, lastRow - 1), 1).getValues();
+
+    for (var i = 0; i < existingGroups.length; i++) {
+      if (normalize(existingGroups[i][0]) === normalize(grupo)) {
+        return { success: false, message: "Grupo já existe" };
+      }
+    }
+
+    // Adiciona grupo
+    var nextRow = sheetDados.getLastRow() + 1;
+    sheetDados.getRange(nextRow, 4).setValue(grupo);
+
+    // Invalida cache
+    invalidateCache();
+
+    return { success: true, message: "Grupo adicionado com sucesso" };
+  } catch (error) {
+    Logger.log("Erro insertGroup: " + error);
+    return { success: false, message: "Erro ao inserir grupo: " + error.message };
+  }
+}
+
+/**
+ * buscarProduto: Wrapper para localizar produto via web app
+ */
+function buscarProduto(item) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum dado encontrado" };
+    }
+
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getDisplayValues();
+    var results = [];
+    var itemNormalized = normalize(item);
+
+    for (var i = 0; i < data.length; i++) {
+      var currentItem = normalize(data[i][1]);
+      if (currentItem.indexOf(itemNormalized) >= 0) {
+        results.push(data[i]);
+      }
+    }
+
+    if (results.length === 0) {
+      return { success: false, message: "Produto não encontrado" };
+    }
+
+    return {
+      success: true,
+      data: {
+        headers: ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"],
+        rows: results
+      }
+    };
+  } catch (error) {
+    Logger.log("Erro buscarProduto: " + error);
+    return { success: false, message: "Erro ao buscar produto: " + error.message };
+  }
+}
+
+/**
+ * mostrarTodosProdutos: Retorna todos os produtos do estoque
+ */
+function mostrarTodosProdutos() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum dado encontrado" };
+    }
+
+    var data = sheetEstoque.getRange(2, 1, Math.min(1000, lastRow - 1), 11).getDisplayValues();
+
+    return {
+      success: true,
+      data: {
+        headers: ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"],
+        rows: data
+      }
+    };
+  } catch (error) {
+    Logger.log("Erro mostrarTodosProdutos: " + error);
+    return { success: false, message: "Erro ao buscar produtos: " + error.message };
+  }
+}
+
+/**
+ * filtrarEstoquePorPeriodo: Aplica filtro por período na planilha
+ */
+function filtrarEstoquePorPeriodo(dataInicio, dataFim) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    // Remove filtro existente
+    var filter = sheetEstoque.getFilter();
+    if (filter) {
+      filter.remove();
+    }
+
+    // Cria novo filtro
+    var lastRow = sheetEstoque.getLastRow();
+    var lastCol = sheetEstoque.getLastColumn();
+    var range = sheetEstoque.getRange(1, 1, lastRow, lastCol);
+
+    var newFilter = range.createFilter();
+
+    // Aplica filtro na coluna C (Data)
+    var inicio = new Date(dataInicio);
+    var fim = new Date(dataFim);
+
+    var criteria = SpreadsheetApp.newFilterCriteria()
+      .whenDateAfter(inicio)
+      .whenDateBefore(fim)
+      .build();
+
+    newFilter.setColumnFilterCriteria(3, criteria);
+
+    return { success: true, message: "Filtro aplicado com sucesso" };
+  } catch (error) {
+    Logger.log("Erro filtrarEstoquePorPeriodo: " + error);
+    return { success: false, message: "Erro ao filtrar: " + error.message };
+  }
+}
+
+/**
+ * getEstoque3Meses: Retorna estoque dos últimos 3 meses
+ */
+function getEstoque3Meses() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum dado encontrado" };
+    }
+
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getValues();
+    var results = [];
+
+    var today = new Date();
+    var threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(today.getMonth() - 3);
+
+    for (var i = 0; i < data.length; i++) {
+      var dataMovimento = new Date(data[i][2]);
+      if (dataMovimento >= threeMonthsAgo) {
+        results.push(data[i]);
+      }
+    }
+
+    if (results.length === 0) {
+      return { success: false, message: "Nenhum movimento nos últimos 3 meses" };
+    }
+
+    return {
+      success: true,
+      data: {
+        headers: ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"],
+        rows: results
+      }
+    };
+  } catch (error) {
+    Logger.log("Erro getEstoque3Meses: " + error);
+    return { success: false, message: "Erro ao buscar estoque: " + error.message };
+  }
 }
