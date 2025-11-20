@@ -1124,20 +1124,56 @@
     }
 
     // Load all estoque data for instant client-side filtering
-    function loadAllEstoqueData() {
+    function loadAllEstoqueData(showFeedback) {
       console.log('Carregando todos os dados do estoque...');
+
+      // Mostra indicador de carregamento apenas se solicitado
+      if (showFeedback) {
+        const statusMsg = document.createElement('div');
+        statusMsg.id = 'dataLoadingStatus';
+        statusMsg.style.cssText = 'position:fixed;top:80px;right:20px;background:#4CAF50;color:white;padding:10px 20px;border-radius:4px;box-shadow:0 2px 5px rgba(0,0,0,0.3);z-index:9999;';
+        statusMsg.textContent = '🔄 Atualizando dados...';
+        document.body.appendChild(statusMsg);
+      }
+
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
             allEstoqueData = result.data;
             estoqueHeaders = result.headers;
             console.log('Dados do estoque carregados: ' + allEstoqueData.length + ' registros');
+
+            // Remove indicador e mostra sucesso
+            if (showFeedback) {
+              const statusMsg = document.getElementById('dataLoadingStatus');
+              if (statusMsg) {
+                statusMsg.textContent = '✅ Dados atualizados!';
+                statusMsg.style.background = '#4CAF50';
+                setTimeout(() => statusMsg.remove(), 2000);
+              }
+            }
           } else {
             console.error('Erro ao carregar dados do estoque:', result.message);
+            if (showFeedback) {
+              const statusMsg = document.getElementById('dataLoadingStatus');
+              if (statusMsg) {
+                statusMsg.textContent = '❌ Erro ao atualizar';
+                statusMsg.style.background = '#f44336';
+                setTimeout(() => statusMsg.remove(), 3000);
+              }
+            }
           }
         })
         .withFailureHandler(function(error) {
           console.error('Erro ao carregar dados do estoque:', error);
+          if (showFeedback) {
+            const statusMsg = document.getElementById('dataLoadingStatus');
+            if (statusMsg) {
+              statusMsg.textContent = '❌ Erro ao atualizar';
+              statusMsg.style.background = '#f44336';
+              setTimeout(() => statusMsg.remove(), 3000);
+            }
+          }
         })
         .carregarTodosOsDadosEstoque();
     }
@@ -1301,6 +1337,8 @@
             showMessage('estoqueMessage', 'Estoque inserido com sucesso!', 'success');
             resetEstoqueForm();
             loadDashboardData();
+            loadAllEstoqueData(true); // Recarrega dados para mostrar mudanças instantaneamente (com feedback visual)
+            loadAutocompleteData(); // Atualiza autocomplete com novos itens
           } else {
             showMessage('estoqueMessage', result.message || 'Erro ao inserir estoque', 'error');
           }
@@ -1598,6 +1636,8 @@
           if (result.success) {
             showMessage('apagarLinhaMessage', 'Última linha apagada com sucesso!', 'success');
             loadDashboardData();
+            loadAllEstoqueData(true); // Recarrega dados para mostrar mudanças instantaneamente (com feedback visual)
+            loadAutocompleteData(); // Atualiza autocomplete
           } else {
             showMessage('apagarLinhaMessage', result.message || 'Erro ao apagar linha', 'error');
           }
