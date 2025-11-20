@@ -4002,10 +4002,20 @@ function buscarProduto(item, dataInicio, dataFim) {
 }
 
 /**
+ * testeConexao: Função de teste para verificar se a comunicação está funcionando
+ */
+function testeConexao() {
+  return { success: true, message: "Conexão funcionando!", timestamp: new Date().toString() };
+}
+
+/**
  * carregarTodosOsDadosEstoque: Carrega TODOS os dados do estoque de uma vez
  * Para filtros instantâneos no lado do cliente
  */
 function carregarTodosOsDadosEstoque() {
+  // Garantia absoluta de que NUNCA retornará null
+  var resultado = { success: false, message: "Erro desconhecido", data: [] };
+
   try {
     Logger.log("=== carregarTodosOsDadosEstoque INICIADO ===");
 
@@ -4014,7 +4024,8 @@ function carregarTodosOsDadosEstoque() {
 
     if (!sheetEstoque) {
       Logger.log("ERRO: Sheet ESTOQUE não encontrada");
-      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+      resultado.message = "Sheet ESTOQUE não encontrada";
+      return resultado;
     }
 
     var lastRow = sheetEstoque.getLastRow();
@@ -4069,8 +4080,13 @@ function carregarTodosOsDadosEstoque() {
   } catch (error) {
     Logger.log("ERRO CRÍTICO em carregarTodosOsDadosEstoque: " + error);
     Logger.log("Stack trace: " + error.stack);
-    return { success: false, message: "Erro ao carregar dados: " + error.message };
+    resultado.message = "Erro ao carregar dados: " + error.message;
+    resultado.error = error.toString();
+    return resultado;
   }
+
+  // Garantia final - nunca deve chegar aqui
+  return resultado;
 }
 
 /**
