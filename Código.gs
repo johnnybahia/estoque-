@@ -766,6 +766,66 @@ function getObsList() {
 }
 
 /**
+ * getMedidasList: Retorna a lista de unidades de medida da aba DADOS, coluna MEDIDAS.
+ */
+function getMedidasList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("DADOS");
+  if (!sheet) return [];
+
+  // Encontra a coluna MEDIDAS
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var medidasCol = -1;
+  for (var i = 0; i < headers.length; i++) {
+    if (headers[i].toString().toUpperCase() === "MEDIDAS") {
+      medidasCol = i + 1;
+      break;
+    }
+  }
+
+  if (medidasCol === -1) return [];
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var values = sheet.getRange(2, medidasCol, lastRow - 1, 1).getValues().flat();
+  var medidasList = values.filter(function(v) {
+    return v.toString().trim() !== "";
+  });
+  return medidasList;
+}
+
+/**
+ * getObservacoesList: Retorna a lista de observações pré-definidas da aba DADOS, coluna OBSERVAÇÃO.
+ */
+function getObservacoesList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("DADOS");
+  if (!sheet) return [];
+
+  // Encontra a coluna OBSERVAÇÃO
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var obsCol = -1;
+  for (var i = 0; i < headers.length; i++) {
+    if (headers[i].toString().toUpperCase() === "OBSERVAÇÃO" || headers[i].toString().toUpperCase() === "OBSERVACAO") {
+      obsCol = i + 1;
+      break;
+    }
+  }
+
+  if (obsCol === -1) return [];
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var values = sheet.getRange(2, obsCol, lastRow - 1, 1).getValues().flat();
+  var obsList = values.filter(function(v) {
+    return v.toString().trim() !== "";
+  });
+  return obsList;
+}
+
+/**
  * normalize: Função auxiliar para normalizar texto.
  */
 function normalize(text) {
@@ -880,7 +940,9 @@ function getAllAutocompleteData() {
     items: Array.from(new Set(items)),        // Remove duplicatas
     groups: Array.from(new Set(groups)),      // Remove duplicatas
     nfs: Array.from(new Set(nfs)),            // Remove duplicatas
-    obs: Array.from(new Set(obs))             // Remove duplicatas
+    obs: Array.from(new Set(obs)),            // Remove duplicatas
+    medidas: getMedidasList(),                // Lista de unidades de medida
+    observacoes: getObservacoesList()         // Lista de observações pré-definidas
   };
 }
 
@@ -2182,6 +2244,66 @@ function getObsList() {
 }
 
 /**
+ * getMedidasList: Retorna a lista de unidades de medida da aba DADOS, coluna MEDIDAS.
+ */
+function getMedidasList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("DADOS");
+  if (!sheet) return [];
+
+  // Encontra a coluna MEDIDAS
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var medidasCol = -1;
+  for (var i = 0; i < headers.length; i++) {
+    if (headers[i].toString().toUpperCase() === "MEDIDAS") {
+      medidasCol = i + 1;
+      break;
+    }
+  }
+
+  if (medidasCol === -1) return [];
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var values = sheet.getRange(2, medidasCol, lastRow - 1, 1).getValues().flat();
+  var medidasList = values.filter(function(v) {
+    return v.toString().trim() !== "";
+  });
+  return medidasList;
+}
+
+/**
+ * getObservacoesList: Retorna a lista de observações pré-definidas da aba DADOS, coluna OBSERVAÇÃO.
+ */
+function getObservacoesList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("DADOS");
+  if (!sheet) return [];
+
+  // Encontra a coluna OBSERVAÇÃO
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var obsCol = -1;
+  for (var i = 0; i < headers.length; i++) {
+    if (headers[i].toString().toUpperCase() === "OBSERVAÇÃO" || headers[i].toString().toUpperCase() === "OBSERVACAO") {
+      obsCol = i + 1;
+      break;
+    }
+  }
+
+  if (obsCol === -1) return [];
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var values = sheet.getRange(2, obsCol, lastRow - 1, 1).getValues().flat();
+  var obsList = values.filter(function(v) {
+    return v.toString().trim() !== "";
+  });
+  return obsList;
+}
+
+/**
  * normalize: Função auxiliar para normalizar texto.
  */
 function normalize(text) {
@@ -2296,7 +2418,9 @@ function getAllAutocompleteData() {
     items: Array.from(new Set(items)),        // Remove duplicatas
     groups: Array.from(new Set(groups)),      // Remove duplicatas
     nfs: Array.from(new Set(nfs)),            // Remove duplicatas
-    obs: Array.from(new Set(obs))             // Remove duplicatas
+    obs: Array.from(new Set(obs)),            // Remove duplicatas
+    medidas: getMedidasList(),                // Lista de unidades de medida
+    observacoes: getObservacoesList()         // Lista de observações pré-definidas
   };
 }
 
@@ -3812,9 +3936,9 @@ function buscarProduto(item, dataInicio, dataFim) {
       return { success: false, message: "Nenhum dado encontrado" };
     }
 
-    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getDisplayValues();
-    var dataValues = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getValues(); // Para pegar datas como Date
-    var backgrounds = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getBackgrounds();
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
+    var dataValues = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getValues(); // Para pegar datas como Date
+    var backgrounds = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getBackgrounds();
     var results = [];
     var itemNormalized = normalize(item);
 
@@ -3822,8 +3946,8 @@ function buscarProduto(item, dataInicio, dataFim) {
     for (var i = 0; i < data.length; i++) {
       var currentItem = normalize(data[i][1]);
       if (currentItem.indexOf(itemNormalized) >= 0) {
-        // Pega a data como objeto Date (não string)
-        var dataMovimento = dataValues[i][2];
+        // Pega a data como objeto Date (não string) - Coluna D (índice 3)
+        var dataMovimento = dataValues[i][3];
 
         // Verifica filtro de data
         if (dataInicio && dataFim) {
@@ -3866,7 +3990,7 @@ function buscarProduto(item, dataInicio, dataFim) {
     return {
       success: true,
       data: {
-        headers: ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"],
+        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
         rows: sortedRows,
         colors: rowColors
       }
@@ -3981,7 +4105,7 @@ function mostrarTodosProdutos(dataInicio, dataFim) {
     return {
       success: true,
       data: {
-        headers: ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"],
+        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
         rows: sortedRows,
         colors: rowColors
       }
@@ -4073,7 +4197,7 @@ function getEstoque3Meses() {
     return {
       success: true,
       data: {
-        headers: ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"],
+        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
         rows: results
       }
     };

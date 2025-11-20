@@ -33,18 +33,22 @@ function processEstoqueWebApp(formData) {
     var lastReg = getLastRegistration(formData.item, nextRow);
     var previousSaldo = parseFloat(lastReg.lastStock) || 0;
     var newSaldo = previousSaldo + parseFloat(formData.entrada) - parseFloat(formData.saida);
+
+    // Nova estrutura com Unidade de Medida (após Item) e Valor (após Saldo)
     var rowData = [
-      formData.group,
-      formData.item,
-      now,
-      formData.nf,
-      formData.obs,
-      previousSaldo,
-      formData.entrada,
-      formData.saida,
-      newSaldo,
-      now,
-      getLoggedUser()
+      formData.group,              // A: Grupo
+      formData.item,               // B: Item
+      formData.unidade || '',      // C: Unidade de Medida (NOVO)
+      now,                         // D: Data
+      formData.nf || '',           // E: NF
+      formData.obs || '',          // F: Obs
+      previousSaldo,               // G: Saldo Anterior
+      formData.entrada,            // H: Entrada
+      formData.saida,              // I: Saída
+      newSaldo,                    // J: Saldo
+      parseFloat(formData.valorUnitario) || 0,  // K: Valor Unitário (NOVO)
+      now,                         // L: Alterado Em
+      getLoggedUser()              // M: Alterado Por
     ];
 
     sheetEstoque.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
@@ -60,7 +64,7 @@ function processEstoqueWebApp(formData) {
       var lastDate = new Date(lastReg.lastDate);
       var diffDays = (now.getTime() - lastDate.getTime()) / (1000 * 3600 * 24);
       if (diffDays > 20) {
-        // Verifica coluna E (obs) por palavras-chave
+        // Verifica coluna F (obs) por palavras-chave
         var textoObs = formData.obs ? formData.obs.toString().toLowerCase() : "";
         var temKeyword = /acerto|atualiza[cç][ãa]o/.test(textoObs);
         // Se não conter 'acerto' ou 'atualização', pinta de vermelho
@@ -111,7 +115,7 @@ function gerarListagemEstoqueWebApp(formData) {
       return { success: false, message: "Nenhum dado encontrado" };
     }
 
-    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getDisplayValues();
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
     var results = [];
 
     var filterGroup = formData.group ? normalize(formData.group) : null;
@@ -144,7 +148,7 @@ function gerarListagemEstoqueWebApp(formData) {
     return {
       success: true,
       data: {
-        headers: ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"],
+        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
         rows: results
       }
     };
@@ -171,7 +175,7 @@ function gerarRelatorioEstoqueWebApp(dataInicio, dataFim) {
       return { success: false, message: "Nenhum dado encontrado" };
     }
 
-    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getValues();
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getValues();
     var results = [];
 
     var inicio = new Date(dataInicio);
@@ -180,7 +184,7 @@ function gerarRelatorioEstoqueWebApp(dataInicio, dataFim) {
     fim.setHours(23, 59, 59, 999);
 
     for (var i = 0; i < data.length; i++) {
-      var dataMovimento = new Date(data[i][2]);
+      var dataMovimento = new Date(data[i][3]); // Coluna D (índice 3)
       if (dataMovimento >= inicio && dataMovimento <= fim) {
         results.push(data[i]);
       }
@@ -193,7 +197,7 @@ function gerarRelatorioEstoqueWebApp(dataInicio, dataFim) {
     return {
       success: true,
       data: {
-        headers: ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"],
+        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
         rows: results
       }
     };
@@ -220,7 +224,7 @@ function gerarRelatorioPorGrupoWebApp(grupoSelecionado) {
       return { success: false, message: "Nenhum dado encontrado" };
     }
 
-    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getDisplayValues();
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
     var results = [];
     var grupoNormalized = normalize(grupoSelecionado);
 
@@ -237,7 +241,7 @@ function gerarRelatorioPorGrupoWebApp(grupoSelecionado) {
     return {
       success: true,
       data: {
-        headers: ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"],
+        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
         rows: results
       }
     };
@@ -267,7 +271,7 @@ function gerarListagemCoresDesatualizadasWebApp(formData) {
       return { success: false, message: "Nenhum dado encontrado" };
     }
 
-    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getDisplayValues();
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
     var results = [];
 
     var today = new Date();
@@ -278,8 +282,8 @@ function gerarListagemCoresDesatualizadasWebApp(formData) {
     var itemsMap = {};
     for (var i = 0; i < data.length; i++) {
       var item = data[i][1];
-      var dataMovimento = new Date(data[i][2]);
-      var obs = data[i][4] || "";
+      var dataMovimento = new Date(data[i][3]); // Coluna D (índice 3)
+      var obs = data[i][5] || ""; // Coluna F (índice 5)
 
       if (!itemsMap[item] || dataMovimento > new Date(itemsMap[item][2])) {
         itemsMap[item] = data[i];
@@ -306,7 +310,7 @@ function gerarListagemCoresDesatualizadasWebApp(formData) {
     return {
       success: true,
       data: {
-        headers: ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"],
+        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
         rows: results
       }
     };

@@ -709,22 +709,42 @@
                 <datalist id="nfList"></datalist>
               </div>
               <div class="form-group">
+                <label for="estoqueUnidade">Unidade de Medida *</label>
+                <select id="estoqueUnidade" required>
+                  <option value="">Selecione...</option>
+                </select>
+              </div>
+              <div class="form-group">
                 <label for="estoqueObs">Observação</label>
-                <textarea id="estoqueObs" rows="3"></textarea>
+                <select id="estoqueObs">
+                  <option value="">Selecione...</option>
+                </select>
               </div>
               <div class="form-group">
                 <label for="estoqueEntrada">Entrada</label>
-                <input type="number" id="estoqueEntrada" step="0.01" value="0">
+                <input type="number" id="estoqueEntrada" step="0.01" value="0" onchange="toggleValorUnitario()">
               </div>
               <div class="form-group">
                 <label for="estoqueSaida">Saída</label>
-                <input type="number" id="estoqueSaida" step="0.01" value="0">
+                <input type="number" id="estoqueSaida" step="0.01" value="0" onchange="toggleValorUnitario()">
+              </div>
+              <div class="form-group" id="valorUnitarioGroup" style="display: none;">
+                <label for="estoqueValorUnitario">Valor Unitário (R$) *</label>
+                <input type="number" id="estoqueValorUnitario" step="0.01" min="0">
               </div>
               <div class="btn-group">
                 <button type="submit" class="btn btn-success">✓ Confirmar</button>
                 <button type="button" class="btn btn-warning" onclick="resetEstoqueForm()">↻ Limpar</button>
               </div>
             </form>
+
+            <!-- Histórico do Produto -->
+            <div id="estoqueHistorico" style="display: none; margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 4px;">
+              <h3 style="margin-top: 0; color: #666; font-size: 0.9rem;">📊 Histórico do Produto</h3>
+              <div id="estoqueHistoricoContent" class="table-container" style="max-height: 300px; overflow-y: auto;">
+                <!-- Tabela de histórico será inserida aqui -->
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1116,11 +1136,61 @@
           populateAutocomplete('listagemGroupList', data.groups);
           populateAutocomplete('listagemItemList', data.items);
           populateSelect('relatorioGrupoSelect', data.groups);
+
+          // Popula selects de Unidade de Medida e Observação
+          populateSelect('estoqueUnidade', data.medidas || []);
+          populateSelect('estoqueObs', data.observacoes || []);
         })
         .withFailureHandler(function(error) {
           console.error('Erro ao carregar autocomplete:', error);
         })
         .getAllAutocompleteData();
+    }
+
+    // Toggle valor unitário visibility based on rules
+    function toggleValorUnitario() {
+      const entrada = parseFloat(document.getElementById('estoqueEntrada').value) || 0;
+      const saida = parseFloat(document.getElementById('estoqueSaida').value) || 0;
+      const obs = document.getElementById('estoqueObs').value.toUpperCase();
+      const valorGroup = document.getElementById('valorUnitarioGroup');
+      const valorInput = document.getElementById('estoqueValorUnitario');
+
+      // Regra: Valor unitário obrigatório SE entrada > 0 E obs ≠ "ATUALIZAÇÃO"
+      if (entrada > 0 && obs !== 'ATUALIZAÇÃO') {
+        valorGroup.style.display = 'block';
+        valorInput.required = true;
+      } else {
+        valorGroup.style.display = 'none';
+        valorInput.required = false;
+        valorInput.value = ''; // Limpa o valor
+      }
+    }
+
+    // Show product history when item is typed
+    function showProductHistory(item) {
+      if (!item || item.trim() === '') {
+        document.getElementById('estoqueHistorico').style.display = 'none';
+        return;
+      }
+
+      // Filtra histórico do produto no lado do cliente (instantâneo!)
+      const result = filterEstoqueData(item, null, null);
+
+      if (result.success && result.data && result.data.rows.length > 0) {
+        // Mostra apenas os últimos 10 registros
+        const limitedRows = result.data.rows.slice(0, 10);
+        const limitedColors = result.data.colors.slice(0, 10);
+
+        displayTable('estoqueHistoricoContent', {
+          headers: result.data.headers,
+          rows: limitedRows,
+          colors: limitedColors
+        });
+
+        document.getElementById('estoqueHistorico').style.display = 'block';
+      } else {
+        document.getElementById('estoqueHistorico').style.display = 'none';
+      }
     }
 
     // Load all estoque data for instant client-side filtering
@@ -1279,6 +1349,7 @@
     document.addEventListener('DOMContentLoaded', function() {
       const itemInput = document.getElementById('estoqueItem');
       if (itemInput) {
+        // Auto-fill group when item changes
         itemInput.addEventListener('change', function() {
           const item = this.value;
           if (item) {
@@ -1289,8 +1360,31 @@
                 }
               })
               .getLastRegistration(item, 0);
+
+            // Show product history
+            showProductHistory(item);
           }
         });
+
+        // Show history as user types (with debounce)
+        let typingTimer;
+        itemInput.addEventListener('input', function() {
+          clearTimeout(typingTimer);
+          const item = this.value;
+          typingTimer = setTimeout(function() {
+            if (item && item.length >= 3) {
+              showProductHistory(item);
+            } else {
+              document.getElementById('estoqueHistorico').style.display = 'none';
+            }
+          }, 500); // Wait 500ms after user stops typing
+        });
+      }
+
+      // Toggle valor unitário when observação changes
+      const obsSelect = document.getElementById('estoqueObs');
+      if (obsSelect) {
+        obsSelect.addEventListener('change', toggleValorUnitario);
       }
     });
 
@@ -1302,9 +1396,11 @@
         item: document.getElementById('estoqueItem').value,
         group: document.getElementById('estoqueGroup').value,
         nf: document.getElementById('estoqueNF').value,
+        unidade: document.getElementById('estoqueUnidade').value,
         obs: document.getElementById('estoqueObs').value,
         entrada: document.getElementById('estoqueEntrada').value,
-        saida: document.getElementById('estoqueSaida').value
+        saida: document.getElementById('estoqueSaida').value,
+        valorUnitario: document.getElementById('estoqueValorUnitario').value
       };
 
       // Validation
@@ -1318,6 +1414,13 @@
 
       if (entrada === 0 && saida === 0) {
         showMessage('estoqueMessage', 'Informe uma entrada ou saída.', 'error');
+        return false;
+      }
+
+      // Validação de valor unitário (regra: obrigatório se entrada > 0 E obs ≠ "ATUALIZAÇÃO")
+      const valorUnitario = parseFloat(formData.valorUnitario) || 0;
+      if (entrada > 0 && formData.obs.toUpperCase() !== 'ATUALIZAÇÃO' && valorUnitario <= 0) {
+        showMessage('estoqueMessage', 'Valor unitário é obrigatório para entradas (exceto quando Obs = ATUALIZAÇÃO).', 'error');
         return false;
       }
 
@@ -1357,6 +1460,9 @@
       document.getElementById('estoqueForm').reset();
       document.getElementById('estoqueEntrada').value = '0';
       document.getElementById('estoqueSaida').value = '0';
+      document.getElementById('estoqueValorUnitario').value = '';
+      document.getElementById('valorUnitarioGroup').style.display = 'none';
+      document.getElementById('estoqueHistorico').style.display = 'none';
       document.getElementById('estoqueItem').focus();
     }
 
