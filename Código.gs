@@ -4041,13 +4041,27 @@ function carregarTodosOsDadosEstoque() {
     var numCols = lastCol >= 13 ? 13 : 11;
     Logger.log("Usando estrutura de " + numCols + " colunas");
 
-    // Limita a 10.000 linhas para evitar timeout
-    var maxRows = Math.min(lastRow - 1, 10000);
-    Logger.log("Carregando " + maxRows + " linhas de dados");
+    // Limita a 2.000 registros mais recentes para evitar exceder limite de transferência
+    // Com 43k+ linhas, 10k era grande demais. 2k é suficiente para buscas rápidas.
+    var maxRowsToLoad = 2000;
+    var totalDataRows = lastRow - 1; // Exclui header
 
-    var data = sheetEstoque.getRange(2, 1, maxRows, numCols).getDisplayValues();
-    var dataValues = sheetEstoque.getRange(2, 1, maxRows, numCols).getValues();
-    var backgrounds = sheetEstoque.getRange(2, 1, maxRows, numCols).getBackgrounds();
+    var startRow, numRowsToLoad;
+    if (totalDataRows <= maxRowsToLoad) {
+      // Se tem menos de 2000 linhas, carrega tudo
+      startRow = 2;
+      numRowsToLoad = totalDataRows;
+    } else {
+      // Se tem mais de 2000, carrega apenas as últimas 2000 (mais recentes)
+      startRow = lastRow - maxRowsToLoad + 1;
+      numRowsToLoad = maxRowsToLoad;
+    }
+
+    Logger.log("Carregando " + numRowsToLoad + " linhas (da linha " + startRow + " até " + (startRow + numRowsToLoad - 1) + ")");
+
+    var data = sheetEstoque.getRange(startRow, 1, numRowsToLoad, numCols).getDisplayValues();
+    var dataValues = sheetEstoque.getRange(startRow, 1, numRowsToLoad, numCols).getValues();
+    var backgrounds = sheetEstoque.getRange(startRow, 1, numRowsToLoad, numCols).getBackgrounds();
 
     Logger.log("Dados carregados - processando...");
     var allData = [];
