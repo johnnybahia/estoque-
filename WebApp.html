@@ -1,1 +1,1904 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Gestão de Estoque</title>
 
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --primary-color: #2c3e50;
+      --secondary-color: #3498db;
+      --success-color: #27ae60;
+      --warning-color: #f39c12;
+      --danger-color: #e74c3c;
+      --light-bg: #ecf0f1;
+      --white: #ffffff;
+      --text-dark: #2c3e50;
+      --border-color: #bdc3c7;
+      --sidebar-width: 250px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: var(--light-bg);
+      color: var(--text-dark);
+      line-height: 1.6;
+    }
+
+    /* Header */
+    .header {
+      background: var(--primary-color);
+      color: var(--white);
+      padding: 1rem 2rem;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1000;
+    }
+
+    .header h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+
+    .header .user-info {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .header .user-info span {
+      font-size: 0.9rem;
+    }
+
+    .header .logout-btn {
+      background: var(--danger-color);
+      color: var(--white);
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: background 0.3s;
+    }
+
+    .header .logout-btn:hover {
+      background: #c0392b;
+    }
+
+    /* Layout Container */
+    .container {
+      display: flex;
+      margin-top: 60px;
+      min-height: calc(100vh - 60px);
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: var(--sidebar-width);
+      background: var(--white);
+      box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+      overflow-y: auto;
+      position: fixed;
+      left: 0;
+      top: 60px;
+      bottom: 0;
+      transition: transform 0.3s;
+    }
+
+    .sidebar.hidden {
+      transform: translateX(-100%);
+    }
+
+    .sidebar-toggle {
+      display: block;
+      position: fixed;
+      top: 70px;
+      left: 10px;
+      z-index: 999;
+      background: var(--secondary-color);
+      color: var(--white);
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: left 0.3s;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    }
+
+    .sidebar-toggle:hover {
+      background: #2980b9;
+    }
+
+    .sidebar-toggle.shifted {
+      left: 260px;
+    }
+
+    .sidebar nav ul {
+      list-style: none;
+      padding: 1rem 0;
+    }
+
+    .sidebar nav li {
+      margin: 0;
+    }
+
+    .sidebar nav a {
+      display: flex;
+      align-items: center;
+      padding: 0.9rem 1.5rem;
+      color: var(--text-dark);
+      text-decoration: none;
+      transition: background 0.3s, color 0.3s;
+      border-left: 3px solid transparent;
+      gap: 0.8rem;
+    }
+
+    .sidebar nav a:hover {
+      background: var(--light-bg);
+      border-left-color: var(--secondary-color);
+    }
+
+    .sidebar nav a.active {
+      background: var(--light-bg);
+      border-left-color: var(--secondary-color);
+      color: var(--secondary-color);
+      font-weight: 600;
+    }
+
+    .sidebar nav .separator {
+      border-bottom: 1px solid var(--border-color);
+      margin: 0.5rem 1rem;
+    }
+
+    .sidebar nav .section-title {
+      padding: 1rem 1.5rem 0.5rem;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      color: #7f8c8d;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    /* Main Content */
+    .main-content {
+      flex: 1;
+      margin-left: var(--sidebar-width);
+      padding: 2rem;
+      transition: margin-left 0.3s;
+    }
+
+    .main-content.expanded {
+      margin-left: 0;
+    }
+
+    .content-card {
+      background: var(--white);
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      padding: 2rem;
+      margin-bottom: 2rem;
+    }
+
+    .content-card h2 {
+      margin-bottom: 1.5rem;
+      color: var(--primary-color);
+      font-size: 1.75rem;
+      border-bottom: 2px solid var(--secondary-color);
+      padding-bottom: 0.5rem;
+    }
+
+    /* Forms */
+    .form-group {
+      margin-bottom: 1.5rem;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 500;
+      color: var(--text-dark);
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%;
+      padding: 0.75rem;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      font-size: 1rem;
+      transition: border-color 0.3s;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: var(--secondary-color);
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      min-height: 100px;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 0.75rem 1.5rem;
+      border: none;
+      border-radius: 4px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.3s, transform 0.1s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn-primary {
+      background: var(--secondary-color);
+      color: var(--white);
+    }
+
+    .btn-primary:hover {
+      background: #2980b9;
+    }
+
+    .btn-success {
+      background: var(--success-color);
+      color: var(--white);
+    }
+
+    .btn-success:hover {
+      background: #229954;
+    }
+
+    .btn-warning {
+      background: var(--warning-color);
+      color: var(--white);
+    }
+
+    .btn-warning:hover {
+      background: #e67e22;
+    }
+
+    .btn-danger {
+      background: var(--danger-color);
+      color: var(--white);
+    }
+
+    .btn-danger:hover {
+      background: #c0392b;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    /* Tables */
+    .table-container {
+      overflow-x: auto;
+      margin-top: 1rem;
+      max-height: calc(100vh - 300px);
+      overflow-y: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--white);
+      table-layout: auto;
+      font-size: 0.85rem;
+    }
+
+    table th,
+    table td {
+      padding: 0.4rem 0.5rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border-color);
+      white-space: nowrap;
+      min-width: 70px;
+      line-height: 1.3;
+    }
+
+    /* Larguras específicas para colunas - 13 colunas */
+    table th:nth-child(1), table td:nth-child(1) { min-width: 90px; } /* Grupo */
+    table th:nth-child(2), table td:nth-child(2) { min-width: 150px; } /* Item */
+    table th:nth-child(3), table td:nth-child(3) { min-width: 60px; text-align: center; font-size: 0.8rem; } /* Unidade */
+    table th:nth-child(4), table td:nth-child(4) { min-width: 85px; } /* Data */
+    table th:nth-child(5), table td:nth-child(5) { min-width: 70px; } /* NF */
+    table th:nth-child(6), table td:nth-child(6) { min-width: 120px; white-space: normal; } /* Obs */
+    table th:nth-child(7), table td:nth-child(7) { min-width: 70px; text-align: right; } /* Saldo Ant */
+    table th:nth-child(8), table td:nth-child(8) { min-width: 60px; text-align: right; } /* Entrada */
+    table th:nth-child(9), table td:nth-child(9) { min-width: 60px; text-align: right; } /* Saída */
+    table th:nth-child(10), table td:nth-child(10) {
+      min-width: 70px;
+      text-align: right;
+      font-weight: 700;
+      background-color: #e3f2fd;
+      font-size: 0.9rem;
+    } /* Saldo - DESTACADO */
+    table th:nth-child(11), table td:nth-child(11) { min-width: 75px; text-align: right; font-size: 0.8rem; } /* Valor */
+    table th:nth-child(12), table td:nth-child(12) { min-width: 110px; font-size: 0.8rem; } /* Alterado Em */
+    table th:nth-child(13), table td:nth-child(13) { min-width: 90px; } /* Alterado Por */
+
+    /* Destaque especial para cabeçalho da coluna SALDO */
+    table th:nth-child(10) {
+      background-color: #2196f3 !important;
+      color: white !important;
+    }
+
+    table th {
+      background: var(--light-bg);
+      font-weight: 600;
+      color: var(--primary-color);
+      position: sticky;
+      top: 0;
+      font-size: 0.85rem;
+      z-index: 10;
+    }
+
+    table tr:hover {
+      opacity: 0.9;
+    }
+
+    /* Cores das linhas (vermelho e amarelo) */
+    table tr.row-red {
+      background-color: #ff0000 !important;
+      color: white;
+    }
+
+    table tr.row-red:hover {
+      background-color: #cc0000 !important;
+    }
+
+    /* Mantém destaque na coluna SALDO mesmo em linhas vermelhas */
+    table tr.row-red td:nth-child(10) {
+      background-color: #d32f2f !important;
+      font-weight: 700;
+      border-left: 2px solid white;
+      border-right: 2px solid white;
+    }
+
+    table tr.row-yellow {
+      background-color: #ffff00 !important;
+      color: black;
+    }
+
+    table tr.row-yellow:hover {
+      background-color: #e6e600 !important;
+    }
+
+    /* Mantém destaque na coluna SALDO mesmo em linhas amarelas */
+    table tr.row-yellow td:nth-child(10) {
+      background-color: #fdd835 !important;
+      font-weight: 700;
+      border-left: 2px solid #f57f17;
+      border-right: 2px solid #f57f17;
+    }
+
+    /* Print styles */
+    @media print {
+      .header, .sidebar, .sidebar-toggle, .btn, .form-group, .content-card h2, #localizarMessage {
+        display: none !important;
+      }
+
+      .main-content {
+        margin-left: 0 !important;
+        padding: 0 !important;
+      }
+
+      .table-container {
+        overflow: visible !important;
+      }
+
+      table {
+        page-break-inside: auto;
+        font-size: 10pt;
+      }
+
+      table tr {
+        page-break-inside: avoid;
+        page-break-after: auto;
+      }
+
+      table th {
+        position: static;
+      }
+    }
+
+    /* Login Screen */
+    .login-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+    }
+
+    .login-card {
+      background: var(--white);
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+      padding: 3rem;
+      width: 100%;
+      max-width: 400px;
+    }
+
+    .login-card h2 {
+      text-align: center;
+      margin-bottom: 2rem;
+      color: var(--primary-color);
+    }
+
+    /* Loading Spinner */
+    .loading {
+      display: none;
+      text-align: center;
+      padding: 2rem;
+    }
+
+    .loading.show {
+      display: block;
+    }
+
+    .spinner {
+      border: 4px solid var(--light-bg);
+      border-top: 4px solid var(--secondary-color);
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Messages */
+    .message {
+      padding: 1rem 1.5rem;
+      border-radius: 4px;
+      margin-bottom: 1rem;
+      display: none;
+    }
+
+    .message.show {
+      display: block;
+    }
+
+    .message.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .message.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    .message.warning {
+      background: #fff3cd;
+      color: #856404;
+      border: 1px solid #ffeaa7;
+    }
+
+    .message.info {
+      background: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+
+    /* Responsive Design */
+    @media (max-width: 768px) {
+      .header h1 {
+        font-size: 1.2rem;
+      }
+
+      .sidebar {
+        transform: translateX(-100%);
+      }
+
+      .sidebar:not(.hidden) {
+        transform: translateX(0);
+      }
+
+      .sidebar-toggle {
+        left: 10px !important;
+      }
+
+      .sidebar-toggle.shifted {
+        left: 10px !important;
+      }
+
+      .main-content {
+        margin-left: 0;
+        padding: 1rem;
+      }
+
+      .content-card {
+        padding: 1rem;
+      }
+
+      .btn-group {
+        flex-direction: column;
+      }
+
+      .btn {
+        width: 100%;
+        justify-content: center;
+      }
+    }
+
+    /* Module specific styles */
+    .module-container {
+      display: none;
+    }
+
+    .module-container.active {
+      display: block;
+    }
+
+    .dashboard-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .stat-card {
+      background: var(--white);
+      padding: 1.5rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      text-align: center;
+    }
+
+    .stat-card h3 {
+      font-size: 2rem;
+      color: var(--secondary-color);
+      margin-bottom: 0.5rem;
+    }
+
+    .stat-card p {
+      color: #7f8c8d;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <!-- Login Screen -->
+  <div id="loginScreen" class="login-container">
+    <div class="login-card">
+      <h2>🔐 Login</h2>
+      <div id="loginMessage" class="message"></div>
+      <form id="loginForm" onsubmit="return handleLogin(event)">
+        <div class="form-group">
+          <label for="loginUser">Usuário</label>
+          <input type="text" id="loginUser" required placeholder="Digite seu usuário">
+        </div>
+        <div class="form-group">
+          <label for="loginPassword">Senha</label>
+          <input type="password" id="loginPassword" required placeholder="Digite sua senha">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Entrar</button>
+      </form>
+      <div class="loading">
+        <div class="spinner"></div>
+        <p>Autenticando...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main App -->
+  <div id="mainApp" style="display: none;">
+    <!-- Header -->
+    <header class="header">
+      <h1>📦 Sistema de Gestão de Estoque</h1>
+      <div class="user-info">
+        <span id="userName">Usuário</span>
+        <button class="logout-btn" onclick="handleLogout()">Sair</button>
+      </div>
+    </header>
+
+    <!-- Sidebar Toggle -->
+    <button class="sidebar-toggle shifted" onclick="toggleSidebar()">✕ Esconder Menu</button>
+
+    <!-- Container -->
+    <div class="container">
+      <!-- Sidebar -->
+      <aside class="sidebar" id="sidebar">
+        <nav>
+          <ul>
+            <li class="section-title">Principal</li>
+            <li><a href="#" onclick="showModule('dashboard')" data-module="dashboard" class="active">📊 Dashboard</a></li>
+
+            <li class="separator"></li>
+            <li class="section-title">Operações</li>
+            <li><a href="#" onclick="showModule('inserir-estoque')" data-module="inserir-estoque">📦 Inserir Estoque</a></li>
+            <li><a href="#" onclick="showModule('inserir-grupo')" data-module="inserir-grupo">📁 Inserir Grupo</a></li>
+
+            <li class="separator"></li>
+            <li class="section-title">Consultas</li>
+            <li><a href="#" onclick="showModule('localizar-produto')" data-module="localizar-produto">🔍 Localizar Produto</a></li>
+            <li><a href="#" onclick="showModule('listagem-estoque')" data-module="listagem-estoque">📋 Listagem de Estoque</a></li>
+
+            <li class="separator"></li>
+            <li class="section-title">Relatórios</li>
+            <li><a href="#" onclick="showModule('relatorio-estoque')" data-module="relatorio-estoque">📊 Gerar Relatório</a></li>
+            <li><a href="#" onclick="showModule('relatorio-grupo')" data-module="relatorio-grupo">📈 Relatório por Grupo</a></li>
+            <li><a href="#" onclick="showModule('estoque-periodo')" data-module="estoque-periodo">📅 Estoque por Período</a></li>
+            <li><a href="#" onclick="showModule('estoque-3-meses')" data-module="estoque-3-meses">📦 Estoque 3 Meses</a></li>
+
+            <li class="separator"></li>
+            <li class="section-title">Cores</li>
+            <li><a href="#" onclick="showModule('cores-desatualizadas')" data-module="cores-desatualizadas">🎨 Cores Desatualizadas</a></li>
+
+            <li class="separator"></li>
+            <li class="section-title">Administração</li>
+            <li><a href="#" onclick="showModule('atualizar-fio')" data-module="atualizar-fio">🔄 Atualizar Compra de Fio</a></li>
+            <li><a href="#" onclick="showModule('atualizar-embarcado')" data-module="atualizar-embarcado">🚢 Atualizar Total Embarcado</a></li>
+            <li><a href="#" onclick="showModule('apagar-linha')" data-module="apagar-linha">🗑️ Apagar Última Linha</a></li>
+            <li><a href="#" onclick="showModule('limpar-filtro')" data-module="limpar-filtro">🔄 Limpar Filtro</a></li>
+          </ul>
+        </nav>
+      </aside>
+
+      <!-- Main Content -->
+      <main class="main-content" id="mainContent">
+        <!-- Dashboard Module -->
+        <div id="module-dashboard" class="module-container active">
+          <div class="content-card">
+            <h2>Dashboard</h2>
+            <div class="dashboard-stats">
+              <div class="stat-card">
+                <h3 id="totalItems">-</h3>
+                <p>Total de Itens</p>
+              </div>
+              <div class="stat-card">
+                <h3 id="totalGroups">-</h3>
+                <p>Grupos Cadastrados</p>
+              </div>
+              <div class="stat-card">
+                <h3 id="recentEntries">-</h3>
+                <p>Entradas (Hoje)</p>
+              </div>
+              <div class="stat-card">
+                <h3 id="recentExits">-</h3>
+                <p>Saídas (Hoje)</p>
+              </div>
+            </div>
+            <p>Bem-vindo ao Sistema de Gestão de Estoque. Use o menu lateral para navegar pelas funcionalidades.</p>
+          </div>
+        </div>
+
+        <!-- Inserir Estoque Module -->
+        <div id="module-inserir-estoque" class="module-container">
+          <div class="content-card">
+            <!-- FORMULÁRIO DE INSERÇÃO -->
+            <div id="estoqueFormArea">
+              <h2>📦 Inserir Estoque</h2>
+              <div id="estoqueMessage" class="message"></div>
+              <form id="estoqueForm" onsubmit="return handleInserirEstoque(event)">
+                <!-- Grid compacto 2 colunas -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="estoqueItem" style="font-size: 0.85rem;">Produto *</label>
+                    <input type="text" id="estoqueItem" list="itemList" required style="padding: 6px;">
+                    <datalist id="itemList"></datalist>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="estoqueGroup" style="font-size: 0.85rem;">Grupo *</label>
+                    <input type="text" id="estoqueGroup" list="groupList" required style="padding: 6px;">
+                    <datalist id="groupList"></datalist>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="estoqueUnidade" style="font-size: 0.85rem;">Unidade *</label>
+                    <select id="estoqueUnidade" required style="padding: 6px;">
+                      <option value="">Selecione...</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="estoqueNF" style="font-size: 0.85rem;">NF</label>
+                    <input type="text" id="estoqueNF" list="nfList" style="padding: 6px;">
+                    <datalist id="nfList"></datalist>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="estoqueObs" style="font-size: 0.85rem;">Observação</label>
+                    <select id="estoqueObs" style="padding: 6px;">
+                      <option value="">Selecione...</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="estoqueEntrada" style="font-size: 0.85rem;">Entrada</label>
+                    <input type="number" id="estoqueEntrada" step="0.01" value="0" onchange="toggleValorUnitario()" style="padding: 6px;">
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="estoqueSaida" style="font-size: 0.85rem;">Saída</label>
+                    <input type="number" id="estoqueSaida" step="0.01" value="0" onchange="toggleValorUnitario()" style="padding: 6px;">
+                  </div>
+                  <div class="form-group" id="valorUnitarioGroup" style="margin-bottom: 8px; display: none;">
+                    <label for="estoqueValorUnitario" style="font-size: 0.85rem;">Valor Unit. (R$) *</label>
+                    <input type="number" id="estoqueValorUnitario" step="0.01" min="0" style="padding: 6px;">
+                  </div>
+                </div>
+                <div class="btn-group" style="margin-top: 10px;">
+                  <button type="submit" class="btn btn-success">✓ Confirmar</button>
+                  <button type="button" class="btn btn-warning" onclick="resetEstoqueForm()">↻ Limpar</button>
+                </div>
+              </form>
+
+              <!-- Histórico do Produto (durante digitação) -->
+              <div id="estoqueHistorico" style="display: none; margin-top: 15px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
+                <h3 style="margin: 0 0 10px 0; color: #666; font-size: 0.85rem;">📊 Histórico do Produto</h3>
+                <div id="estoqueHistoricoContent" class="table-container" style="max-height: 200px; overflow-y: auto;">
+                </div>
+              </div>
+            </div>
+
+            <!-- ÁREA DE RESULTADOS APÓS INSERÇÃO -->
+            <div id="estoqueResultArea" style="display: none;">
+              <h2>✅ Estoque Inserido com Sucesso!</h2>
+              <div id="estoqueResultMessage" style="background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 15px;"></div>
+              <h3 style="margin: 15px 0 10px 0; font-size: 0.9rem;">📋 Movimentações do Item:</h3>
+              <div id="estoqueResultTable" class="table-container" style="max-height: 400px; overflow-y: auto;">
+              </div>
+              <div class="btn-group" style="margin-top: 15px;">
+                <button type="button" class="btn btn-primary" onclick="voltarParaFormulario()">✓ OK - Inserir Novo</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Inserir Grupo Module -->
+        <div id="module-inserir-grupo" class="module-container">
+          <div class="content-card">
+            <h2>📁 Inserir Grupo</h2>
+            <div id="grupoMessage" class="message"></div>
+            <form id="grupoForm" onsubmit="return handleInserirGrupo(event)">
+              <div class="form-group">
+                <label for="grupoNome">Nome do Grupo *</label>
+                <input type="text" id="grupoNome" required>
+              </div>
+              <div class="btn-group">
+                <button type="submit" class="btn btn-success">✓ Adicionar Grupo</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Localizar Produto Module -->
+        <div id="module-localizar-produto" class="module-container">
+          <div class="content-card">
+            <h2>🔍 Localizar Produto</h2>
+            <div id="localizarMessage" class="message"></div>
+            <form id="localizarForm" onsubmit="return handleLocalizarProduto(event)">
+              <div class="form-group">
+                <label for="localizarItem">Nome do Produto *</label>
+                <input type="text" id="localizarItem" list="localizarItemList" required>
+                <datalist id="localizarItemList"></datalist>
+              </div>
+              <div class="btn-group">
+                <button type="submit" class="btn btn-primary">🔍 Buscar</button>
+                <button type="button" class="btn btn-warning" onclick="showAllProducts()">📋 Mostrar Todos</button>
+              </div>
+            </form>
+            <div id="localizarResults" class="table-container" style="display: none;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 1rem;">
+                <h3 style="margin: 0;">Resultados da Busca (<span id="totalResults">0</span> registros)</h3>
+                <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                  <label for="printDataInicio" style="margin: 0;">Período:</label>
+                  <input type="date" id="printDataInicio" style="padding: 0.5rem;">
+                  <span>até</span>
+                  <input type="date" id="printDataFim" style="padding: 0.5rem;">
+                  <button class="btn btn-success" onclick="printResults(true)" style="padding: 0.5rem 1rem;">🖨️ Imprimir Período</button>
+                  <button class="btn btn-primary" onclick="printResults(false)" style="padding: 0.5rem 1rem;">🖨️ Imprimir Tudo</button>
+                </div>
+              </div>
+              <div id="localizarTableContainer"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Listagem de Estoque Module -->
+        <div id="module-listagem-estoque" class="module-container">
+          <div class="content-card">
+            <h2>📋 Listagem de Estoque</h2>
+            <div id="listagemMessage" class="message"></div>
+            <form id="listagemForm" onsubmit="return handleListagemEstoque(event)">
+              <div class="form-group">
+                <label for="listagemGroup">Grupo</label>
+                <input type="text" id="listagemGroup" list="listagemGroupList">
+                <datalist id="listagemGroupList"></datalist>
+              </div>
+              <div class="form-group">
+                <label for="listagemItem">Item</label>
+                <input type="text" id="listagemItem" list="listagemItemList">
+                <datalist id="listagemItemList"></datalist>
+              </div>
+              <div class="btn-group">
+                <button type="submit" class="btn btn-primary">📊 Gerar Listagem</button>
+              </div>
+            </form>
+            <div id="listagemResults" class="table-container" style="display: none;">
+              <h3>Listagem de Estoque</h3>
+              <div id="listagemTableContainer"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Gerar Relatório Module -->
+        <div id="module-relatorio-estoque" class="module-container">
+          <div class="content-card">
+            <h2>📊 Gerar Relatório</h2>
+            <div id="relatorioMessage" class="message"></div>
+            <form id="relatorioForm" onsubmit="return handleRelatorioEstoque(event)">
+              <div class="form-group">
+                <label for="relatorioDataInicio">Data Início *</label>
+                <input type="date" id="relatorioDataInicio" required>
+              </div>
+              <div class="form-group">
+                <label for="relatorioDataFim">Data Fim *</label>
+                <input type="date" id="relatorioDataFim" required>
+              </div>
+              <div class="btn-group">
+                <button type="submit" class="btn btn-primary">📊 Gerar Relatório</button>
+              </div>
+            </form>
+            <div id="relatorioResults" class="table-container" style="display: none;">
+              <h3>Relatório de Estoque</h3>
+              <div id="relatorioTableContainer"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Relatório por Grupo Module -->
+        <div id="module-relatorio-grupo" class="module-container">
+          <div class="content-card">
+            <h2>📈 Relatório por Grupo</h2>
+            <div id="relatorioGrupoMessage" class="message"></div>
+            <form id="relatorioGrupoForm" onsubmit="return handleRelatorioPorGrupo(event)">
+              <div class="form-group">
+                <label for="relatorioGrupoSelect">Grupo *</label>
+                <select id="relatorioGrupoSelect" required>
+                  <option value="">Selecione um grupo...</option>
+                </select>
+              </div>
+              <div class="btn-group">
+                <button type="submit" class="btn btn-primary">📊 Gerar Relatório</button>
+              </div>
+            </form>
+            <div id="relatorioGrupoResults" class="table-container" style="display: none;">
+              <h3>Relatório por Grupo</h3>
+              <div id="relatorioGrupoTableContainer"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Estoque por Período Module -->
+        <div id="module-estoque-periodo" class="module-container">
+          <div class="content-card">
+            <h2>📅 Estoque por Período</h2>
+            <div id="estoquePeriodoMessage" class="message"></div>
+            <form id="estoquePeriodoForm" onsubmit="return handleEstoquePorPeriodo(event)">
+              <div class="form-group">
+                <label for="periodoDataInicio">Data Início *</label>
+                <input type="date" id="periodoDataInicio" required>
+              </div>
+              <div class="form-group">
+                <label for="periodoDataFim">Data Fim *</label>
+                <input type="date" id="periodoDataFim" required>
+              </div>
+              <div class="btn-group">
+                <button type="submit" class="btn btn-primary">📊 Filtrar</button>
+              </div>
+            </form>
+            <div id="estoquePeriodoResults" class="table-container" style="display: none;">
+              <h3>Estoque no Período</h3>
+              <div id="estoquePeriodoTableContainer"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Estoque 3 Meses Module -->
+        <div id="module-estoque-3-meses" class="module-container">
+          <div class="content-card">
+            <h2>📦 Estoque 3 Meses</h2>
+            <div id="estoque3MesesMessage" class="message"></div>
+            <div class="btn-group">
+              <button class="btn btn-primary" onclick="handleEstoque3Meses()">📊 Gerar Relatório (Últimos 3 Meses)</button>
+            </div>
+            <div id="estoque3MesesResults" class="table-container" style="display: none;">
+              <h3>Estoque dos Últimos 3 Meses</h3>
+              <div id="estoque3MesesTableContainer"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cores Desatualizadas Module -->
+        <div id="module-cores-desatualizadas" class="module-container">
+          <div class="content-card">
+            <h2>🎨 Cores Desatualizadas</h2>
+            <div id="coresMessage" class="message"></div>
+            <form id="coresForm" onsubmit="return handleCoresDesatualizadas(event)">
+              <div class="form-group">
+                <label for="coresMesesAtras">Meses Atrás</label>
+                <input type="number" id="coresMesesAtras" value="3" min="1" max="12">
+              </div>
+              <div class="form-group">
+                <label for="coresObservacao">Observação</label>
+                <input type="text" id="coresObservacao" placeholder="Ex: TINTURA, TECELAGEM, etc.">
+              </div>
+              <div class="btn-group">
+                <button type="submit" class="btn btn-primary">🔍 Buscar Cores</button>
+              </div>
+            </form>
+            <div id="coresResults" class="table-container" style="display: none;">
+              <h3>Cores Desatualizadas</h3>
+              <div id="coresTableContainer"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Atualizar Compra de Fio Module -->
+        <div id="module-atualizar-fio" class="module-container">
+          <div class="content-card">
+            <h2>🔄 Atualizar Compra de Fio e Histórico</h2>
+            <div id="atualizarFioMessage" class="message"></div>
+            <p>Esta função atualiza as informações de compra de fio e histórico na planilha.</p>
+            <div class="btn-group">
+              <button class="btn btn-warning" onclick="handleAtualizarFio()">🔄 Atualizar Agora</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Atualizar Total Embarcado Module -->
+        <div id="module-atualizar-embarcado" class="module-container">
+          <div class="content-card">
+            <h2>🚢 Atualizar Total Embarcado</h2>
+            <div id="atualizarEmbarcadoMessage" class="message"></div>
+            <p>Esta função atualiza o total embarcado na planilha.</p>
+            <div class="btn-group">
+              <button class="btn btn-warning" onclick="handleAtualizarEmbarcado()">🚢 Atualizar Agora</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Apagar Última Linha Module -->
+        <div id="module-apagar-linha" class="module-container">
+          <div class="content-card">
+            <h2>🗑️ Apagar Última Linha</h2>
+            <div id="apagarLinhaMessage" class="message"></div>
+            <p style="color: var(--danger-color); font-weight: bold;">⚠️ Atenção: Esta ação não pode ser desfeita!</p>
+            <div class="btn-group">
+              <button class="btn btn-danger" onclick="handleApagarLinha()">🗑️ Apagar Última Linha</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Limpar Filtro Module -->
+        <div id="module-limpar-filtro" class="module-container">
+          <div class="content-card">
+            <h2>🔄 Limpar Filtro</h2>
+            <div id="limparFiltroMessage" class="message"></div>
+            <p>Remove todos os filtros aplicados na aba ESTOQUE.</p>
+            <div class="btn-group">
+              <button class="btn btn-warning" onclick="handleLimparFiltro()">🔄 Limpar Filtro</button>
+            </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <script>
+    // Global variables
+    let currentUser = null;
+    let autocompleteData = null;
+    let allEstoqueData = null; // Armazena TODOS os dados do estoque para filtros instantâneos
+    let estoqueHeaders = null;
+
+    // Initialize app
+    window.onload = function() {
+      // Check if user is already logged in (for development)
+      // In production, this would check a session
+    };
+
+    // Login handler
+    function handleLogin(event) {
+      event.preventDefault();
+      const username = document.getElementById('loginUser').value;
+      const password = document.getElementById('loginPassword').value;
+
+      showLoading(true);
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showLoading(false);
+          if (result.success) {
+            currentUser = result.user;
+            document.getElementById('userName').textContent = currentUser;
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('mainApp').style.display = 'block';
+            loadDashboardData();
+            loadAutocompleteData();
+            // loadAllEstoqueData(); // REMOVIDO - agora busca direto da planilha sempre
+          } else {
+            showMessage('loginMessage', result.message || 'Login falhou', 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showLoading(false);
+          showMessage('loginMessage', 'Erro ao fazer login: ' + error.message, 'error');
+        })
+        .loginUser(username, password);
+
+      return false;
+    }
+
+    // Logout handler
+    function handleLogout() {
+      if (confirm('Deseja realmente sair?')) {
+        google.script.run
+          .withSuccessHandler(function() {
+            location.reload();
+          })
+          .logoutUser();
+      }
+    }
+
+    // Show loading
+    function showLoading(show) {
+      const forms = document.querySelectorAll('form');
+      const loadings = document.querySelectorAll('.loading');
+
+      forms.forEach(form => form.style.display = show ? 'none' : 'block');
+      loadings.forEach(loading => loading.classList.toggle('show', show));
+    }
+
+    // Show message
+    function showMessage(elementId, message, type) {
+      const msgElement = document.getElementById(elementId);
+      msgElement.textContent = message;
+      msgElement.className = 'message ' + type + ' show';
+      setTimeout(() => msgElement.classList.remove('show'), 5000);
+    }
+
+    // Toggle sidebar
+    function toggleSidebar() {
+      const sidebar = document.getElementById('sidebar');
+      const mainContent = document.getElementById('mainContent');
+      const toggleBtn = document.querySelector('.sidebar-toggle');
+
+      sidebar.classList.toggle('hidden');
+      mainContent.classList.toggle('expanded');
+      toggleBtn.classList.toggle('shifted');
+
+      // Altera o texto do botão
+      if (sidebar.classList.contains('hidden')) {
+        toggleBtn.innerHTML = '☰ Mostrar Menu';
+      } else {
+        toggleBtn.innerHTML = '✕ Esconder Menu';
+      }
+    }
+
+    // Show module
+    function showModule(moduleName) {
+      // Hide all modules
+      document.querySelectorAll('.module-container').forEach(module => {
+        module.classList.remove('active');
+      });
+
+      // Show selected module
+      document.getElementById('module-' + moduleName).classList.add('active');
+
+      // Update sidebar active state
+      document.querySelectorAll('.sidebar nav a').forEach(link => {
+        link.classList.remove('active');
+      });
+      document.querySelector('[data-module="' + moduleName + '"]').classList.add('active');
+
+      // Hide sidebar on mobile or when needed
+      if (window.innerWidth <= 768) {
+        const sidebar = document.getElementById('sidebar');
+        const mainContent = document.getElementById('mainContent');
+        const toggleBtn = document.querySelector('.sidebar-toggle');
+
+        sidebar.classList.add('hidden');
+        mainContent.classList.add('expanded');
+        toggleBtn.innerHTML = '☰ Mostrar Menu';
+      }
+    }
+
+    // Load dashboard data
+    function loadDashboardData() {
+      google.script.run
+        .withSuccessHandler(function(data) {
+          document.getElementById('totalItems').textContent = data.totalItems || '-';
+          document.getElementById('totalGroups').textContent = data.totalGroups || '-';
+          document.getElementById('recentEntries').textContent = data.recentEntries || '-';
+          document.getElementById('recentExits').textContent = data.recentExits || '-';
+        })
+        .withFailureHandler(function(error) {
+          console.error('Erro ao carregar dashboard:', error);
+        })
+        .getDashboardData();
+    }
+
+    // Load autocomplete data
+    function loadAutocompleteData() {
+      google.script.run
+        .withSuccessHandler(function(data) {
+          autocompleteData = data;
+          populateAutocomplete('itemList', data.items);
+          populateAutocomplete('groupList', data.groups);
+          populateAutocomplete('nfList', data.nfs);
+          populateAutocomplete('localizarItemList', data.items);
+          populateAutocomplete('listagemGroupList', data.groups);
+          populateAutocomplete('listagemItemList', data.items);
+          populateSelect('relatorioGrupoSelect', data.groups);
+
+          // Popula selects de Unidade de Medida e Observação
+          populateSelect('estoqueUnidade', data.medidas || []);
+          populateSelect('estoqueObs', data.observacoes || []);
+        })
+        .withFailureHandler(function(error) {
+          console.error('Erro ao carregar autocomplete:', error);
+        })
+        .getAllAutocompleteData();
+    }
+
+    // Toggle valor unitário visibility based on rules
+    function toggleValorUnitario() {
+      const entrada = parseFloat(document.getElementById('estoqueEntrada').value) || 0;
+      const saida = parseFloat(document.getElementById('estoqueSaida').value) || 0;
+      const obs = document.getElementById('estoqueObs').value.toUpperCase();
+      const valorGroup = document.getElementById('valorUnitarioGroup');
+      const valorInput = document.getElementById('estoqueValorUnitario');
+
+      // Regra: Valor unitário obrigatório SE entrada > 0 E obs ≠ "ATUALIZAÇÃO"
+      if (entrada > 0 && obs !== 'ATUALIZAÇÃO') {
+        valorGroup.style.display = 'block';
+        valorInput.required = true;
+      } else {
+        valorGroup.style.display = 'none';
+        valorInput.required = false;
+        valorInput.value = ''; // Limpa o valor
+      }
+    }
+
+    // Show product history when item is typed (busca no servidor)
+    let historyTimeout;
+    function showProductHistory(item) {
+      if (!item || item.trim() === '') {
+        document.getElementById('estoqueHistorico').style.display = 'none';
+        return;
+      }
+
+      // Debounce - aguarda 800ms após usuário parar de digitar
+      clearTimeout(historyTimeout);
+      historyTimeout = setTimeout(function() {
+        // Busca histórico do produto no servidor
+        google.script.run
+          .withSuccessHandler(function(result) {
+            if (result.success && result.data && result.data.rows.length > 0) {
+              // Mostra apenas os últimos 10 registros
+              const limitedRows = result.data.rows.slice(0, 10);
+              const limitedColors = result.data.colors.slice(0, 10);
+
+              displayTable('estoqueHistoricoContent', {
+                headers: result.data.headers,
+                rows: limitedRows,
+                colors: limitedColors
+              });
+
+              document.getElementById('estoqueHistorico').style.display = 'block';
+            } else {
+              document.getElementById('estoqueHistorico').style.display = 'none';
+            }
+          })
+          .withFailureHandler(function(error) {
+            console.error('Erro ao buscar histórico:', error);
+            document.getElementById('estoqueHistorico').style.display = 'none';
+          })
+          .buscarProduto(item, null, null);
+      }, 800);
+    }
+
+    // Load all estoque data for instant client-side filtering
+    function loadAllEstoqueData(showFeedback) {
+      console.log('=== loadAllEstoqueData INICIADO ===');
+      console.log('ShowFeedback:', showFeedback);
+
+      // Mostra indicador de carregamento sempre
+      const statusMsg = document.createElement('div');
+      statusMsg.id = 'dataLoadingStatus';
+      statusMsg.style.cssText = 'position:fixed;top:80px;right:20px;background:#2196f3;color:white;padding:10px 20px;border-radius:4px;box-shadow:0 2px 5px rgba(0,0,0,0.3);z-index:9999;font-size:14px;';
+      statusMsg.textContent = '🔄 Carregando dados do estoque...';
+      document.body.appendChild(statusMsg);
+
+      console.log('Chamando google.script.run.carregarTodosOsDadosEstoque()...');
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          console.log('SUCCESS Handler chamado');
+          console.log('Result:', result);
+
+          if (result && result.success) {
+            allEstoqueData = result.data;
+            estoqueHeaders = result.headers;
+            console.log('✅ Dados do estoque carregados com sucesso!');
+            console.log('Total de registros: ' + (allEstoqueData ? allEstoqueData.length : 0));
+
+            const statusMsg = document.getElementById('dataLoadingStatus');
+            if (statusMsg) {
+              statusMsg.textContent = '✅ ' + allEstoqueData.length + ' registros carregados!';
+              statusMsg.style.background = '#4CAF50';
+              setTimeout(() => statusMsg.remove(), 3000);
+            }
+          } else {
+            console.error('❌ Erro retornado do servidor:', result ? result.message : 'Resposta vazia');
+
+            const statusMsg = document.getElementById('dataLoadingStatus');
+            if (statusMsg) {
+              statusMsg.textContent = '❌ Erro: ' + (result ? result.message : 'Resposta vazia');
+              statusMsg.style.background = '#f44336';
+              setTimeout(() => statusMsg.remove(), 5000);
+            }
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.error('❌ FAILURE Handler chamado');
+          console.error('Erro completo:', error);
+          console.error('Tipo de erro:', typeof error);
+          console.error('Mensagem:', error.message);
+
+          const statusMsg = document.getElementById('dataLoadingStatus');
+          if (statusMsg) {
+            statusMsg.textContent = '❌ Falha ao carregar: ' + (error.message || error);
+            statusMsg.style.background = '#f44336';
+            setTimeout(() => statusMsg.remove(), 5000);
+          }
+
+          // Alerta para o usuário
+          alert('Erro ao carregar dados do estoque:\n\n' + (error.message || error) + '\n\nVerifique as permissões do script e tente novamente.');
+        })
+        .carregarTodosOsDadosEstoque();
+
+      console.log('Chamada ao servidor enviada. Aguardando resposta...');
+    }
+
+    // Normalize string for search (remove accents, lowercase)
+    function normalizeString(str) {
+      if (!str) return '';
+      return str.toString()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+    }
+
+    // Client-side filter function (INSTANT!)
+    function filterEstoqueData(itemFilter, dataInicio, dataFim) {
+      if (!allEstoqueData) {
+        console.error('Dados do estoque ainda não foram carregados');
+        return { success: false, message: 'Dados ainda não carregados. Aguarde...' };
+      }
+
+      const itemNormalized = normalizeString(itemFilter);
+      let results = [];
+
+      // Filtra por item e data
+      for (let i = 0; i < allEstoqueData.length; i++) {
+        const record = allEstoqueData[i];
+        const currentItem = normalizeString(record.row[1]); // Coluna Item
+
+        // Verifica se o item corresponde (se filtro foi fornecido)
+        if (itemFilter && itemFilter.trim() !== '' && currentItem.indexOf(itemNormalized) < 0) {
+          continue;
+        }
+
+        // Verifica filtro de data
+        if (dataInicio && dataFim) {
+          const recordDate = new Date(record.date);
+          const inicio = new Date(dataInicio);
+          const fim = new Date(dataFim);
+          inicio.setHours(0, 0, 0, 0);
+          fim.setHours(23, 59, 59, 999);
+
+          if (recordDate < inicio || recordDate > fim) {
+            continue; // Pula este registro
+          }
+        }
+
+        results.push(record);
+      }
+
+      if (results.length === 0) {
+        return { success: false, message: 'Nenhum resultado encontrado' };
+      }
+
+      // Ordena do mais novo para o mais antigo
+      results.sort(function(a, b) {
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
+      });
+
+      // Prepara o resultado no formato esperado
+      const rows = [];
+      const colors = [];
+      for (let j = 0; j < results.length; j++) {
+        rows.push(results[j].row);
+        colors.push(results[j].background);
+      }
+
+      return {
+        success: true,
+        data: {
+          headers: estoqueHeaders,
+          rows: rows,
+          colors: colors
+        }
+      };
+    }
+
+    // Populate autocomplete datalist
+    function populateAutocomplete(datalistId, items) {
+      const datalist = document.getElementById(datalistId);
+      datalist.innerHTML = '';
+      items.forEach(item => {
+        const option = document.createElement('option');
+        option.value = item;
+        datalist.appendChild(option);
+      });
+    }
+
+    // Populate select
+    function populateSelect(selectId, items) {
+      const select = document.getElementById(selectId);
+      const firstOption = select.options[0];
+      select.innerHTML = '';
+      select.appendChild(firstOption);
+      items.forEach(item => {
+        const option = document.createElement('option');
+        option.value = item;
+        option.textContent = item;
+        select.appendChild(option);
+      });
+    }
+
+    // Auto-fill group when item is selected
+    document.addEventListener('DOMContentLoaded', function() {
+      const itemInput = document.getElementById('estoqueItem');
+      if (itemInput) {
+        // Auto-fill group when item changes
+        itemInput.addEventListener('change', function() {
+          const item = this.value;
+          if (item) {
+            google.script.run
+              .withSuccessHandler(function(result) {
+                if (result.lastGroup) {
+                  document.getElementById('estoqueGroup').value = result.lastGroup;
+                }
+              })
+              .getLastRegistration(item, 0);
+
+            // Show product history
+            showProductHistory(item);
+          }
+        });
+
+        // Show history as user types (with debounce)
+        let typingTimer;
+        itemInput.addEventListener('input', function() {
+          clearTimeout(typingTimer);
+          const item = this.value;
+          typingTimer = setTimeout(function() {
+            if (item && item.length >= 3) {
+              showProductHistory(item);
+            } else {
+              document.getElementById('estoqueHistorico').style.display = 'none';
+            }
+          }, 500); // Wait 500ms after user stops typing
+        });
+      }
+
+      // Toggle valor unitário when observação changes
+      const obsSelect = document.getElementById('estoqueObs');
+      if (obsSelect) {
+        obsSelect.addEventListener('change', toggleValorUnitario);
+      }
+    });
+
+    // Handle Inserir Estoque
+    function handleInserirEstoque(event) {
+      event.preventDefault();
+
+      const formData = {
+        item: document.getElementById('estoqueItem').value,
+        group: document.getElementById('estoqueGroup').value,
+        nf: document.getElementById('estoqueNF').value,
+        unidade: document.getElementById('estoqueUnidade').value,
+        obs: document.getElementById('estoqueObs').value,
+        entrada: document.getElementById('estoqueEntrada').value,
+        saida: document.getElementById('estoqueSaida').value,
+        valorUnitario: document.getElementById('estoqueValorUnitario').value
+      };
+
+      // Validation
+      const entrada = parseFloat(formData.entrada) || 0;
+      const saida = parseFloat(formData.saida) || 0;
+
+      if (entrada > 0 && saida > 0) {
+        showMessage('estoqueMessage', 'Não é possível ter entrada e saída ao mesmo tempo.', 'error');
+        return false;
+      }
+
+      if (entrada === 0 && saida === 0) {
+        showMessage('estoqueMessage', 'Informe uma entrada ou saída.', 'error');
+        return false;
+      }
+
+      // Validação de valor unitário (regra: obrigatório se entrada > 0 E obs ≠ "ATUALIZAÇÃO")
+      const valorUnitario = parseFloat(formData.valorUnitario) || 0;
+      if (entrada > 0 && formData.obs.toUpperCase() !== 'ATUALIZAÇÃO' && valorUnitario <= 0) {
+        showMessage('estoqueMessage', 'Valor unitário é obrigatório para entradas (exceto quando Obs = ATUALIZAÇÃO).', 'error');
+        return false;
+      }
+
+      // Warning for entrada > 0
+      if (entrada > 0) {
+        if (!confirm('⚠️ ATENÇÃO!\n\nVocê está registrando uma ENTRADA no estoque.\n\nCertifique-se de ATUALIZAR o inventário físico para evitar discrepâncias.\n\nDeseja continuar?')) {
+          return false;
+        }
+      }
+
+      showLoading(true);
+
+      // Guarda o item para buscar histórico depois
+      const itemInserido = formData.item;
+      const entradaValor = entrada;
+      const saidaValor = saida;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showLoading(false);
+          if (result.success) {
+            loadDashboardData();
+            loadAutocompleteData();
+
+            // Mostra mensagem de sucesso na área de resultados
+            const tipoMov = entradaValor > 0 ? 'ENTRADA' : 'SAÍDA';
+            const qtdMov = entradaValor > 0 ? entradaValor : saidaValor;
+            document.getElementById('estoqueResultMessage').innerHTML =
+              '<strong>' + tipoMov + '</strong> de <strong>' + qtdMov + '</strong> unidade(s) do item <strong>' + itemInserido + '</strong> registrada com sucesso!';
+
+            // Busca histórico atualizado do item no servidor
+            google.script.run
+              .withSuccessHandler(function(histResult) {
+                if (histResult.success && histResult.data) {
+                  displayTable('estoqueResultTable', histResult.data);
+                } else {
+                  document.getElementById('estoqueResultTable').innerHTML = '<p>Nenhum histórico encontrado.</p>';
+                }
+              })
+              .withFailureHandler(function(err) {
+                document.getElementById('estoqueResultTable').innerHTML = '<p>Erro ao carregar histórico.</p>';
+              })
+              .buscarProduto(itemInserido, null, null);
+
+            // Esconde formulário e mostra resultados
+            document.getElementById('estoqueFormArea').style.display = 'none';
+            document.getElementById('estoqueResultArea').style.display = 'block';
+            resetEstoqueForm();
+          } else {
+            showMessage('estoqueMessage', result.message || 'Erro ao inserir estoque', 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showLoading(false);
+          showMessage('estoqueMessage', 'Erro: ' + error.message, 'error');
+        })
+        .processEstoqueWebApp(formData);
+
+      return false;
+    }
+
+    // Reset estoque form
+    function resetEstoqueForm() {
+      document.getElementById('estoqueForm').reset();
+      document.getElementById('estoqueEntrada').value = '0';
+      document.getElementById('estoqueSaida').value = '0';
+      document.getElementById('estoqueValorUnitario').value = '';
+      document.getElementById('valorUnitarioGroup').style.display = 'none';
+      document.getElementById('estoqueHistorico').style.display = 'none';
+      document.getElementById('estoqueItem').focus();
+    }
+
+    // Volta da área de resultados para o formulário de inserção
+    function voltarParaFormulario() {
+      document.getElementById('estoqueResultArea').style.display = 'none';
+      document.getElementById('estoqueFormArea').style.display = 'block';
+      document.getElementById('estoqueItem').focus();
+    }
+
+    // Handle Inserir Grupo
+    function handleInserirGrupo(event) {
+      event.preventDefault();
+
+      const grupo = document.getElementById('grupoNome').value;
+
+      showLoading(true);
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showLoading(false);
+          if (result.success) {
+            showMessage('grupoMessage', 'Grupo inserido com sucesso!', 'success');
+            document.getElementById('grupoForm').reset();
+            loadAutocompleteData();
+          } else {
+            showMessage('grupoMessage', result.message || 'Erro ao inserir grupo', 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showLoading(false);
+          showMessage('grupoMessage', 'Erro: ' + error.message, 'error');
+        })
+        .insertGroup(grupo);
+
+      return false;
+    }
+
+    // Handle Localizar Produto (SERVER-SIDE - dados completos direto da planilha)
+    function handleLocalizarProduto(event) {
+      event.preventDefault();
+
+      const item = document.getElementById('localizarItem').value;
+
+      if (!item || item.trim() === '') {
+        showMessage('localizarMessage', 'Por favor, informe um item para buscar', 'warning');
+        return false;
+      }
+
+      showMessage('localizarMessage', '🔍 Buscando...', 'info');
+      document.getElementById('localizarResults').style.display = 'none';
+
+      // Busca completa no servidor (todos os registros da planilha)
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success && result.data) {
+            displayTable('localizarTableContainer', result.data);
+            document.getElementById('localizarResults').style.display = 'block';
+            document.getElementById('totalResults').textContent = result.data.rows.length;
+            showMessage('localizarMessage', '✅ ' + result.data.rows.length + ' registros encontrados', 'success');
+          } else {
+            showMessage('localizarMessage', result.message || 'Nenhum resultado encontrado', 'warning');
+            document.getElementById('localizarResults').style.display = 'none';
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('localizarMessage', 'Erro ao buscar: ' + error.message, 'error');
+        })
+        .buscarProduto(item, null, null);
+
+      return false;
+    }
+
+    // Show all products (CLIENT-SIDE - INSTANT!)
+    function showAllProducts() {
+      // Filtra no lado do cliente sem filtro de item (mostra tudo)
+      const result = filterEstoqueData('', null, null);
+
+      if (result.success && result.data) {
+        displayTable('localizarTableContainer', result.data);
+        document.getElementById('localizarResults').style.display = 'block';
+        document.getElementById('totalResults').textContent = result.data.rows.length;
+      } else {
+        showMessage('localizarMessage', result.message || 'Erro ao buscar produtos', 'error');
+      }
+    }
+
+    // Print results (CLIENT-SIDE - INSTANT!)
+    function printResults(filterByDate) {
+      const item = document.getElementById('localizarItem').value;
+
+      if (filterByDate) {
+        const dataInicio = document.getElementById('printDataInicio').value;
+        const dataFim = document.getElementById('printDataFim').value;
+
+        if (!dataInicio || !dataFim) {
+          alert('Por favor, selecione o período para impressão.');
+          return;
+        }
+
+        // Filtra no lado do cliente com data (INSTANTÂNEO!)
+        const result = filterEstoqueData(item, dataInicio, dataFim);
+
+        if (result.success && result.data) {
+          displayTable('localizarTableContainer', result.data);
+          document.getElementById('totalResults').textContent = result.data.rows.length;
+          setTimeout(() => window.print(), 500);
+        } else {
+          showMessage('localizarMessage', 'Nenhum resultado no período selecionado', 'warning');
+        }
+      } else {
+        // Imprime tudo que está sendo exibido
+        setTimeout(() => window.print(), 100);
+      }
+    }
+
+    // Handle Listagem Estoque
+    function handleListagemEstoque(event) {
+      event.preventDefault();
+
+      const formData = {
+        group: document.getElementById('listagemGroup').value,
+        item: document.getElementById('listagemItem').value
+      };
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success && result.data) {
+            displayTable('listagemTableContainer', result.data);
+            document.getElementById('listagemResults').style.display = 'block';
+          } else {
+            showMessage('listagemMessage', result.message || 'Nenhum resultado encontrado', 'warning');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('listagemMessage', 'Erro: ' + error.message, 'error');
+        })
+        .gerarListagemEstoqueWebApp(formData);
+
+      return false;
+    }
+
+    // Handle Relatório Estoque
+    function handleRelatorioEstoque(event) {
+      event.preventDefault();
+
+      const dataInicio = document.getElementById('relatorioDataInicio').value;
+      const dataFim = document.getElementById('relatorioDataFim').value;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success && result.data) {
+            displayTable('relatorioTableContainer', result.data);
+            document.getElementById('relatorioResults').style.display = 'block';
+          } else {
+            showMessage('relatorioMessage', result.message || 'Nenhum resultado encontrado', 'warning');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('relatorioMessage', 'Erro: ' + error.message, 'error');
+        })
+        .gerarRelatorioEstoqueWebApp(dataInicio, dataFim);
+
+      return false;
+    }
+
+    // Handle Relatório por Grupo
+    function handleRelatorioPorGrupo(event) {
+      event.preventDefault();
+
+      const grupo = document.getElementById('relatorioGrupoSelect').value;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success && result.data) {
+            displayTable('relatorioGrupoTableContainer', result.data);
+            document.getElementById('relatorioGrupoResults').style.display = 'block';
+          } else {
+            showMessage('relatorioGrupoMessage', result.message || 'Nenhum resultado encontrado', 'warning');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('relatorioGrupoMessage', 'Erro: ' + error.message, 'error');
+        })
+        .gerarRelatorioPorGrupoWebApp(grupo);
+
+      return false;
+    }
+
+    // Handle Estoque por Período
+    function handleEstoquePorPeriodo(event) {
+      event.preventDefault();
+
+      const dataInicio = document.getElementById('periodoDataInicio').value;
+      const dataFim = document.getElementById('periodoDataFim').value;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showMessage('estoquePeriodoMessage', 'Filtro aplicado com sucesso! Verifique a planilha.', 'success');
+          } else {
+            showMessage('estoquePeriodoMessage', result.message || 'Erro ao filtrar', 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('estoquePeriodoMessage', 'Erro: ' + error.message, 'error');
+        })
+        .filtrarEstoquePorPeriodo(dataInicio, dataFim);
+
+      return false;
+    }
+
+    // Handle Estoque 3 Meses
+    function handleEstoque3Meses() {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success && result.data) {
+            displayTable('estoque3MesesTableContainer', result.data);
+            document.getElementById('estoque3MesesResults').style.display = 'block';
+          } else {
+            showMessage('estoque3MesesMessage', result.message || 'Nenhum resultado encontrado', 'warning');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('estoque3MesesMessage', 'Erro: ' + error.message, 'error');
+        })
+        .getEstoque3Meses();
+    }
+
+    // Handle Cores Desatualizadas
+    function handleCoresDesatualizadas(event) {
+      event.preventDefault();
+
+      const formData = {
+        mesesAtras: document.getElementById('coresMesesAtras').value,
+        observacao: document.getElementById('coresObservacao').value
+      };
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success && result.data) {
+            displayTable('coresTableContainer', result.data);
+            document.getElementById('coresResults').style.display = 'block';
+          } else {
+            showMessage('coresMessage', result.message || 'Nenhum resultado encontrado', 'warning');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('coresMessage', 'Erro: ' + error.message, 'error');
+        })
+        .gerarListagemCoresDesatualizadasWebApp(formData);
+
+      return false;
+    }
+
+    // Handle Atualizar Fio
+    function handleAtualizarFio() {
+      if (!confirm('Deseja realmente atualizar a compra de fio e histórico?')) return;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showMessage('atualizarFioMessage', 'Compra de fio atualizada com sucesso!', 'success');
+          } else {
+            showMessage('atualizarFioMessage', result.message || 'Erro ao atualizar', 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('atualizarFioMessage', 'Erro: ' + error.message, 'error');
+        })
+        .atualizarCompraDeFioEHistoricoWebApp();
+    }
+
+    // Handle Atualizar Embarcado
+    function handleAtualizarEmbarcado() {
+      if (!confirm('Deseja realmente atualizar o total embarcado?')) return;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showMessage('atualizarEmbarcadoMessage', 'Total embarcado atualizado com sucesso!', 'success');
+          } else {
+            showMessage('atualizarEmbarcadoMessage', result.message || 'Erro ao atualizar', 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('atualizarEmbarcadoMessage', 'Erro: ' + error.message, 'error');
+        })
+        .atualizarTotalEmbarcadoWebApp();
+    }
+
+    // Handle Apagar Linha
+    function handleApagarLinha() {
+      if (!confirm('⚠️ ATENÇÃO!\n\nEsta ação irá apagar a última linha da planilha ESTOQUE.\n\nEsta ação NÃO PODE SER DESFEITA!\n\nDeseja continuar?')) return;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showMessage('apagarLinhaMessage', 'Última linha apagada com sucesso!', 'success');
+            loadDashboardData();
+            // loadAllEstoqueData(true); // REMOVIDO - busca direto da planilha
+            loadAutocompleteData(); // Atualiza autocomplete
+          } else {
+            showMessage('apagarLinhaMessage', result.message || 'Erro ao apagar linha', 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('apagarLinhaMessage', 'Erro: ' + error.message, 'error');
+        })
+        .apagarUltimaLinhaWebApp();
+    }
+
+    // Handle Limpar Filtro
+    function handleLimparFiltro() {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showMessage('limparFiltroMessage', 'Filtro removido com sucesso!', 'success');
+          } else {
+            showMessage('limparFiltroMessage', result.message || 'Erro ao remover filtro', 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('limparFiltroMessage', 'Erro: ' + error.message, 'error');
+        })
+        .limparFiltroEstoqueWebApp();
+    }
+
+    // Display table from data with row colors
+    function displayTable(containerId, data) {
+      const container = document.getElementById(containerId);
+
+      if (!data || !data.headers || !data.rows || data.rows.length === 0) {
+        container.innerHTML = '<p>Nenhum resultado encontrado.</p>';
+        return;
+      }
+
+      let html = '<table><thead><tr>';
+      data.headers.forEach(header => {
+        html += '<th>' + header + '</th>';
+      });
+      html += '</tr></thead><tbody>';
+
+      data.rows.forEach((row, index) => {
+        // Determina a classe CSS baseada na cor de fundo
+        let rowClass = '';
+        if (data.colors && data.colors[index]) {
+          const color = data.colors[index].toLowerCase();
+          if (color === '#ff0000' || color === 'red' || color === '#f00') {
+            rowClass = ' class="row-red"';
+          } else if (color === '#ffff00' || color === 'yellow' || color === '#ff0') {
+            rowClass = ' class="row-yellow"';
+          }
+        }
+
+        html += '<tr' + rowClass + '>';
+        row.forEach(cell => {
+          html += '<td>' + (cell !== null && cell !== undefined ? cell : '') + '</td>';
+        });
+        html += '</tr>';
+      });
+
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+  </script>
+</body>
+</html>
