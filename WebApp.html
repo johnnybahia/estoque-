@@ -1022,6 +1022,53 @@
     let allEstoqueData = null; // Armazena TODOS os dados do estoque para filtros instantâneos
     let estoqueHeaders = null;
 
+    // ========================================
+    // CACHE NO CLIENTE - localStorage
+    // ========================================
+    const CLIENT_CACHE = {
+      AUTOCOMPLETE_KEY: 'estoque_autocomplete',
+      AUTOCOMPLETE_TTL: 600000, // 10 minutos em ms
+      TIMESTAMP_KEY: 'estoque_cache_timestamp'
+    };
+
+    function getClientCache(key) {
+      try {
+        const timestamp = localStorage.getItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + key);
+        const data = localStorage.getItem(key);
+
+        if (timestamp && data) {
+          const age = Date.now() - parseInt(timestamp);
+          if (age < CLIENT_CACHE.AUTOCOMPLETE_TTL) {
+            console.log('Cache HIT (cliente): ' + key + ' (idade: ' + Math.round(age/1000) + 's)');
+            return JSON.parse(data);
+          }
+        }
+      } catch (e) {
+        console.log('Erro ao ler cache cliente:', e);
+      }
+      return null;
+    }
+
+    function setClientCache(key, data) {
+      try {
+        localStorage.setItem(key, JSON.stringify(data));
+        localStorage.setItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + key, Date.now().toString());
+        console.log('Cache salvo (cliente): ' + key);
+      } catch (e) {
+        console.log('Erro ao salvar cache cliente:', e);
+      }
+    }
+
+    function clearClientCache() {
+      try {
+        localStorage.removeItem(CLIENT_CACHE.AUTOCOMPLETE_KEY);
+        localStorage.removeItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + CLIENT_CACHE.AUTOCOMPLETE_KEY);
+        console.log('Cache cliente limpo');
+      } catch (e) {
+        console.log('Erro ao limpar cache:', e);
+      }
+    }
+
     // Initialize app
     window.onload = function() {
       // Check if user is already logged in (for development)
@@ -1149,27 +1196,50 @@
         .getDashboardData();
     }
 
-    // Load autocomplete data
+    // Load autocomplete data - OTIMIZADO com cache cliente
     function loadAutocompleteData() {
+      // Tenta usar cache do cliente primeiro (resposta instantânea)
+      const cachedData = getClientCache(CLIENT_CACHE.AUTOCOMPLETE_KEY);
+
+      if (cachedData) {
+        console.log('Usando autocomplete do cache cliente');
+        applyAutocompleteData(cachedData);
+
+        // Atualiza em background para próxima vez
+        google.script.run
+          .withSuccessHandler(function(data) {
+            setClientCache(CLIENT_CACHE.AUTOCOMPLETE_KEY, data);
+          })
+          .getAllAutocompleteData();
+        return;
+      }
+
+      // Sem cache - busca do servidor
+      console.log('Buscando autocomplete do servidor...');
       google.script.run
         .withSuccessHandler(function(data) {
           autocompleteData = data;
-          populateAutocomplete('itemList', data.items);
-          populateAutocomplete('groupList', data.groups);
-          populateAutocomplete('nfList', data.nfs);
-          populateAutocomplete('localizarItemList', data.items);
-          populateAutocomplete('listagemGroupList', data.groups);
-          populateAutocomplete('listagemItemList', data.items);
-          populateSelect('relatorioGrupoSelect', data.groups);
-
-          // Popula selects de Unidade de Medida e Observação
-          populateSelect('estoqueUnidade', data.medidas || []);
-          populateSelect('estoqueObs', data.observacoes || []);
+          applyAutocompleteData(data);
+          setClientCache(CLIENT_CACHE.AUTOCOMPLETE_KEY, data);
         })
         .withFailureHandler(function(error) {
           console.error('Erro ao carregar autocomplete:', error);
         })
         .getAllAutocompleteData();
+    }
+
+    // Aplica dados de autocomplete nos campos
+    function applyAutocompleteData(data) {
+      autocompleteData = data;
+      populateAutocomplete('itemList', data.items);
+      populateAutocomplete('groupList', data.groups);
+      populateAutocomplete('nfList', data.nfs);
+      populateAutocomplete('localizarItemList', data.items);
+      populateAutocomplete('listagemGroupList', data.groups);
+      populateAutocomplete('listagemItemList', data.items);
+      populateSelect('relatorioGrupoSelect', data.groups);
+      populateSelect('estoqueUnidade', data.medidas || []);
+      populateSelect('estoqueObs', data.observacoes || []);
     }
 
     // Toggle valor unitário visibility based on rules
@@ -1486,6 +1556,7 @@
         .withSuccessHandler(function(result) {
           showLoading(false);
           if (result.success) {
+            clearClientCache(); // Limpa cache cliente para forçar atualização
             loadDashboardData();
             loadAutocompleteData();
 

@@ -3,6 +3,178 @@
 // Funções adicionais do Web App separadas para melhor organização
 // ========================================
 
+// ========================================
+// OTIMIZAÇÕES DE CACHE - TTLs aumentados
+// ========================================
+
+/**
+ * Constantes de cache - TTLs otimizados para melhor performance
+ * TTLs maiores reduzem chamadas à planilha sem prejudicar limites do Google
+ */
+var CACHE_TTL_OPT = {
+  AUTOCOMPLETE: 600,    // 10 minutos para dados de autocomplete
+  DASHBOARD: 120,       // 2 minutos para dashboard
+  ITEM_INDEX: 300,      // 5 minutos para índice de itens
+  DEFAULT: 300          // 5 minutos padrão
+};
+
+/**
+ * getCachedDataOpt: Versão otimizada de cache com TTL maior
+ */
+function getCachedDataOpt(key, fetchFunction, ttl) {
+  ttl = ttl || CACHE_TTL_OPT.DEFAULT;
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get(key);
+
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      Logger.log("Cache parse error, regenerating: " + key);
+    }
+  }
+
+  var data = fetchFunction();
+  try {
+    var jsonData = JSON.stringify(data);
+    if (jsonData.length < 100000) {
+      cache.put(key, jsonData, ttl);
+      Logger.log("Cache saved: " + key + " (TTL: " + ttl + "s)");
+    }
+  } catch (e) {
+    Logger.log("Cache save error: " + e.message);
+  }
+
+  return data;
+}
+
+/**
+ * getDashboardDataCached: Dashboard com cache de 2 minutos
+ */
+function getDashboardDataCached() {
+  return getCachedDataOpt("dashboardData", function() {
+    return _fetchDashboardData();
+  }, CACHE_TTL_OPT.DASHBOARD);
+}
+
+function _fetchDashboardData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+  if (!sheetEstoque) {
+    return { totalItems: 0, totalGroups: 0, recentEntries: 0, recentExits: 0 };
+  }
+
+  var lastRow = sheetEstoque.getLastRow();
+  if (lastRow < 2) {
+    return { totalItems: 0, totalGroups: 0, recentEntries: 0, recentExits: 0 };
+  }
+
+  // Lê apenas colunas necessárias
+  var data = sheetEstoque.getRange(2, 1, lastRow - 1, 9).getValues();
+
+  var items = new Set();
+  var groups = new Set();
+  var todayEntries = 0;
+  var todayExits = 0;
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  for (var i = 0; i < data.length; i++) {
+    if (data[i][1]) items.add(data[i][1].toString().trim());
+    if (data[i][0]) groups.add(data[i][0].toString().trim());
+
+    var dataMovimento = new Date(data[i][3]);
+    dataMovimento.setHours(0, 0, 0, 0);
+
+    if (dataMovimento.getTime() === today.getTime()) {
+      var entrada = parseFloat(data[i][7]) || 0;
+      var saida = parseFloat(data[i][8]) || 0;
+      if (entrada > 0) todayEntries++;
+      if (saida > 0) todayExits++;
+    }
+  }
+
+  return {
+    totalItems: items.size,
+    totalGroups: groups.size,
+    recentEntries: todayEntries,
+    recentExits: todayExits
+  };
+}
+
+/**
+ * getItemIndexOpt: Índice otimizado para busca O(1)
+ */
+function getItemIndexOpt() {
+  return getCachedDataOpt("itemIndexOpt", function() {
+    return _buildItemIndexOpt();
+  }, CACHE_TTL_OPT.ITEM_INDEX);
+}
+
+function _buildItemIndexOpt() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) return {};
+
+  var lastRow = sheetEstoque.getLastRow();
+  if (lastRow < 2) return {};
+
+  var data = sheetEstoque.getRange(2, 1, lastRow - 1, 10).getDisplayValues();
+  var index = {};
+
+  for (var i = 0; i < data.length; i++) {
+    var item = data[i][1] ? data[i][1].toString().trim().toLowerCase() : null;
+    if (item) {
+      index[item] = {
+        row: i + 2,
+        group: data[i][0],
+        date: data[i][3],
+        stock: data[i][9]
+      };
+    }
+  }
+
+  Logger.log("Item index built with " + Object.keys(index).length + " entries");
+  return index;
+}
+
+/**
+ * getLastRegistrationOpt: Busca O(1) usando índice em cache
+ */
+function getLastRegistrationOpt(item) {
+  if (!item) return { lastDate: null, lastStock: 0, lastGroup: null };
+
+  var itemNormalized = item.toString().trim().toLowerCase();
+  var index = getItemIndexOpt();
+
+  if (index[itemNormalized]) {
+    var cached = index[itemNormalized];
+    return {
+      lastDate: cached.date,
+      lastStock: cached.stock,
+      lastGroup: cached.group
+    };
+  }
+
+  return { lastDate: null, lastStock: 0, lastGroup: null };
+}
+
+/**
+ * invalidateCacheOpt: Invalida caches otimizados
+ */
+function invalidateCacheOpt() {
+  var cache = CacheService.getScriptCache();
+  cache.remove("autocompleteData");
+  cache.remove("itemIndexOpt");
+  cache.remove("dashboardData");
+  Logger.log("Optimized caches invalidated");
+}
+
+// ========================================
+// FUNÇÕES ORIGINAIS DO WEB APP
+// ========================================
+
 /**
  * processEstoqueWebApp: Wrapper da função processEstoque para o Web App
  * Retorna sucesso/erro em formato JSON
@@ -83,8 +255,9 @@ function processEstoqueWebApp(formData) {
       warningMessage = "⚠️ ENTRADA DE ESTOQUE REGISTRADA!\n\nÉ NECESSÁRIO ATUALIZAR O ESTOQUE DESTE ITEM PARA EVITAR FUROS DE ESTOQUE.\n\nRealize uma contagem física e registre uma atualização completa do saldo.";
     }
 
-    // Invalida cache
+    // Invalida caches (padrão e otimizado)
     invalidateCache();
+    invalidateCacheOpt();
 
     return {
       success: true,
@@ -368,6 +541,7 @@ function apagarUltimaLinhaWebApp() {
     sheetEstoque.deleteRow(lastRow);
     backupEstoqueData();
     invalidateCache();
+    invalidateCacheOpt();
 
     return { success: true, message: "Última linha apagada com sucesso" };
   } catch (error) {
