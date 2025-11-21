@@ -168,7 +168,182 @@ function invalidateCacheOpt() {
   cache.remove("autocompleteData");
   cache.remove("itemIndexOpt");
   cache.remove("dashboardData");
+  cache.remove("itemHistoryIndex");
   Logger.log("Optimized caches invalidated");
+}
+
+// ========================================
+// ÍNDICE DE HISTÓRICO - Últimos 20 registros por item
+// ========================================
+
+/**
+ * Constante: número máximo de registros por item no índice
+ */
+var MAX_HISTORY_PER_ITEM = 20;
+
+/**
+ * getItemHistoryIndex: Retorna o índice de histórico completo do cache ou reconstrói
+ * O índice contém os últimos 20 registros de cada item para acesso instantâneo
+ */
+function getItemHistoryIndex() {
+  return getCachedDataOpt("itemHistoryIndex", function() {
+    return _buildItemHistoryIndex();
+  }, CACHE_TTL_OPT.ITEM_INDEX);
+}
+
+/**
+ * _buildItemHistoryIndex: Constrói o índice de histórico com últimos 20 registros por item
+ * Estrutura: { "item_normalizado": { info: {...}, history: [{row, date, background}, ...] } }
+ */
+function _buildItemHistoryIndex() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) return {};
+
+  var lastRow = sheetEstoque.getLastRow();
+  if (lastRow < 2) return {};
+
+  // Lê todos os dados de uma vez (mais eficiente)
+  var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, 13);
+  var data = dataRange.getDisplayValues();
+  var backgrounds = dataRange.getBackgrounds();
+
+  var index = {};
+
+  // Processa todos os registros
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    var itemOriginal = row[1] ? row[1].toString().trim() : null;
+    if (!itemOriginal) continue;
+
+    var itemKey = itemOriginal.toLowerCase();
+    var dateStr = row[3]; // Coluna D (Data)
+    var rowDate = dateStr ? new Date(dateStr) : new Date(0);
+    var background = backgrounds[i][0] || null; // Cor de fundo da linha
+
+    // Inicializa o item no índice se não existir
+    if (!index[itemKey]) {
+      index[itemKey] = {
+        info: {
+          item: itemOriginal,
+          group: row[0],
+          lastDate: dateStr,
+          lastStock: row[9], // Coluna J (Saldo)
+          unidade: row[2]    // Coluna C (Unidade)
+        },
+        history: []
+      };
+    }
+
+    // Adiciona ao histórico
+    index[itemKey].history.push({
+      row: row,
+      date: rowDate.getTime(),
+      background: background
+    });
+
+    // Atualiza info se este registro é mais recente
+    var currentLastDate = new Date(index[itemKey].info.lastDate);
+    if (rowDate > currentLastDate) {
+      index[itemKey].info.lastDate = dateStr;
+      index[itemKey].info.lastStock = row[9];
+      index[itemKey].info.group = row[0];
+      index[itemKey].info.unidade = row[2];
+    }
+  }
+
+  // Para cada item, ordena por data (mais recente primeiro) e limita a 20 registros
+  var itemCount = 0;
+  for (var key in index) {
+    index[key].history.sort(function(a, b) {
+      return b.date - a.date;
+    });
+
+    // Limita ao máximo de registros
+    if (index[key].history.length > MAX_HISTORY_PER_ITEM) {
+      index[key].history = index[key].history.slice(0, MAX_HISTORY_PER_ITEM);
+    }
+    itemCount++;
+  }
+
+  Logger.log("Item history index built: " + itemCount + " items with up to " + MAX_HISTORY_PER_ITEM + " records each");
+  return index;
+}
+
+/**
+ * getItemHistory: Retorna o histórico dos últimos 20 registros de um item específico
+ * @param {string} item - Nome do item para buscar
+ * @return {object} - { success, data: { headers, rows, colors }, info: { lastDate, lastStock, group } }
+ */
+function getItemHistory(item) {
+  if (!item || item.trim() === '') {
+    return { success: false, message: "Item não informado" };
+  }
+
+  var itemKey = item.toString().trim().toLowerCase();
+  var index = getItemHistoryIndex();
+
+  if (!index[itemKey]) {
+    return { success: false, message: "Item não encontrado no índice" };
+  }
+
+  var itemData = index[itemKey];
+  var headers = ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"];
+  var rows = [];
+  var colors = [];
+
+  for (var i = 0; i < itemData.history.length; i++) {
+    rows.push(itemData.history[i].row);
+    colors.push(itemData.history[i].background);
+  }
+
+  return {
+    success: true,
+    data: {
+      headers: headers,
+      rows: rows,
+      colors: colors
+    },
+    info: itemData.info
+  };
+}
+
+/**
+ * getItemHistoryForClient: Versão otimizada para retornar índice parcial ao cliente
+ * Retorna apenas itens que correspondem à busca parcial (para autocomplete inteligente)
+ * @param {string} searchTerm - Termo de busca parcial
+ * @param {number} limit - Limite de itens a retornar (default 50)
+ */
+function getItemHistoryForClient(searchTerm, limit) {
+  limit = limit || 50;
+  var index = getItemHistoryIndex();
+  var result = {};
+  var count = 0;
+
+  var searchNormalized = searchTerm ? searchTerm.toString().trim().toLowerCase() : '';
+
+  for (var key in index) {
+    if (searchNormalized === '' || key.indexOf(searchNormalized) >= 0) {
+      result[key] = index[key];
+      count++;
+      if (count >= limit) break;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * preloadItemHistoryIndex: Pré-carrega o índice de histórico (chamado após login)
+ * Útil para garantir que o cache está pronto antes do primeiro uso
+ */
+function preloadItemHistoryIndex() {
+  var startTime = new Date().getTime();
+  var index = getItemHistoryIndex();
+  var elapsed = new Date().getTime() - startTime;
+  var itemCount = Object.keys(index).length;
+  Logger.log("Item history index preloaded: " + itemCount + " items in " + elapsed + "ms");
+  return { success: true, itemCount: itemCount, loadTime: elapsed };
 }
 
 // ========================================

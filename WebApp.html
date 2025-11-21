@@ -1027,9 +1027,14 @@
     // ========================================
     const CLIENT_CACHE = {
       AUTOCOMPLETE_KEY: 'estoque_autocomplete',
+      HISTORY_INDEX_KEY: 'estoque_history_index',
       AUTOCOMPLETE_TTL: 600000, // 10 minutos em ms
+      HISTORY_INDEX_TTL: 300000, // 5 minutos em ms
       TIMESTAMP_KEY: 'estoque_cache_timestamp'
     };
+
+    // Índice de histórico em memória (cache RAM para acesso instantâneo)
+    let itemHistoryIndex = null;
 
     function getClientCache(key) {
       try {
@@ -1063,10 +1068,157 @@
       try {
         localStorage.removeItem(CLIENT_CACHE.AUTOCOMPLETE_KEY);
         localStorage.removeItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + CLIENT_CACHE.AUTOCOMPLETE_KEY);
+        localStorage.removeItem(CLIENT_CACHE.HISTORY_INDEX_KEY);
+        localStorage.removeItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + CLIENT_CACHE.HISTORY_INDEX_KEY);
+        itemHistoryIndex = null; // Limpa cache em memória também
         console.log('Cache cliente limpo');
       } catch (e) {
         console.log('Erro ao limpar cache:', e);
       }
+    }
+
+    // ========================================
+    // ÍNDICE DE HISTÓRICO - Últimos 20 registros por item
+    // ========================================
+
+    /**
+     * Carrega o índice de histórico (cache localStorage -> cache memória -> servidor)
+     * Este índice contém os últimos 20 registros de cada item para acesso INSTANTÂNEO
+     */
+    function loadItemHistoryIndex() {
+      // 1. Tenta cache em memória (mais rápido)
+      if (itemHistoryIndex && Object.keys(itemHistoryIndex).length > 0) {
+        console.log('Índice histórico: usando cache em memória');
+        return;
+      }
+
+      // 2. Tenta localStorage
+      try {
+        const timestamp = localStorage.getItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + CLIENT_CACHE.HISTORY_INDEX_KEY);
+        const data = localStorage.getItem(CLIENT_CACHE.HISTORY_INDEX_KEY);
+
+        if (timestamp && data) {
+          const age = Date.now() - parseInt(timestamp);
+          if (age < CLIENT_CACHE.HISTORY_INDEX_TTL) {
+            itemHistoryIndex = JSON.parse(data);
+            console.log('Índice histórico: carregado do localStorage (' + Object.keys(itemHistoryIndex).length + ' itens)');
+
+            // Atualiza em background
+            refreshHistoryIndexInBackground();
+            return;
+          }
+        }
+      } catch (e) {
+        console.log('Erro ao ler índice do localStorage:', e);
+      }
+
+      // 3. Busca do servidor
+      console.log('Índice histórico: buscando do servidor...');
+      fetchHistoryIndexFromServer();
+    }
+
+    /**
+     * Busca o índice de histórico do servidor
+     */
+    function fetchHistoryIndexFromServer() {
+      google.script.run
+        .withSuccessHandler(function(index) {
+          if (index && Object.keys(index).length > 0) {
+            itemHistoryIndex = index;
+            saveHistoryIndexToLocalStorage(index);
+            console.log('Índice histórico carregado do servidor: ' + Object.keys(index).length + ' itens');
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.error('Erro ao carregar índice de histórico:', error);
+        })
+        .getItemHistoryIndex();
+    }
+
+    /**
+     * Atualiza o índice em background (não bloqueia a UI)
+     */
+    function refreshHistoryIndexInBackground() {
+      google.script.run
+        .withSuccessHandler(function(index) {
+          if (index && Object.keys(index).length > 0) {
+            itemHistoryIndex = index;
+            saveHistoryIndexToLocalStorage(index);
+            console.log('Índice histórico atualizado em background');
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.log('Falha ao atualizar índice em background:', error);
+        })
+        .getItemHistoryIndex();
+    }
+
+    /**
+     * Salva o índice no localStorage
+     */
+    function saveHistoryIndexToLocalStorage(index) {
+      try {
+        const jsonData = JSON.stringify(index);
+        // localStorage tem limite de ~5MB, verificamos se cabe
+        if (jsonData.length < 4000000) { // 4MB limite seguro
+          localStorage.setItem(CLIENT_CACHE.HISTORY_INDEX_KEY, jsonData);
+          localStorage.setItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + CLIENT_CACHE.HISTORY_INDEX_KEY, Date.now().toString());
+          console.log('Índice histórico salvo no localStorage (' + Math.round(jsonData.length/1024) + 'KB)');
+        } else {
+          console.log('Índice muito grande para localStorage, usando apenas memória');
+        }
+      } catch (e) {
+        console.log('Erro ao salvar índice no localStorage:', e);
+      }
+    }
+
+    /**
+     * Busca histórico de um item no índice local (INSTANTÂNEO!)
+     * @param {string} item - Nome do item
+     * @returns {object|null} - Dados do histórico ou null se não encontrado
+     */
+    function getItemHistoryFromIndex(item) {
+      if (!item || !itemHistoryIndex) return null;
+
+      const itemKey = item.toString().trim().toLowerCase();
+
+      // Busca exata primeiro
+      if (itemHistoryIndex[itemKey]) {
+        return itemHistoryIndex[itemKey];
+      }
+
+      // Busca parcial (para autocomplete)
+      for (const key in itemHistoryIndex) {
+        if (key.indexOf(itemKey) >= 0 || itemKey.indexOf(key) >= 0) {
+          return itemHistoryIndex[key];
+        }
+      }
+
+      return null;
+    }
+
+    /**
+     * Formata dados do índice para exibição na tabela
+     */
+    function formatHistoryForDisplay(historyData, maxRecords) {
+      if (!historyData || !historyData.history) return null;
+
+      maxRecords = maxRecords || 10;
+      const limitedHistory = historyData.history.slice(0, maxRecords);
+
+      const rows = [];
+      const colors = [];
+
+      for (let i = 0; i < limitedHistory.length; i++) {
+        rows.push(limitedHistory[i].row);
+        colors.push(limitedHistory[i].background);
+      }
+
+      return {
+        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
+        rows: rows,
+        colors: colors
+      };
     }
 
     // Initialize app
@@ -1093,7 +1245,7 @@
             document.getElementById('mainApp').style.display = 'block';
             loadDashboardData();
             loadAutocompleteData();
-            // loadAllEstoqueData(); // REMOVIDO - agora busca direto da planilha sempre
+            loadItemHistoryIndex(); // NOVO: Carrega índice de histórico para acesso instantâneo
           } else {
             showMessage('loginMessage', result.message || 'Login falhou', 'error');
           }
@@ -1280,7 +1432,7 @@
       }
     }
 
-    // Show product history when item is typed (busca no servidor)
+    // Show product history when item is typed (OTIMIZADO: índice local primeiro, servidor como fallback)
     let historyTimeout;
     function showProductHistory(item) {
       if (!item || item.trim() === '') {
@@ -1288,10 +1440,31 @@
         return;
       }
 
-      // Debounce - aguarda 800ms após usuário parar de digitar
+      // Debounce reduzido para 300ms (antes era 800ms) - agora é mais rápido!
       clearTimeout(historyTimeout);
       historyTimeout = setTimeout(function() {
-        // Busca histórico do produto no servidor
+        // 1. TENTA ÍNDICE LOCAL PRIMEIRO (INSTANTÂNEO!)
+        const localHistory = getItemHistoryFromIndex(item);
+        if (localHistory) {
+          const displayData = formatHistoryForDisplay(localHistory, 10);
+          if (displayData && displayData.rows.length > 0) {
+            // Adiciona info do item acima da tabela
+            const infoHtml = '<div style="margin-bottom:8px;font-size:0.8rem;color:#333;">' +
+              '<strong>Saldo Atual:</strong> ' + (localHistory.info.lastStock || '0') +
+              ' | <strong>Última Atualização:</strong> ' + (localHistory.info.lastDate || '-') +
+              ' | <strong>Grupo:</strong> ' + (localHistory.info.group || '-') +
+              '</div>';
+
+            document.getElementById('estoqueHistoricoContent').innerHTML = infoHtml;
+            displayTable('estoqueHistoricoContent', displayData);
+            document.getElementById('estoqueHistorico').style.display = 'block';
+            console.log('Histórico carregado do índice local (instantâneo)');
+            return;
+          }
+        }
+
+        // 2. FALLBACK: Busca no servidor (para itens novos ou não encontrados)
+        console.log('Histórico: buscando no servidor...');
         google.script.run
           .withSuccessHandler(function(result) {
             if (result.success && result.data && result.data.rows.length > 0) {
@@ -1315,7 +1488,7 @@
             document.getElementById('estoqueHistorico').style.display = 'none';
           })
           .buscarProduto(item, null, null);
-      }, 800);
+      }, 300); // Reduzido de 800ms para 300ms
     }
 
     // Load all estoque data for instant client-side filtering
@@ -1589,6 +1762,7 @@
             clearClientCache(); // Limpa cache cliente para forçar atualização
             loadDashboardData();
             loadAutocompleteData();
+            fetchHistoryIndexFromServer(); // Recarrega índice de histórico
 
             // Mostra mensagem de sucesso na área de resultados
             const tipoMov = entradaValor > 0 ? 'ENTRADA' : 'SAÍDA';
@@ -1673,7 +1847,7 @@
       return false;
     }
 
-    // Handle Localizar Produto (SERVER-SIDE - dados completos direto da planilha)
+    // Handle Localizar Produto (OTIMIZADO: índice local para últimos 20, servidor para completo)
     function handleLocalizarProduto(event) {
       event.preventDefault();
 
@@ -1684,17 +1858,50 @@
         return false;
       }
 
-      showMessage('localizarMessage', '🔍 Buscando...', 'info');
-      document.getElementById('localizarResults').style.display = 'none';
+      // 1. TENTA ÍNDICE LOCAL PRIMEIRO (INSTANTÂNEO - últimos 20 registros)
+      const localHistory = getItemHistoryFromIndex(item);
+      if (localHistory) {
+        const displayData = formatHistoryForDisplay(localHistory, 20); // Mostra até 20 registros
+        if (displayData && displayData.rows.length > 0) {
+          // Adiciona info do item e botão para histórico completo
+          const infoHtml = '<div style="margin-bottom:10px;padding:10px;background:#e3f2fd;border-radius:4px;">' +
+            '<strong>📊 Resumo:</strong> ' +
+            'Saldo Atual: <strong>' + (localHistory.info.lastStock || '0') + '</strong> | ' +
+            'Última Atualização: <strong>' + (localHistory.info.lastDate || '-') + '</strong> | ' +
+            'Grupo: <strong>' + (localHistory.info.group || '-') + '</strong>' +
+            '<br><small style="color:#666;">Exibindo últimos ' + displayData.rows.length + ' registros (cache local). ' +
+            '<a href="#" onclick="buscarHistoricoCompleto(\'' + item.replace(/'/g, "\\'") + '\'); return false;" style="color:#1976d2;">Clique aqui para histórico completo</a></small>' +
+            '</div>';
 
-      // Busca completa no servidor (todos os registros da planilha)
+          document.getElementById('localizarTableContainer').innerHTML = infoHtml;
+          displayTable('localizarTableContainer', displayData);
+          document.getElementById('localizarResults').style.display = 'block';
+          document.getElementById('totalResults').textContent = displayData.rows.length + ' (últimos)';
+          showMessage('localizarMessage', '⚡ ' + displayData.rows.length + ' registros (cache instantâneo)', 'success');
+          console.log('Localizar: usando índice local (instantâneo)');
+          return false;
+        }
+      }
+
+      // 2. FALLBACK: Busca completa no servidor
+      showMessage('localizarMessage', '🔍 Buscando histórico completo...', 'info');
+      document.getElementById('localizarResults').style.display = 'none';
+      buscarHistoricoCompleto(item);
+
+      return false;
+    }
+
+    // Função separada para buscar histórico completo no servidor
+    function buscarHistoricoCompleto(item) {
+      showMessage('localizarMessage', '🔍 Buscando histórico completo no servidor...', 'info');
+
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success && result.data) {
             displayTable('localizarTableContainer', result.data);
             document.getElementById('localizarResults').style.display = 'block';
             document.getElementById('totalResults').textContent = result.data.rows.length;
-            showMessage('localizarMessage', '✅ ' + result.data.rows.length + ' registros encontrados', 'success');
+            showMessage('localizarMessage', '✅ ' + result.data.rows.length + ' registros encontrados (histórico completo)', 'success');
           } else {
             showMessage('localizarMessage', result.message || 'Nenhum resultado encontrado', 'warning');
             document.getElementById('localizarResults').style.display = 'none';
@@ -1704,8 +1911,6 @@
           showMessage('localizarMessage', 'Erro ao buscar: ' + error.message, 'error');
         })
         .buscarProduto(item, null, null);
-
-      return false;
     }
 
     // Show all products (CLIENT-SIDE - INSTANT!)
