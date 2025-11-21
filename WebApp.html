@@ -1199,12 +1199,19 @@
 
     /**
      * Formata dados do índice para exibição na tabela
+     * Garante ordenação do mais novo para o mais antigo
      */
     function formatHistoryForDisplay(historyData, maxRecords) {
       if (!historyData || !historyData.history) return null;
 
       maxRecords = maxRecords || 10;
-      const limitedHistory = historyData.history.slice(0, maxRecords);
+
+      // Cria cópia e ordena por data (mais novo primeiro)
+      const sortedHistory = historyData.history.slice().sort(function(a, b) {
+        return b.date - a.date;
+      });
+
+      const limitedHistory = sortedHistory.slice(0, maxRecords);
 
       const rows = [];
       const colors = [];
@@ -1762,7 +1769,6 @@
             clearClientCache(); // Limpa cache cliente para forçar atualização
             loadDashboardData();
             loadAutocompleteData();
-            fetchHistoryIndexFromServer(); // Recarrega índice de histórico
 
             // Mostra mensagem de sucesso na área de resultados
             const tipoMov = entradaValor > 0 ? 'ENTRADA' : 'SAÍDA';
@@ -1770,23 +1776,49 @@
             document.getElementById('estoqueResultMessage').innerHTML =
               '<strong>' + tipoMov + '</strong> de <strong>' + qtdMov + '</strong> unidade(s) do item <strong>' + itemInserido + '</strong> registrada com sucesso!';
 
-            // Busca histórico atualizado do item no servidor
+            // Mostra indicador de carregamento na tabela
+            document.getElementById('estoqueResultTable').innerHTML = '<p style="text-align:center;padding:20px;">⏳ Carregando histórico...</p>';
+
+            // Esconde formulário e mostra área de resultados (SEM botão ainda)
+            document.getElementById('estoqueFormArea').style.display = 'none';
+            document.getElementById('estoqueResultArea').style.display = 'block';
+            document.querySelector('#estoqueResultArea .btn-group').style.display = 'none'; // Esconde botão
+
+            // Busca histórico atualizado usando getItemHistory (mais rápido, usa índice)
             google.script.run
               .withSuccessHandler(function(histResult) {
-                if (histResult.success && histResult.data) {
+                if (histResult.success && histResult.data && histResult.data.rows.length > 0) {
                   displayTable('estoqueResultTable', histResult.data);
                 } else {
-                  document.getElementById('estoqueResultTable').innerHTML = '<p>Nenhum histórico encontrado.</p>';
+                  // Fallback: busca completa no servidor se índice não encontrar
+                  google.script.run
+                    .withSuccessHandler(function(fullResult) {
+                      if (fullResult.success && fullResult.data) {
+                        displayTable('estoqueResultTable', fullResult.data);
+                      } else {
+                        document.getElementById('estoqueResultTable').innerHTML = '<p>Registro inserido, mas histórico não disponível.</p>';
+                      }
+                      // Mostra botão após carregar
+                      document.querySelector('#estoqueResultArea .btn-group').style.display = 'flex';
+                    })
+                    .withFailureHandler(function(err) {
+                      document.getElementById('estoqueResultTable').innerHTML = '<p>Erro ao carregar histórico.</p>';
+                      document.querySelector('#estoqueResultArea .btn-group').style.display = 'flex';
+                    })
+                    .buscarProduto(itemInserido, null, null);
+                  return;
                 }
+                // Mostra botão após carregar lista
+                document.querySelector('#estoqueResultArea .btn-group').style.display = 'flex';
               })
               .withFailureHandler(function(err) {
                 document.getElementById('estoqueResultTable').innerHTML = '<p>Erro ao carregar histórico.</p>';
+                document.querySelector('#estoqueResultArea .btn-group').style.display = 'flex';
               })
-              .buscarProduto(itemInserido, null, null);
+              .getItemHistory(itemInserido);
 
-            // Esconde formulário e mostra resultados
-            document.getElementById('estoqueFormArea').style.display = 'none';
-            document.getElementById('estoqueResultArea').style.display = 'block';
+            // Recarrega índice de histórico em background (para próximas consultas)
+            fetchHistoryIndexFromServer();
             resetEstoqueForm();
           } else {
             showMessage('estoqueMessage', result.message || 'Erro ao inserir estoque', 'error');

@@ -289,12 +289,18 @@ function getItemHistory(item) {
 
   var itemData = index[itemKey];
   var headers = ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"];
+
+  // Ordena por data (mais novo primeiro) antes de retornar
+  var sortedHistory = itemData.history.slice().sort(function(a, b) {
+    return b.date - a.date;
+  });
+
   var rows = [];
   var colors = [];
 
-  for (var i = 0; i < itemData.history.length; i++) {
-    rows.push(itemData.history[i].row);
-    colors.push(itemData.history[i].background);
+  for (var i = 0; i < sortedHistory.length; i++) {
+    rows.push(sortedHistory[i].row);
+    colors.push(sortedHistory[i].background);
   }
 
   return {
