@@ -834,8 +834,109 @@ function normalize(text) {
 }
 
 /* ================================
-   FUNÇÕES DE CACHE E OTIMIZAÇÃO (REMOVIDO - DUPLICADO)
+   FUNÇÕES DE CACHE E AUTOCOMPLETE
    ================================ */
+
+/**
+ * getCachedData: Busca dados no cache ou executa função e armazena no cache.
+ */
+function getCachedData(key, fetchFunction, ttl) {
+  ttl = ttl || 300;
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get(key);
+
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      Logger.log("Cache parse error: " + key);
+    }
+  }
+
+  var data = fetchFunction();
+  try {
+    var jsonData = JSON.stringify(data);
+    if (jsonData.length < 100000) {
+      cache.put(key, jsonData, ttl);
+    }
+  } catch (e) {
+    Logger.log("Cache save error: " + e.message);
+  }
+
+  return data;
+}
+
+/**
+ * invalidateCache: Invalida caches.
+ */
+function invalidateCache(keys) {
+  var cache = CacheService.getScriptCache();
+  var keysToInvalidate = typeof keys === 'string' ? [keys] : (keys || []);
+  keysToInvalidate.forEach(function(key) { cache.remove(key); });
+  cache.remove("autocompleteData");
+}
+
+/**
+ * invalidateAllAutocompleteCache: Invalida todos os caches de autocomplete.
+ */
+function invalidateAllAutocompleteCache() {
+  invalidateCache(["itemList", "groupList", "nfList", "obsList", "autocompleteData"]);
+}
+
+/**
+ * getAllAutocompleteData: Busca todos os dados de autocomplete em uma única operação.
+ * OTIMIZADO: Usa cache de 10 minutos
+ */
+function getAllAutocompleteData() {
+  return getCachedData("autocompleteData", function() {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // 1ª Leitura: DADOS (apenas grupos)
+    var sheetDados = ss.getSheetByName("DADOS");
+    var groups = [];
+    if (sheetDados) {
+      var lastRowDados = sheetDados.getLastRow();
+      if (lastRowDados >= 1) {
+        var dadosData = sheetDados.getRange(1, 4, lastRowDados, 1).getDisplayValues();
+        for (var i = 0; i < dadosData.length; i++) {
+          if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
+            groups.push(dadosData[i][0].toString().trim());
+          }
+        }
+      }
+    }
+
+    // 2ª Leitura: ESTOQUE (itens da coluna B, NFs e Obs)
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var items = [], nfs = [], obs = [];
+    if (sheetEstoque) {
+      var lastRowEstoque = sheetEstoque.getLastRow();
+      if (lastRowEstoque >= 2) {
+        var estoqueData = sheetEstoque.getRange(2, 2, lastRowEstoque - 1, 4).getDisplayValues();
+        for (var j = 0; j < estoqueData.length; j++) {
+          if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
+            items.push(estoqueData[j][0].toString().trim());
+          }
+          if (estoqueData[j][2] && estoqueData[j][2].toString().trim() !== "") {
+            nfs.push(estoqueData[j][2]);
+          }
+          if (estoqueData[j][3] && estoqueData[j][3].toString().trim() !== "") {
+            obs.push(estoqueData[j][3]);
+          }
+        }
+      }
+    }
+
+    return {
+      items: Array.from(new Set(items)),
+      groups: Array.from(new Set(groups)),
+      nfs: Array.from(new Set(nfs)),
+      obs: Array.from(new Set(obs)),
+      medidas: getMedidasList(),
+      observacoes: getObservacoesList()
+    };
+  }, 600);
+}
 
 /**
  * getLastRegistration: Retorna o último registro de um item (data, estoque e grupo).
@@ -2203,8 +2304,109 @@ function normalize(text) {
 }
 
 /* ================================
-   FUNÇÕES DE CACHE E OTIMIZAÇÃO (REMOVIDO - DUPLICADO)
+   FUNÇÕES DE CACHE E AUTOCOMPLETE
    ================================ */
+
+/**
+ * getCachedData: Busca dados no cache ou executa função e armazena no cache.
+ */
+function getCachedData(key, fetchFunction, ttl) {
+  ttl = ttl || 300;
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get(key);
+
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      Logger.log("Cache parse error: " + key);
+    }
+  }
+
+  var data = fetchFunction();
+  try {
+    var jsonData = JSON.stringify(data);
+    if (jsonData.length < 100000) {
+      cache.put(key, jsonData, ttl);
+    }
+  } catch (e) {
+    Logger.log("Cache save error: " + e.message);
+  }
+
+  return data;
+}
+
+/**
+ * invalidateCache: Invalida caches.
+ */
+function invalidateCache(keys) {
+  var cache = CacheService.getScriptCache();
+  var keysToInvalidate = typeof keys === 'string' ? [keys] : (keys || []);
+  keysToInvalidate.forEach(function(key) { cache.remove(key); });
+  cache.remove("autocompleteData");
+}
+
+/**
+ * invalidateAllAutocompleteCache: Invalida todos os caches de autocomplete.
+ */
+function invalidateAllAutocompleteCache() {
+  invalidateCache(["itemList", "groupList", "nfList", "obsList", "autocompleteData"]);
+}
+
+/**
+ * getAllAutocompleteData: Busca todos os dados de autocomplete em uma única operação.
+ * OTIMIZADO: Usa cache de 10 minutos
+ */
+function getAllAutocompleteData() {
+  return getCachedData("autocompleteData", function() {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // 1ª Leitura: DADOS (apenas grupos)
+    var sheetDados = ss.getSheetByName("DADOS");
+    var groups = [];
+    if (sheetDados) {
+      var lastRowDados = sheetDados.getLastRow();
+      if (lastRowDados >= 1) {
+        var dadosData = sheetDados.getRange(1, 4, lastRowDados, 1).getDisplayValues();
+        for (var i = 0; i < dadosData.length; i++) {
+          if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
+            groups.push(dadosData[i][0].toString().trim());
+          }
+        }
+      }
+    }
+
+    // 2ª Leitura: ESTOQUE (itens da coluna B, NFs e Obs)
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var items = [], nfs = [], obs = [];
+    if (sheetEstoque) {
+      var lastRowEstoque = sheetEstoque.getLastRow();
+      if (lastRowEstoque >= 2) {
+        var estoqueData = sheetEstoque.getRange(2, 2, lastRowEstoque - 1, 4).getDisplayValues();
+        for (var j = 0; j < estoqueData.length; j++) {
+          if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
+            items.push(estoqueData[j][0].toString().trim());
+          }
+          if (estoqueData[j][2] && estoqueData[j][2].toString().trim() !== "") {
+            nfs.push(estoqueData[j][2]);
+          }
+          if (estoqueData[j][3] && estoqueData[j][3].toString().trim() !== "") {
+            obs.push(estoqueData[j][3]);
+          }
+        }
+      }
+    }
+
+    return {
+      items: Array.from(new Set(items)),
+      groups: Array.from(new Set(groups)),
+      nfs: Array.from(new Set(nfs)),
+      obs: Array.from(new Set(obs)),
+      medidas: getMedidasList(),
+      observacoes: getObservacoesList()
+    };
+  }, 600);
+}
 
 /**
  * getLastRegistration: Retorna o último registro de um item (data, estoque e grupo).
