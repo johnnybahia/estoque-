@@ -3,6 +3,31 @@
 // ==============================
 
 /**
+ * doGet: Função principal do Web App
+ * Serve a interface web quando alguém acessa a URL do Web App
+ */
+function doGet(e) {
+  var template = HtmlService.createTemplateFromFile('WebApp');
+
+  // Passa parâmetros da URL para o template, se houver
+  template.params = e.parameter;
+
+  return template.evaluate()
+    .setTitle('Sistema de Gestão de Estoque')
+    .setFaviconUrl('https://www.gstatic.com/images/branding/product/1x/drive_2020q4_48dp.png')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/**
+ * include: Função helper para incluir arquivos HTML parciais
+ * Permite modularizar o código HTML
+ */
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+/**
  * Atualiza o menu principal e adiciona um menu separado para processar cores.
  */
 function updateMenus() {
@@ -564,7 +589,11 @@ function processLogin(formData) {
   if (!sheetDados) {
     throw new Error("A aba DADOS não foi encontrada.");
   }
-  var data = sheetDados.getRange("B:C").getValues();
+  var lastRow = sheetDados.getLastRow();
+  if (lastRow < 1) {
+    throw new Error("Não há usuários cadastrados.");
+  }
+  var data = sheetDados.getRange(1, 2, lastRow, 2).getValues();
   var valid = false;
   for (var i = 0; i < data.length; i++) {
     var username = data[i][0];
@@ -599,14 +628,17 @@ function getLoggedUser() {
 function showEstoqueSidebar() {
   var nextRow = updateUnprotectedRange();
   Logger.log("showEstoqueSidebar: Próxima linha para cadastro: " + nextRow);
-  
+
+  // OTIMIZADO: 1 busca em vez de 4
+  var autocompleteData = getAllAutocompleteData();
+
   var template = HtmlService.createTemplateFromFile("DialogEstoque");
-  template.itemList = JSON.stringify(getItemList());
-  template.groupList = JSON.stringify(getGroupList());
-  template.nfList = JSON.stringify(getNfList());
-  template.obsList = JSON.stringify(getObsList());
+  template.itemList = JSON.stringify(autocompleteData.items);
+  template.groupList = JSON.stringify(autocompleteData.groups);
+  template.nfList = JSON.stringify(autocompleteData.nfs);
+  template.obsList = JSON.stringify(autocompleteData.obs);
   template.currentRow = nextRow;
-  
+
   var htmlOutput = template.evaluate().setTitle("CADASTRO DE ESTOQUE");
   SpreadsheetApp.getUi().showSidebar(htmlOutput);
 }
@@ -670,7 +702,9 @@ function getItemList() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetDados = ss.getSheetByName("DADOS");
   if (!sheetDados) return [];
-  var values = sheetDados.getRange("A:A").getValues().flat();
+  var lastRow = sheetDados.getLastRow();
+  if (lastRow < 1) return [];
+  var values = sheetDados.getRange(1, 1, lastRow, 1).getValues().flat();
   var items = [];
   for (var i = 0; i < values.length; i++) {
     if (values[i] && values[i].toString().trim() !== "") {
@@ -687,7 +721,9 @@ function getGroupList() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetDados = ss.getSheetByName("DADOS");
   if (!sheetDados) return [];
-  var values = sheetDados.getRange("D:D").getValues().flat();
+  var lastRow = sheetDados.getLastRow();
+  if (lastRow < 1) return [];
+  var values = sheetDados.getRange(1, 4, lastRow, 1).getValues().flat();
   var groups = [];
   for (var i = 0; i < values.length; i++) {
     if (values[i] && values[i].toString().trim() !== "") {
@@ -706,7 +742,7 @@ function getNfList() {
   if (!sheet) return [];
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-  var values = sheet.getRange("D2:D" + lastRow).getValues().flat();
+  var values = sheet.getRange(2, 4, lastRow - 1, 1).getValues().flat();
   var nfList = values.filter(function(v) {
     return v.toString().trim() !== "";
   });
@@ -722,11 +758,71 @@ function getObsList() {
   if (!sheet) return [];
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-  var values = sheet.getRange("E2:E" + lastRow).getValues().flat();
+  var values = sheet.getRange(2, 5, lastRow - 1, 1).getValues().flat();
   var obsList = values.filter(function(v) {
     return v.toString().trim() !== "";
   });
   return Array.from(new Set(obsList));
+}
+
+/**
+ * getMedidasList: Retorna a lista de unidades de medida da aba DADOS, coluna MEDIDAS.
+ */
+function getMedidasList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("DADOS");
+  if (!sheet) return [];
+
+  // Encontra a coluna MEDIDAS
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var medidasCol = -1;
+  for (var i = 0; i < headers.length; i++) {
+    if (headers[i].toString().toUpperCase() === "MEDIDAS") {
+      medidasCol = i + 1;
+      break;
+    }
+  }
+
+  if (medidasCol === -1) return [];
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var values = sheet.getRange(2, medidasCol, lastRow - 1, 1).getValues().flat();
+  var medidasList = values.filter(function(v) {
+    return v.toString().trim() !== "";
+  });
+  return medidasList;
+}
+
+/**
+ * getObservacoesList: Retorna a lista de observações pré-definidas da aba DADOS, coluna OBSERVAÇÃO.
+ */
+function getObservacoesList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("DADOS");
+  if (!sheet) return [];
+
+  // Encontra a coluna OBSERVAÇÃO
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var obsCol = -1;
+  for (var i = 0; i < headers.length; i++) {
+    if (headers[i].toString().toUpperCase() === "OBSERVAÇÃO" || headers[i].toString().toUpperCase() === "OBSERVACAO") {
+      obsCol = i + 1;
+      break;
+    }
+  }
+
+  if (obsCol === -1) return [];
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var values = sheet.getRange(2, obsCol, lastRow - 1, 1).getValues().flat();
+  var obsList = values.filter(function(v) {
+    return v.toString().trim() !== "";
+  });
+  return obsList;
 }
 
 /**
@@ -737,32 +833,184 @@ function normalize(text) {
   return text.toString().trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+/* ================================
+   FUNÇÕES DE CACHE E OTIMIZAÇÃO
+   ================================ */
+
 /**
- * getLastRegistration: Retorna o último registro de um item na aba "ESPELHO DO ESTOQUE".
+ * getCachedData: Busca dados no cache ou executa função e armazena no cache.
+ * @param {string} key - Chave do cache
+ * @param {function} fetchFunction - Função que busca os dados
+ * @param {number} ttl - Tempo de vida em segundos (padrão: 10 segundos)
  */
-function getLastRegistration(item, currentRow) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetEspelho = ss.getSheetByName("ESPELHO DO ESTOQUE");
-  if (!sheetEspelho) {
-    Logger.log("getLastRegistration: Aba ESPELHO DO ESTOQUE não encontrada.");
-    return { lastDate: null, lastStock: 0 };
+function getCachedData(key, fetchFunction, ttl) {
+  ttl = ttl || 10; // Cache mínimo de 10 segundos
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get(key);
+
+  if (cached) {
+    Logger.log("Cache HIT para: " + key);
+    return JSON.parse(cached);
   }
-  var data = sheetEspelho.getDataRange().getValues();
-  var result = { lastDate: null, lastStock: 0 };
-  if (data.length < 2) return result;
-  
-  Logger.log("getLastRegistration: Procurando por " + normalize(item));
-  for (var i = data.length - 1; i >= 1; i--) {
-    if ((i + 1) >= currentRow) continue;
-    var currentItem = data[i][0];
-    Logger.log("Linha " + (i + 1) + ": " + normalize(currentItem));
-    if (currentItem && normalize(currentItem) === normalize(item)) {
-      result.lastDate = data[i][1];
-      result.lastStock = data[i][2];
-      Logger.log("getLastRegistration: Encontrado na linha " + (i + 1) + " com Data=" + result.lastDate + " e Estoque=" + result.lastStock);
-      break;
+
+  Logger.log("Cache MISS para: " + key);
+  var data = fetchFunction();
+  cache.put(key, JSON.stringify(data), ttl);
+  return data;
+}
+
+/**
+ * invalidateCache: Invalida um ou mais itens do cache.
+ * @param {string|Array} keys - Chave(s) para invalidar
+ */
+function invalidateCache(keys) {
+  var cache = CacheService.getScriptCache();
+  if (typeof keys === 'string') {
+    cache.remove(keys);
+    Logger.log("Cache invalidado: " + keys);
+  } else if (Array.isArray(keys)) {
+    keys.forEach(function(key) {
+      cache.remove(key);
+    });
+    Logger.log("Cache invalidado: " + keys.join(", "));
+  }
+}
+
+/**
+ * invalidateAllAutocompleteCache: Invalida todos os caches de autocomplete.
+ * NOTA: autocompleteData não usa cache (dados muito grandes para cache do Google)
+ */
+function invalidateAllAutocompleteCache() {
+  invalidateCache([
+    "itemList",
+    "groupList",
+    "nfList",
+    "obsList"
+  ]);
+}
+
+/**
+ * getAllAutocompleteData: Busca todos os dados de autocomplete em uma única operação.
+ * OTIMIZADO: Itens vêm da coluna B do ESTOQUE (produtos realmente usados, sem duplicatas)
+ */
+function getAllAutocompleteData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // 1ª Leitura: DADOS (apenas grupos)
+  var sheetDados = ss.getSheetByName("DADOS");
+  var groups = [];
+  if (sheetDados) {
+    var lastRowDados = sheetDados.getLastRow();
+    if (lastRowDados >= 1) {
+      var dadosData = sheetDados.getRange(1, 4, lastRowDados, 1).getDisplayValues();
+      for (var i = 0; i < dadosData.length; i++) {
+        if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
+          groups.push(dadosData[i][0].toString().trim());
+        }
+      }
     }
   }
+
+  // 2ª Leitura: ESTOQUE (itens da coluna B, NFs e Obs)
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  var items = [], nfs = [], obs = [];
+  if (sheetEstoque) {
+    var lastRowEstoque = sheetEstoque.getLastRow();
+    if (lastRowEstoque >= 2) {
+      // Lê colunas B (Item), D (NF), E (Obs) - usa getDisplayValues para forçar TEXTO
+      var estoqueData = sheetEstoque.getRange(2, 2, lastRowEstoque - 1, 4).getDisplayValues();
+      for (var j = 0; j < estoqueData.length; j++) {
+        // Coluna B (Item) - índice 0
+        if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
+          items.push(estoqueData[j][0].toString().trim());
+        }
+        // Coluna D (NF) - índice 2
+        if (estoqueData[j][2] && estoqueData[j][2].toString().trim() !== "") {
+          nfs.push(estoqueData[j][2]);
+        }
+        // Coluna E (Obs) - índice 3
+        if (estoqueData[j][3] && estoqueData[j][3].toString().trim() !== "") {
+          obs.push(estoqueData[j][3]);
+        }
+      }
+    }
+  }
+
+  return {
+    items: Array.from(new Set(items)),        // Remove duplicatas
+    groups: Array.from(new Set(groups)),      // Remove duplicatas
+    nfs: Array.from(new Set(nfs)),            // Remove duplicatas
+    obs: Array.from(new Set(obs)),            // Remove duplicatas
+    medidas: getMedidasList(),                // Lista de unidades de medida
+    observacoes: getObservacoesList()         // Lista de observações pré-definidas
+  };
+}
+
+/**
+ * getLastRegistration: Retorna o último registro de um item (data, estoque e grupo).
+ * OTIMIZADO: Lê apenas as últimas 2000 linhas da planilha ESTOQUE
+ */
+function getLastRegistration(item, currentRow) {
+  Logger.log("=== getLastRegistration INICIADO ===");
+  Logger.log("Item buscado: '" + item + "'");
+  Logger.log("CurrentRow: " + currentRow);
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) {
+    Logger.log("ERRO: Aba ESTOQUE não encontrada!");
+    return { lastDate: null, lastStock: 0, lastGroup: null };
+  }
+
+  var lastRow = sheetEstoque.getLastRow();
+  Logger.log("Última linha da planilha: " + lastRow);
+  if (lastRow < 2) {
+    Logger.log("Planilha vazia - sem dados");
+    return { lastDate: null, lastStock: 0, lastGroup: null };
+  }
+
+  // Lê TODA a planilha como TEXTO (getDisplayValues) para evitar problemas de formato
+  var startRow = 2;
+  var numRows = lastRow - startRow + 1;
+  Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow + " (" + numRows + " linhas)");
+
+  // USA getDisplayValues() para forçar conversão para texto
+  var data = sheetEstoque.getRange(startRow, 1, numRows, 9).getDisplayValues();
+  Logger.log("Usando getDisplayValues() para forçar formato de TEXTO");
+
+  var result = { lastDate: null, lastStock: 0, lastGroup: null };
+  var itemNormalized = normalize(item);
+  Logger.log("Item normalizado: '" + itemNormalized + "'");
+
+  var encontrados = 0;
+  for (var i = data.length - 1; i >= 0; i--) {
+    var rowNum = startRow + i;
+    if (rowNum >= currentRow) continue;
+
+    var currentItem = data[i][1]; // Coluna B (Item) - agora em formato TEXTO
+    if (currentItem && currentItem.toString().trim() !== "") {
+      var currentItemNormalized = normalize(currentItem);
+
+      if (currentItemNormalized === itemNormalized) {
+        encontrados++;
+        result.lastGroup = data[i][0];  // Coluna A (Grupo)
+        result.lastDate = data[i][2];   // Coluna C (Data) - como texto
+        result.lastStock = data[i][8];  // Coluna I (Novo Saldo) - como texto
+        Logger.log("✓ ENCONTRADO na linha " + rowNum);
+        Logger.log("  Grupo: '" + result.lastGroup + "'");
+        Logger.log("  Data: " + result.lastDate);
+        Logger.log("  Estoque: " + result.lastStock);
+        Logger.log("  Item raw: '" + currentItem + "'");
+        break;
+      }
+    }
+  }
+
+  if (encontrados === 0) {
+    Logger.log("✗ NENHUM REGISTRO ENCONTRADO para o item '" + item + "'");
+  }
+
+  Logger.log("=== getLastRegistration FINALIZADO ===");
   return result;
 }
 
@@ -977,7 +1225,7 @@ function getGruposEstoque() {
   if (!sheet) return [];
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-  var values = sheet.getRange("A2:A" + lastRow).getValues().flat();
+  var values = sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat();
   var grupos = values.filter(function(v) {
     return v.toString().trim() !== "";
   });
@@ -1068,27 +1316,33 @@ function gerarListagemEstoque(formData) {
   }
   if (items.length === 0) throw new Error("⚠️ Informe pelo menos um item.");
 
-  // 2) lê dados da aba ESTOQUE
+  // 2) lê dados da aba ESTOQUE - OTIMIZADO: lê apenas colunas necessárias
   var sheetEst = ss.getSheetByName('ESTOQUE');
   var lastRow = sheetEst.getLastRow();
   if (lastRow < 2) throw new Error("Não há dados na aba ESTOQUE.");
-  var dados = sheetEst
-    .getRange(2, 1, lastRow - 1, sheetEst.getLastColumn())
-    .getValues();
+  // Lê apenas colunas B (item), C (data), I (novo saldo)
+  var dados = sheetEst.getRange(2, 1, lastRow - 1, 9).getValues();
 
-  // 3) monta listagem (item, último saldo e data)
+  // 3) OTIMIZADO: Cria índice de últimos registros (1 passada em vez de N*M)
+  var itemIndex = {};
+  for (var j = dados.length - 1; j >= 0; j--) {
+    var prod = dados[j][1] ? dados[j][1].toString().trim().toLowerCase() : '';
+    if (prod && !itemIndex[prod]) {
+      itemIndex[prod] = {
+        saldo: dados[j][8],
+        data: dados[j][2]
+      };
+    }
+  }
+
+  // 4) monta listagem (item, último saldo e data)
   var listagemData = items.map(function(item) {
     var key = item.toLowerCase();
-    var lastSaldo = '', lastDate = '';
-    for (var j = dados.length - 1; j >= 0; j--) {
-      var prod = dados[j][1] ? dados[j][1].toString().trim().toLowerCase() : '';
-      if (prod === key) {
-        lastSaldo = dados[j][8];
-        lastDate  = dados[j][2];
-        break;
-      }
+    var registro = itemIndex[key];
+    if (registro) {
+      return [item, registro.saldo, registro.data];
     }
-    return [item, lastSaldo, lastDate];
+    return [item, '', ''];
   });
 
   // 4) grava na aba LISTAGEM DE ESTOQUE
@@ -1164,7 +1418,7 @@ function processEstoque(formData) {
   
   // Recupera último registro para cálculo de saldo e data
   var lastReg = getLastRegistration(formData.item, nextRow);
-  var previousSaldo = lastReg.lastStock || 0;
+  var previousSaldo = parseFloat(lastReg.lastStock) || 0;
   var newSaldo = previousSaldo + parseFloat(formData.entrada) - parseFloat(formData.saida);
   var rowData = [
     formData.group,
@@ -1192,7 +1446,7 @@ function processEstoque(formData) {
   
   PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
   backupEstoqueData();
-  
+
   // Verifica se passou mais de 20 dias desde a última data de registro
   if (lastReg.lastDate) {
     var lastDate = new Date(lastReg.lastDate);
@@ -1210,6 +1464,15 @@ function processEstoque(formData) {
       }
     }
   }
+
+  // Verifica se houve ENTRADA de estoque - aviso para atualização
+  if (parseFloat(formData.entrada) > 0) {
+    var lastColumn = sheetEstoque.getLastColumn();
+    sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("yellow");
+    showCustomDialog("⚠️ ENTRADA DE ESTOQUE REGISTRADA!\n\nÉ NECESSÁRIO ATUALIZAR O ESTOQUE DESTE ITEM PARA EVITAR FUROS DE ESTOQUE.\n\nRealize uma contagem física e registre uma atualização completa do saldo.");
+    return;
+  }
+
   // Se não entrou no critério, não exibe diálogo de sucesso para agilizar o cadastro.
 }
 
@@ -1804,7 +2067,11 @@ function processLogin(formData) {
   if (!sheetDados) {
     throw new Error("A aba DADOS não foi encontrada.");
   }
-  var data = sheetDados.getRange("B:C").getValues();
+  var lastRow = sheetDados.getLastRow();
+  if (lastRow < 1) {
+    throw new Error("Não há usuários cadastrados.");
+  }
+  var data = sheetDados.getRange(1, 2, lastRow, 2).getValues();
   var valid = false;
   for (var i = 0; i < data.length; i++) {
     var username = data[i][0];
@@ -1839,14 +2106,17 @@ function getLoggedUser() {
 function showEstoqueSidebar() {
   var nextRow = updateUnprotectedRange();
   Logger.log("showEstoqueSidebar: Próxima linha para cadastro: " + nextRow);
-  
+
+  // OTIMIZADO: 1 busca em vez de 4
+  var autocompleteData = getAllAutocompleteData();
+
   var template = HtmlService.createTemplateFromFile("DialogEstoque");
-  template.itemList = JSON.stringify(getItemList());
-  template.groupList = JSON.stringify(getGroupList());
-  template.nfList = JSON.stringify(getNfList());
-  template.obsList = JSON.stringify(getObsList());
+  template.itemList = JSON.stringify(autocompleteData.items);
+  template.groupList = JSON.stringify(autocompleteData.groups);
+  template.nfList = JSON.stringify(autocompleteData.nfs);
+  template.obsList = JSON.stringify(autocompleteData.obs);
   template.currentRow = nextRow;
-  
+
   var htmlOutput = template.evaluate().setTitle("CADASTRO DE ESTOQUE");
   SpreadsheetApp.getUi().showSidebar(htmlOutput);
 }
@@ -1910,7 +2180,9 @@ function getItemList() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetDados = ss.getSheetByName("DADOS");
   if (!sheetDados) return [];
-  var values = sheetDados.getRange("A:A").getValues().flat();
+  var lastRow = sheetDados.getLastRow();
+  if (lastRow < 1) return [];
+  var values = sheetDados.getRange(1, 1, lastRow, 1).getValues().flat();
   var items = [];
   for (var i = 0; i < values.length; i++) {
     if (values[i] && values[i].toString().trim() !== "") {
@@ -1927,7 +2199,9 @@ function getGroupList() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetDados = ss.getSheetByName("DADOS");
   if (!sheetDados) return [];
-  var values = sheetDados.getRange("D:D").getValues().flat();
+  var lastRow = sheetDados.getLastRow();
+  if (lastRow < 1) return [];
+  var values = sheetDados.getRange(1, 4, lastRow, 1).getValues().flat();
   var groups = [];
   for (var i = 0; i < values.length; i++) {
     if (values[i] && values[i].toString().trim() !== "") {
@@ -1946,7 +2220,7 @@ function getNfList() {
   if (!sheet) return [];
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-  var values = sheet.getRange("D2:D" + lastRow).getValues().flat();
+  var values = sheet.getRange(2, 4, lastRow - 1, 1).getValues().flat();
   var nfList = values.filter(function(v) {
     return v.toString().trim() !== "";
   });
@@ -1962,11 +2236,71 @@ function getObsList() {
   if (!sheet) return [];
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-  var values = sheet.getRange("E2:E" + lastRow).getValues().flat();
+  var values = sheet.getRange(2, 5, lastRow - 1, 1).getValues().flat();
   var obsList = values.filter(function(v) {
     return v.toString().trim() !== "";
   });
   return Array.from(new Set(obsList));
+}
+
+/**
+ * getMedidasList: Retorna a lista de unidades de medida da aba DADOS, coluna MEDIDAS.
+ */
+function getMedidasList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("DADOS");
+  if (!sheet) return [];
+
+  // Encontra a coluna MEDIDAS
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var medidasCol = -1;
+  for (var i = 0; i < headers.length; i++) {
+    if (headers[i].toString().toUpperCase() === "MEDIDAS") {
+      medidasCol = i + 1;
+      break;
+    }
+  }
+
+  if (medidasCol === -1) return [];
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var values = sheet.getRange(2, medidasCol, lastRow - 1, 1).getValues().flat();
+  var medidasList = values.filter(function(v) {
+    return v.toString().trim() !== "";
+  });
+  return medidasList;
+}
+
+/**
+ * getObservacoesList: Retorna a lista de observações pré-definidas da aba DADOS, coluna OBSERVAÇÃO.
+ */
+function getObservacoesList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("DADOS");
+  if (!sheet) return [];
+
+  // Encontra a coluna OBSERVAÇÃO
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var obsCol = -1;
+  for (var i = 0; i < headers.length; i++) {
+    if (headers[i].toString().toUpperCase() === "OBSERVAÇÃO" || headers[i].toString().toUpperCase() === "OBSERVACAO") {
+      obsCol = i + 1;
+      break;
+    }
+  }
+
+  if (obsCol === -1) return [];
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var values = sheet.getRange(2, obsCol, lastRow - 1, 1).getValues().flat();
+  var obsList = values.filter(function(v) {
+    return v.toString().trim() !== "";
+  });
+  return obsList;
 }
 
 /**
@@ -1977,32 +2311,184 @@ function normalize(text) {
   return text.toString().trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+/* ================================
+   FUNÇÕES DE CACHE E OTIMIZAÇÃO
+   ================================ */
+
 /**
- * getLastRegistration: Retorna o último registro de um item na aba "ESPELHO DO ESTOQUE".
+ * getCachedData: Busca dados no cache ou executa função e armazena no cache.
+ * @param {string} key - Chave do cache
+ * @param {function} fetchFunction - Função que busca os dados
+ * @param {number} ttl - Tempo de vida em segundos (padrão: 10 segundos)
  */
-function getLastRegistration(item, currentRow) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetEspelho = ss.getSheetByName("ESPELHO DO ESTOQUE");
-  if (!sheetEspelho) {
-    Logger.log("getLastRegistration: Aba ESPELHO DO ESTOQUE não encontrada.");
-    return { lastDate: null, lastStock: 0 };
+function getCachedData(key, fetchFunction, ttl) {
+  ttl = ttl || 10; // Cache mínimo de 10 segundos
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get(key);
+
+  if (cached) {
+    Logger.log("Cache HIT para: " + key);
+    return JSON.parse(cached);
   }
-  var data = sheetEspelho.getDataRange().getValues();
-  var result = { lastDate: null, lastStock: 0 };
-  if (data.length < 2) return result;
-  
-  Logger.log("getLastRegistration: Procurando por " + normalize(item));
-  for (var i = data.length - 1; i >= 1; i--) {
-    if ((i + 1) >= currentRow) continue;
-    var currentItem = data[i][0];
-    Logger.log("Linha " + (i + 1) + ": " + normalize(currentItem));
-    if (currentItem && normalize(currentItem) === normalize(item)) {
-      result.lastDate = data[i][1];
-      result.lastStock = data[i][2];
-      Logger.log("getLastRegistration: Encontrado na linha " + (i + 1) + " com Data=" + result.lastDate + " e Estoque=" + result.lastStock);
-      break;
+
+  Logger.log("Cache MISS para: " + key);
+  var data = fetchFunction();
+  cache.put(key, JSON.stringify(data), ttl);
+  return data;
+}
+
+/**
+ * invalidateCache: Invalida um ou mais itens do cache.
+ * @param {string|Array} keys - Chave(s) para invalidar
+ */
+function invalidateCache(keys) {
+  var cache = CacheService.getScriptCache();
+  if (typeof keys === 'string') {
+    cache.remove(keys);
+    Logger.log("Cache invalidado: " + keys);
+  } else if (Array.isArray(keys)) {
+    keys.forEach(function(key) {
+      cache.remove(key);
+    });
+    Logger.log("Cache invalidado: " + keys.join(", "));
+  }
+}
+
+/**
+ * invalidateAllAutocompleteCache: Invalida todos os caches de autocomplete.
+ * NOTA: autocompleteData não usa cache (dados muito grandes para cache do Google)
+ */
+function invalidateAllAutocompleteCache() {
+  invalidateCache([
+    "itemList",
+    "groupList",
+    "nfList",
+    "obsList"
+  ]);
+}
+
+/**
+ * getAllAutocompleteData: Busca todos os dados de autocomplete em uma única operação.
+ * OTIMIZADO: Itens vêm da coluna B do ESTOQUE (produtos realmente usados, sem duplicatas)
+ */
+function getAllAutocompleteData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // 1ª Leitura: DADOS (apenas grupos)
+  var sheetDados = ss.getSheetByName("DADOS");
+  var groups = [];
+  if (sheetDados) {
+    var lastRowDados = sheetDados.getLastRow();
+    if (lastRowDados >= 1) {
+      var dadosData = sheetDados.getRange(1, 4, lastRowDados, 1).getDisplayValues();
+      for (var i = 0; i < dadosData.length; i++) {
+        if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
+          groups.push(dadosData[i][0].toString().trim());
+        }
+      }
     }
   }
+
+  // 2ª Leitura: ESTOQUE (itens da coluna B, NFs e Obs)
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  var items = [], nfs = [], obs = [];
+  if (sheetEstoque) {
+    var lastRowEstoque = sheetEstoque.getLastRow();
+    if (lastRowEstoque >= 2) {
+      // Lê colunas B (Item), D (NF), E (Obs) - usa getDisplayValues para forçar TEXTO
+      var estoqueData = sheetEstoque.getRange(2, 2, lastRowEstoque - 1, 4).getDisplayValues();
+      for (var j = 0; j < estoqueData.length; j++) {
+        // Coluna B (Item) - índice 0
+        if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
+          items.push(estoqueData[j][0].toString().trim());
+        }
+        // Coluna D (NF) - índice 2
+        if (estoqueData[j][2] && estoqueData[j][2].toString().trim() !== "") {
+          nfs.push(estoqueData[j][2]);
+        }
+        // Coluna E (Obs) - índice 3
+        if (estoqueData[j][3] && estoqueData[j][3].toString().trim() !== "") {
+          obs.push(estoqueData[j][3]);
+        }
+      }
+    }
+  }
+
+  return {
+    items: Array.from(new Set(items)),        // Remove duplicatas
+    groups: Array.from(new Set(groups)),      // Remove duplicatas
+    nfs: Array.from(new Set(nfs)),            // Remove duplicatas
+    obs: Array.from(new Set(obs)),            // Remove duplicatas
+    medidas: getMedidasList(),                // Lista de unidades de medida
+    observacoes: getObservacoesList()         // Lista de observações pré-definidas
+  };
+}
+
+/**
+ * getLastRegistration: Retorna o último registro de um item (data, estoque e grupo).
+ * OTIMIZADO: Lê apenas as últimas 2000 linhas da planilha ESTOQUE
+ */
+function getLastRegistration(item, currentRow) {
+  Logger.log("=== getLastRegistration INICIADO ===");
+  Logger.log("Item buscado: '" + item + "'");
+  Logger.log("CurrentRow: " + currentRow);
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) {
+    Logger.log("ERRO: Aba ESTOQUE não encontrada!");
+    return { lastDate: null, lastStock: 0, lastGroup: null };
+  }
+
+  var lastRow = sheetEstoque.getLastRow();
+  Logger.log("Última linha da planilha: " + lastRow);
+  if (lastRow < 2) {
+    Logger.log("Planilha vazia - sem dados");
+    return { lastDate: null, lastStock: 0, lastGroup: null };
+  }
+
+  // Lê TODA a planilha como TEXTO (getDisplayValues) para evitar problemas de formato
+  var startRow = 2;
+  var numRows = lastRow - startRow + 1;
+  Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow + " (" + numRows + " linhas)");
+
+  // USA getDisplayValues() para forçar conversão para texto
+  var data = sheetEstoque.getRange(startRow, 1, numRows, 9).getDisplayValues();
+  Logger.log("Usando getDisplayValues() para forçar formato de TEXTO");
+
+  var result = { lastDate: null, lastStock: 0, lastGroup: null };
+  var itemNormalized = normalize(item);
+  Logger.log("Item normalizado: '" + itemNormalized + "'");
+
+  var encontrados = 0;
+  for (var i = data.length - 1; i >= 0; i--) {
+    var rowNum = startRow + i;
+    if (rowNum >= currentRow) continue;
+
+    var currentItem = data[i][1]; // Coluna B (Item) - agora em formato TEXTO
+    if (currentItem && currentItem.toString().trim() !== "") {
+      var currentItemNormalized = normalize(currentItem);
+
+      if (currentItemNormalized === itemNormalized) {
+        encontrados++;
+        result.lastGroup = data[i][0];  // Coluna A (Grupo)
+        result.lastDate = data[i][2];   // Coluna C (Data) - como texto
+        result.lastStock = data[i][8];  // Coluna I (Novo Saldo) - como texto
+        Logger.log("✓ ENCONTRADO na linha " + rowNum);
+        Logger.log("  Grupo: '" + result.lastGroup + "'");
+        Logger.log("  Data: " + result.lastDate);
+        Logger.log("  Estoque: " + result.lastStock);
+        Logger.log("  Item raw: '" + currentItem + "'");
+        break;
+      }
+    }
+  }
+
+  if (encontrados === 0) {
+    Logger.log("✗ NENHUM REGISTRO ENCONTRADO para o item '" + item + "'");
+  }
+
+  Logger.log("=== getLastRegistration FINALIZADO ===");
   return result;
 }
 
@@ -2217,7 +2703,7 @@ function getGruposEstoque() {
   if (!sheet) return [];
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-  var values = sheet.getRange("A2:A" + lastRow).getValues().flat();
+  var values = sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat();
   var grupos = values.filter(function(v) {
     return v.toString().trim() !== "";
   });
@@ -2943,7 +3429,9 @@ function getEspelhoItemList() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("ESPELHO DO ESTOQUE");
   if (!sheet) return [];
-  var values = sheet.getRange("A:A").getValues().flat();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 1) return [];
+  var values = sheet.getRange(1, 1, lastRow, 1).getValues().flat();
   var items = [];
   for (var i = 0; i < values.length; i++) {
     if (values[i] && values[i].toString().trim() !== "") {
@@ -3143,4 +3631,637 @@ function gerarListagemVermelho() {
   }
 
   return 'CORES DESATUALIZADAS atualizada com ' + resultados.length + ' registro(s) mais recente(s) por produto.';
+}
+
+/**
+ * DEBUG: Busca e mostra TODOS os registros de um item na ESTOQUE
+ * Use esta função para verificar se o item existe e como está escrito
+ */
+function debugBuscarItemNaEstoque(itemBuscado) {
+  Logger.log("=== DEBUG: Buscando '" + itemBuscado + "' na ESTOQUE ===");
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  var lastRow = sheetEstoque.getLastRow();
+
+  Logger.log("Total de linhas na ESTOQUE: " + lastRow);
+
+  // Lê TODA a coluna B (Item) - USA getDisplayValues para forçar TEXTO
+  var data = sheetEstoque.getRange(2, 1, lastRow - 1, 2).getDisplayValues();
+  Logger.log("Lendo colunas A (Grupo) e B (Item) como TEXTO");
+
+  var itemNormalized = normalize(itemBuscado);
+  Logger.log("Item normalizado buscado: '" + itemNormalized + "'");
+
+  var encontrados = [];
+  var semelhantes = [];
+
+  for (var i = 0; i < data.length; i++) {
+    var grupo = data[i][0];
+    var item = data[i][1];
+
+    if (item && item.toString().trim() !== "") {
+      var itemStr = item.toString();
+      var itemNorm = normalize(itemStr);
+
+      // Exato
+      if (itemNorm === itemNormalized) {
+        encontrados.push({
+          linha: i + 2,
+          grupo: grupo,
+          item: itemStr,
+          itemNorm: itemNorm
+        });
+      }
+      // Semelhante (contém parte do nome)
+      else if (itemNorm.indexOf(itemNormalized) >= 0 || itemNormalized.indexOf(itemNorm) >= 0) {
+        semelhantes.push({
+          linha: i + 2,
+          grupo: grupo,
+          item: itemStr,
+          itemNorm: itemNorm
+        });
+      }
+    }
+  }
+
+  Logger.log("\n========================================");
+  Logger.log("RESULTADOS:");
+  Logger.log("========================================");
+
+  if (encontrados.length > 0) {
+    Logger.log("\n✓ ENCONTRADOS " + encontrados.length + " registros EXATOS:");
+    for (var j = 0; j < Math.min(10, encontrados.length); j++) {
+      var reg = encontrados[j];
+      Logger.log("  Linha " + reg.linha + ": Grupo='" + reg.grupo + "' | Item='" + reg.item + "'");
+    }
+    if (encontrados.length > 10) {
+      Logger.log("  ... e mais " + (encontrados.length - 10) + " registros");
+    }
+  } else {
+    Logger.log("\n✗ NENHUM registro EXATO encontrado");
+  }
+
+  if (semelhantes.length > 0) {
+    Logger.log("\n≈ ENCONTRADOS " + semelhantes.length + " registros SEMELHANTES:");
+    for (var k = 0; k < Math.min(10, semelhantes.length); k++) {
+      var sem = semelhantes[k];
+      Logger.log("  Linha " + sem.linha + ": Grupo='" + sem.grupo + "' | Item='" + sem.item + "'");
+    }
+    if (semelhantes.length > 10) {
+      Logger.log("  ... e mais " + (semelhantes.length - 10) + " registros");
+    }
+  }
+
+  Logger.log("\n========================================");
+  Logger.log("TOTAL: " + encontrados.length + " exatos, " + semelhantes.length + " semelhantes");
+  Logger.log("========================================");
+
+  return {
+    exatos: encontrados.length,
+    semelhantes: semelhantes.length,
+    amostraExatos: encontrados.slice(0, 5),
+    amostraSemelhantes: semelhantes.slice(0, 5)
+  };
+}
+
+// ========================================
+// WEB APP FUNCTIONS
+// ========================================
+
+/**
+ * loginUser: Autentica usuário no Web App
+ * Verifica usuário e senha na sheet USUÁRIOS
+ * Formato da sheet: Coluna A = Usuário, Coluna B = Senha
+ */
+function loginUser(username, password) {
+  try {
+    // Verifica credenciais no sheet USUÁRIOS
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetUsuarios = ss.getSheetByName("USUÁRIOS");
+
+    if (!sheetUsuarios) {
+      return { success: false, message: "Sheet USUÁRIOS não encontrada" };
+    }
+
+    var lastRow = sheetUsuarios.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum usuário cadastrado" };
+    }
+
+    var data = sheetUsuarios.getRange(2, 1, lastRow - 1, 2).getValues();
+
+    // Remove espaços extras e converte para string
+    var usernameClean = String(username).trim();
+    var passwordClean = String(password).trim();
+
+    Logger.log("Tentativa de login - Usuário: '" + usernameClean + "' | Senha: '" + passwordClean + "'");
+
+    for (var i = 0; i < data.length; i++) {
+      var dbUser = String(data[i][0]).trim();
+      var dbPass = String(data[i][1]).trim();
+
+      Logger.log("Comparando com linha " + (i+2) + " - Usuário: '" + dbUser + "' | Senha: '" + dbPass + "'");
+
+      if (dbUser === usernameClean && dbPass === passwordClean) {
+        // Login bem-sucedido
+        Logger.log("Login bem-sucedido!");
+        PropertiesService.getUserProperties().setProperty("loggedUser", usernameClean);
+        return { success: true, user: usernameClean };
+      }
+    }
+
+    Logger.log("Login falhou - credenciais não encontradas");
+    return { success: false, message: "Usuário ou senha incorretos" };
+  } catch (error) {
+    Logger.log("Erro loginUser: " + error);
+    return { success: false, message: "Erro ao fazer login: " + error.message };
+  }
+}
+
+/**
+ * debugUsuarios: Função para debugar usuários cadastrados
+ * Execute esta função no Apps Script para ver os usuários na aba USUÁRIOS
+ */
+function debugUsuarios() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetUsuarios = ss.getSheetByName("USUÁRIOS");
+
+  if (!sheetUsuarios) {
+    Logger.log("❌ Sheet USUÁRIOS não encontrada!");
+    return;
+  }
+
+  var lastRow = sheetUsuarios.getLastRow();
+  Logger.log("📊 Total de linhas: " + lastRow);
+
+  if (lastRow < 2) {
+    Logger.log("❌ Nenhum usuário cadastrado (sheet vazia)");
+    return;
+  }
+
+  var data = sheetUsuarios.getRange(1, 1, lastRow, 2).getValues();
+
+  Logger.log("\n=== USUÁRIOS CADASTRADOS ===");
+  for (var i = 0; i < data.length; i++) {
+    var user = String(data[i][0]);
+    var pass = String(data[i][1]);
+    Logger.log("Linha " + (i+1) + ":");
+    Logger.log("  Usuário: '" + user + "' (length: " + user.length + ")");
+    Logger.log("  Senha: '" + pass + "' (length: " + pass.length + ")");
+  }
+  Logger.log("=========================\n");
+}
+
+/**
+ * logoutUser: Remove autenticação do usuário
+ */
+function logoutUser() {
+  PropertiesService.getUserProperties().deleteProperty("loggedUser");
+  return { success: true };
+}
+
+/**
+ * getDashboardData: Retorna dados estatísticos para o dashboard
+ */
+function getDashboardData() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var sheetDados = ss.getSheetByName("DADOS");
+
+    if (!sheetEstoque || !sheetDados) {
+      return { success: false };
+    }
+
+    // Total de itens únicos
+    var dataEstoque = sheetEstoque.getRange(2, 2, sheetEstoque.getLastRow() - 1, 1).getValues();
+    var uniqueItems = new Set();
+    dataEstoque.forEach(function(row) {
+      if (row[0]) uniqueItems.add(row[0]);
+    });
+
+    // Total de grupos
+    var dataGrupos = sheetDados.getRange(2, 4, sheetDados.getLastRow() - 1, 1).getValues();
+    var uniqueGroups = new Set();
+    dataGrupos.forEach(function(row) {
+      if (row[0]) uniqueGroups.add(row[0]);
+    });
+
+    // Entradas e saídas de hoje
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var dataMovimentos = sheetEstoque.getRange(2, 3, sheetEstoque.getLastRow() - 1, 5).getValues();
+
+    var recentEntries = 0;
+    var recentExits = 0;
+
+    dataMovimentos.forEach(function(row) {
+      var dataMovimento = new Date(row[0]);
+      dataMovimento.setHours(0, 0, 0, 0);
+
+      if (dataMovimento.getTime() === today.getTime()) {
+        var entrada = parseFloat(row[3]) || 0;
+        var saida = parseFloat(row[4]) || 0;
+
+        if (entrada > 0) recentEntries++;
+        if (saida > 0) recentExits++;
+      }
+    });
+
+    return {
+      success: true,
+      totalItems: uniqueItems.size,
+      totalGroups: uniqueGroups.size,
+      recentEntries: recentEntries,
+      recentExits: recentExits
+    };
+  } catch (error) {
+    Logger.log("Erro getDashboardData: " + error);
+    return { success: false };
+  }
+}
+
+/**
+ * insertGroup: Wrapper para inserir grupo via web app
+ */
+function insertGroup(grupo) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetDados = ss.getSheetByName("DADOS");
+
+    if (!sheetDados) {
+      return { success: false, message: "Sheet DADOS não encontrada" };
+    }
+
+    // Verifica se grupo já existe
+    var lastRow = sheetDados.getLastRow();
+    var existingGroups = sheetDados.getRange(2, 4, Math.max(1, lastRow - 1), 1).getValues();
+
+    for (var i = 0; i < existingGroups.length; i++) {
+      if (normalize(existingGroups[i][0]) === normalize(grupo)) {
+        return { success: false, message: "Grupo já existe" };
+      }
+    }
+
+    // Adiciona grupo
+    var nextRow = sheetDados.getLastRow() + 1;
+    sheetDados.getRange(nextRow, 4).setValue(grupo);
+
+    // Invalida cache
+    invalidateCache();
+
+    return { success: true, message: "Grupo adicionado com sucesso" };
+  } catch (error) {
+    Logger.log("Erro insertGroup: " + error);
+    return { success: false, message: "Erro ao inserir grupo: " + error.message };
+  }
+}
+
+/**
+ * buscarProduto: Wrapper para localizar produto via web app
+ * Retorna dados ordenados do mais novo para o mais antigo, com cores das linhas
+ */
+function buscarProduto(item, dataInicio, dataFim) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum dado encontrado" };
+    }
+
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
+    var dataValues = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getValues(); // Para pegar datas como Date
+    var backgrounds = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getBackgrounds();
+    var results = [];
+    var itemNormalized = normalize(item);
+
+    // Filtra por item e data (se fornecida)
+    for (var i = 0; i < data.length; i++) {
+      var currentItem = normalize(data[i][1]);
+      if (currentItem.indexOf(itemNormalized) >= 0) {
+        // Pega a data como objeto Date (não string) - Coluna D (índice 3)
+        var dataMovimento = dataValues[i][3];
+
+        // Verifica filtro de data
+        if (dataInicio && dataFim) {
+          var inicio = new Date(dataInicio);
+          var fim = new Date(dataFim);
+          inicio.setHours(0, 0, 0, 0);
+          fim.setHours(23, 59, 59, 999);
+
+          if (dataMovimento < inicio || dataMovimento > fim) {
+            continue; // Pula este registro
+          }
+        }
+
+        // Adiciona dados com cor de fundo
+        results.push({
+          row: data[i],
+          background: backgrounds[i][0], // Cor da primeira coluna (toda linha tem mesma cor)
+          date: dataMovimento // Para ordenação (usa Date object real)
+        });
+      }
+    }
+
+    if (results.length === 0) {
+      return { success: false, message: "Produto não encontrado" };
+    }
+
+    // Ordena do mais novo para o mais antigo (descendente)
+    results.sort(function(a, b) {
+      return b.date.getTime() - a.date.getTime();
+    });
+
+    // Extrai apenas as linhas e cores
+    var sortedRows = [];
+    var rowColors = [];
+    for (var j = 0; j < results.length; j++) {
+      sortedRows.push(results[j].row);
+      rowColors.push(results[j].background);
+    }
+
+    return {
+      success: true,
+      data: {
+        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
+        rows: sortedRows,
+        colors: rowColors
+      }
+    };
+  } catch (error) {
+    Logger.log("Erro buscarProduto: " + error);
+    return { success: false, message: "Erro ao buscar produto: " + error.message };
+  }
+}
+
+/**
+ * testeConexao: Função de teste para verificar se a comunicação está funcionando
+ */
+function testeConexao() {
+  return { success: true, message: "Conexão funcionando!", timestamp: new Date().toString() };
+}
+
+/**
+ * carregarTodosOsDadosEstoque: Carrega TODOS os dados do estoque de uma vez
+ * Para filtros instantâneos no lado do cliente
+ */
+function carregarTodosOsDadosEstoque() {
+  // Garantia absoluta de que NUNCA retornará null
+  var resultado = { success: false, message: "Erro desconhecido", data: [] };
+
+  try {
+    Logger.log("=== carregarTodosOsDadosEstoque INICIADO ===");
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      Logger.log("ERRO: Sheet ESTOQUE não encontrada");
+      resultado.message = "Sheet ESTOQUE não encontrada";
+      return resultado;
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    var lastCol = sheetEstoque.getLastColumn();
+    Logger.log("Total de linhas: " + lastRow + ", Total de colunas: " + lastCol);
+
+    if (lastRow < 2) {
+      Logger.log("Planilha vazia - retornando array vazio");
+      return { success: true, data: [], headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"] };
+    }
+
+    // Detecta automaticamente o número de colunas (11 ou 13)
+    var numCols = lastCol >= 13 ? 13 : 11;
+    Logger.log("Usando estrutura de " + numCols + " colunas");
+
+    // Limita a 2.000 registros mais recentes para evitar exceder limite de transferência
+    // Com 43k+ linhas, 10k era grande demais. 2k é suficiente para buscas rápidas.
+    var maxRowsToLoad = 2000;
+    var totalDataRows = lastRow - 1; // Exclui header
+
+    var startRow, numRowsToLoad;
+    if (totalDataRows <= maxRowsToLoad) {
+      // Se tem menos de 2000 linhas, carrega tudo
+      startRow = 2;
+      numRowsToLoad = totalDataRows;
+    } else {
+      // Se tem mais de 2000, carrega apenas as últimas 2000 (mais recentes)
+      startRow = lastRow - maxRowsToLoad + 1;
+      numRowsToLoad = maxRowsToLoad;
+    }
+
+    Logger.log("Carregando " + numRowsToLoad + " linhas (da linha " + startRow + " até " + (startRow + numRowsToLoad - 1) + ")");
+
+    var data = sheetEstoque.getRange(startRow, 1, numRowsToLoad, numCols).getDisplayValues();
+    var dataValues = sheetEstoque.getRange(startRow, 1, numRowsToLoad, numCols).getValues();
+    var backgrounds = sheetEstoque.getRange(startRow, 1, numRowsToLoad, numCols).getBackgrounds();
+
+    Logger.log("Dados carregados - processando...");
+    var allData = [];
+
+    // Define índice da coluna Data baseado no número de colunas
+    var dateColIndex = (numCols === 13) ? 3 : 2;  // Coluna D (índice 3) para 13 cols, C (índice 2) para 11 cols
+
+    for (var i = 0; i < data.length; i++) {
+      allData.push({
+        row: data[i],
+        date: dataValues[i][dateColIndex],
+        background: backgrounds[i][0]
+      });
+    }
+
+    Logger.log("Processamento concluído - " + allData.length + " registros");
+
+    // Headers baseados no número de colunas
+    var headers = (numCols === 13)
+      ? ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"]
+      : ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"];
+
+    Logger.log("=== carregarTodosOsDadosEstoque FINALIZADO COM SUCESSO ===");
+
+    return {
+      success: true,
+      data: allData,
+      headers: headers
+    };
+  } catch (error) {
+    Logger.log("ERRO CRÍTICO em carregarTodosOsDadosEstoque: " + error);
+    Logger.log("Stack trace: " + error.stack);
+    resultado.message = "Erro ao carregar dados: " + error.message;
+    resultado.error = error.toString();
+    return resultado;
+  }
+
+  // Garantia final - nunca deve chegar aqui
+  return resultado;
+}
+
+/**
+ * mostrarTodosProdutos: Retorna todos os produtos do estoque
+ * Ordenados do mais novo para o mais antigo, com cores
+ */
+function mostrarTodosProdutos(dataInicio, dataFim) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum dado encontrado" };
+    }
+
+    var data = sheetEstoque.getRange(2, 1, Math.min(5000, lastRow - 1), 11).getDisplayValues();
+    var dataValues = sheetEstoque.getRange(2, 1, Math.min(5000, lastRow - 1), 11).getValues(); // Para pegar datas como Date
+    var backgrounds = sheetEstoque.getRange(2, 1, Math.min(5000, lastRow - 1), 11).getBackgrounds();
+    var results = [];
+
+    // Filtra por data (se fornecida)
+    for (var i = 0; i < data.length; i++) {
+      var dataMovimento = dataValues[i][2]; // Usa Date object real
+
+      if (dataInicio && dataFim) {
+        var inicio = new Date(dataInicio);
+        var fim = new Date(dataFim);
+        inicio.setHours(0, 0, 0, 0);
+        fim.setHours(23, 59, 59, 999);
+
+        if (dataMovimento < inicio || dataMovimento > fim) {
+          continue; // Pula este registro
+        }
+      }
+
+      results.push({
+        row: data[i],
+        background: backgrounds[i][0],
+        date: dataMovimento // Usa Date object real
+      });
+    }
+
+    // Ordena do mais novo para o mais antigo (descendente)
+    results.sort(function(a, b) {
+      return b.date.getTime() - a.date.getTime();
+    });
+
+    // Extrai apenas as linhas e cores
+    var sortedRows = [];
+    var rowColors = [];
+    for (var j = 0; j < results.length; j++) {
+      sortedRows.push(results[j].row);
+      rowColors.push(results[j].background);
+    }
+
+    return {
+      success: true,
+      data: {
+        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
+        rows: sortedRows,
+        colors: rowColors
+      }
+    };
+  } catch (error) {
+    Logger.log("Erro mostrarTodosProdutos: " + error);
+    return { success: false, message: "Erro ao buscar produtos: " + error.message };
+  }
+}
+
+/**
+ * filtrarEstoquePorPeriodo: Aplica filtro por período na planilha
+ */
+function filtrarEstoquePorPeriodo(dataInicio, dataFim) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    // Remove filtro existente
+    var filter = sheetEstoque.getFilter();
+    if (filter) {
+      filter.remove();
+    }
+
+    // Cria novo filtro
+    var lastRow = sheetEstoque.getLastRow();
+    var lastCol = sheetEstoque.getLastColumn();
+    var range = sheetEstoque.getRange(1, 1, lastRow, lastCol);
+
+    var newFilter = range.createFilter();
+
+    // Aplica filtro na coluna C (Data)
+    var inicio = new Date(dataInicio);
+    var fim = new Date(dataFim);
+
+    var criteria = SpreadsheetApp.newFilterCriteria()
+      .whenDateAfter(inicio)
+      .whenDateBefore(fim)
+      .build();
+
+    newFilter.setColumnFilterCriteria(3, criteria);
+
+    return { success: true, message: "Filtro aplicado com sucesso" };
+  } catch (error) {
+    Logger.log("Erro filtrarEstoquePorPeriodo: " + error);
+    return { success: false, message: "Erro ao filtrar: " + error.message };
+  }
+}
+
+/**
+ * getEstoque3Meses: Retorna estoque dos últimos 3 meses
+ */
+function getEstoque3Meses() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum dado encontrado" };
+    }
+
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getValues();
+    var results = [];
+
+    var today = new Date();
+    var threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(today.getMonth() - 3);
+
+    for (var i = 0; i < data.length; i++) {
+      var dataMovimento = new Date(data[i][2]);
+      if (dataMovimento >= threeMonthsAgo) {
+        results.push(data[i]);
+      }
+    }
+
+    if (results.length === 0) {
+      return { success: false, message: "Nenhum movimento nos últimos 3 meses" };
+    }
+
+    return {
+      success: true,
+      data: {
+        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
+        rows: results
+      }
+    };
+  } catch (error) {
+    Logger.log("Erro getEstoque3Meses: " + error);
+    return { success: false, message: "Erro ao buscar estoque: " + error.message };
+  }
 }
