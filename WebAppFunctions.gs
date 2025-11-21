@@ -754,3 +754,108 @@ function limparFiltroEstoqueWebApp() {
     return { success: false, message: "Erro ao remover filtro: " + error.message };
   }
 }
+
+// ========================================
+// FUNÇÕES DE SINCRONIZAÇÃO - IndexedDB
+// ========================================
+
+/**
+ * getAllDataForSync: Retorna TODOS os dados formatados para sincronização inicial
+ * Usado apenas no primeiro carregamento ou refresh completo
+ */
+function getAllDataForSync() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: true, data: [] };
+    }
+
+    var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, 13);
+    var data = dataRange.getDisplayValues();
+    var backgrounds = dataRange.getBackgrounds();
+
+    var records = [];
+    for (var i = 0; i < data.length; i++) {
+      var dateStr = data[i][3]; // Coluna D (Data)
+      var rowDate = dateStr ? new Date(dateStr) : new Date(0);
+
+      records.push({
+        row: data[i],
+        date: rowDate.getTime(),
+        background: backgrounds[i][0] || null
+      });
+    }
+
+    Logger.log("getAllDataForSync: " + records.length + " registros");
+    return { success: true, data: records };
+
+  } catch (error) {
+    Logger.log("Erro getAllDataForSync: " + error);
+    return { success: false, message: "Erro ao buscar dados: " + error.message };
+  }
+}
+
+/**
+ * getNewRecordsSince: Retorna registros inseridos/modificados desde um timestamp
+ * Usado para sincronização incremental (a cada 10 segundos)
+ * @param {number} sinceTimestamp - Timestamp em milissegundos
+ */
+function getNewRecordsSince(sinceTimestamp) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: true, newRecords: [] };
+    }
+
+    // Converte timestamp para Date
+    var sinceDate = new Date(sinceTimestamp || 0);
+
+    var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, 13);
+    var data = dataRange.getDisplayValues();
+    var backgrounds = dataRange.getBackgrounds();
+
+    var newRecords = [];
+
+    for (var i = 0; i < data.length; i++) {
+      var dateStr = data[i][3]; // Coluna D (Data)
+      var rowDate = dateStr ? new Date(dateStr) : new Date(0);
+
+      // Também verifica coluna L (Alterado Em) para pegar edições
+      var alteredStr = data[i][11]; // Coluna L (Alterado Em)
+      var alteredDate = alteredStr ? new Date(alteredStr) : new Date(0);
+
+      // Usa a data mais recente entre Data e Alterado Em
+      var effectiveDate = alteredDate > rowDate ? alteredDate : rowDate;
+
+      // Se o registro é mais recente que o último sync, inclui
+      if (effectiveDate > sinceDate) {
+        newRecords.push({
+          row: data[i],
+          date: rowDate.getTime(),
+          background: backgrounds[i][0] || null
+        });
+      }
+    }
+
+    Logger.log("getNewRecordsSince: " + newRecords.length + " novos registros desde " + sinceDate.toLocaleString());
+    return { success: true, newRecords: newRecords };
+
+  } catch (error) {
+    Logger.log("Erro getNewRecordsSince: " + error);
+    return { success: false, message: "Erro ao buscar novos registros: " + error.message };
+  }
+}

@@ -1023,6 +1023,366 @@
     let estoqueHeaders = null;
 
     // ========================================
+    // INDEXEDDB - Banco de dados local para acesso instantâneo
+    // ========================================
+    const DB_CONFIG = {
+      name: 'EstoqueDB',
+      version: 1,
+      storeName: 'registros',
+      syncInterval: 10000, // 10 segundos
+      metaStore: 'meta'
+    };
+
+    let db = null;
+    let syncTimer = null;
+
+    /**
+     * Inicializa o IndexedDB
+     */
+    function initIndexedDB() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_CONFIG.name, DB_CONFIG.version);
+
+        request.onerror = () => {
+          console.error('Erro ao abrir IndexedDB:', request.error);
+          reject(request.error);
+        };
+
+        request.onsuccess = () => {
+          db = request.result;
+          console.log('IndexedDB inicializado');
+          resolve(db);
+        };
+
+        request.onupgradeneeded = (event) => {
+          const database = event.target.result;
+
+          // Store principal: registros de estoque
+          if (!database.objectStoreNames.contains(DB_CONFIG.storeName)) {
+            const store = database.createObjectStore(DB_CONFIG.storeName, { keyPath: 'id', autoIncrement: true });
+            store.createIndex('item', 'item', { unique: false });
+            store.createIndex('date', 'date', { unique: false });
+            store.createIndex('itemDate', ['item', 'date'], { unique: false });
+          }
+
+          // Store de metadados (última sincronização, etc)
+          if (!database.objectStoreNames.contains(DB_CONFIG.metaStore)) {
+            database.createObjectStore(DB_CONFIG.metaStore, { keyPath: 'key' });
+          }
+
+          console.log('IndexedDB estrutura criada');
+        };
+      });
+    }
+
+    /**
+     * Salva registros no IndexedDB
+     */
+    async function saveToIndexedDB(records) {
+      if (!db) return;
+
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([DB_CONFIG.storeName], 'readwrite');
+        const store = transaction.objectStore(DB_CONFIG.storeName);
+
+        records.forEach(record => {
+          store.put(record);
+        });
+
+        transaction.oncomplete = () => {
+          console.log('IndexedDB: ' + records.length + ' registros salvos');
+          resolve();
+        };
+
+        transaction.onerror = () => {
+          console.error('Erro ao salvar no IndexedDB:', transaction.error);
+          reject(transaction.error);
+        };
+      });
+    }
+
+    /**
+     * Limpa e recarrega todos os dados no IndexedDB
+     */
+    async function reloadIndexedDB(serverData) {
+      if (!db) return;
+
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([DB_CONFIG.storeName, DB_CONFIG.metaStore], 'readwrite');
+        const store = transaction.objectStore(DB_CONFIG.storeName);
+        const metaStore = transaction.objectStore(DB_CONFIG.metaStore);
+
+        // Limpa dados antigos
+        store.clear();
+
+        // Adiciona novos dados
+        serverData.forEach((record, index) => {
+          store.put({
+            id: index + 1,
+            row: record.row,
+            item: record.row[1] ? record.row[1].toString().trim().toLowerCase() : '',
+            date: record.date,
+            background: record.background
+          });
+        });
+
+        // Salva timestamp da última sincronização
+        metaStore.put({ key: 'lastSync', value: Date.now() });
+        metaStore.put({ key: 'recordCount', value: serverData.length });
+
+        transaction.oncomplete = () => {
+          console.log('IndexedDB recarregado: ' + serverData.length + ' registros');
+          resolve();
+        };
+
+        transaction.onerror = () => reject(transaction.error);
+      });
+    }
+
+    /**
+     * Busca registros de um item no IndexedDB (INSTANTÂNEO!)
+     */
+    async function getFromIndexedDB(itemName, limit) {
+      if (!db) return null;
+
+      limit = limit || 20;
+      const itemKey = itemName ? itemName.toString().trim().toLowerCase() : '';
+
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([DB_CONFIG.storeName], 'readonly');
+        const store = transaction.objectStore(DB_CONFIG.storeName);
+        const index = store.index('item');
+        const results = [];
+
+        const request = index.openCursor(IDBKeyRange.only(itemKey));
+
+        request.onsuccess = (event) => {
+          const cursor = event.target.result;
+          if (cursor) {
+            results.push(cursor.value);
+            cursor.continue();
+          } else {
+            // Ordena por data (mais novo primeiro) e limita
+            results.sort((a, b) => b.date - a.date);
+            resolve(results.slice(0, limit));
+          }
+        };
+
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    /**
+     * Busca todos os registros do IndexedDB
+     */
+    async function getAllFromIndexedDB() {
+      if (!db) return [];
+
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([DB_CONFIG.storeName], 'readonly');
+        const store = transaction.objectStore(DB_CONFIG.storeName);
+        const request = store.getAll();
+
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    /**
+     * Obtém timestamp da última sincronização
+     */
+    async function getLastSyncTime() {
+      if (!db) return 0;
+
+      return new Promise((resolve) => {
+        const transaction = db.transaction([DB_CONFIG.metaStore], 'readonly');
+        const store = transaction.objectStore(DB_CONFIG.metaStore);
+        const request = store.get('lastSync');
+
+        request.onsuccess = () => resolve(request.result ? request.result.value : 0);
+        request.onerror = () => resolve(0);
+      });
+    }
+
+    /**
+     * Sincronização inicial - carrega todos os dados do servidor
+     */
+    async function initialSync() {
+      console.log('Sincronização inicial...');
+      showSyncStatus('Carregando dados...');
+
+      return new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(async function(result) {
+            if (result && result.success && result.data) {
+              await reloadIndexedDB(result.data);
+              // Também atualiza o índice em memória
+              buildMemoryIndexFromIDB();
+              showSyncStatus('Dados carregados!', 'success');
+              setTimeout(() => hideSyncStatus(), 2000);
+              resolve();
+            } else {
+              showSyncStatus('Erro ao carregar', 'error');
+              reject(new Error(result ? result.message : 'Erro desconhecido'));
+            }
+          })
+          .withFailureHandler(function(error) {
+            showSyncStatus('Erro: ' + error.message, 'error');
+            reject(error);
+          })
+          .getAllDataForSync();
+      });
+    }
+
+    /**
+     * Sincronização incremental - busca apenas novos registros (a cada 10 segundos)
+     */
+    async function incrementalSync() {
+      if (!db) return;
+
+      const lastSync = await getLastSyncTime();
+      console.log('Sync incremental desde:', new Date(lastSync).toLocaleString());
+
+      google.script.run
+        .withSuccessHandler(async function(result) {
+          if (result && result.success && result.newRecords && result.newRecords.length > 0) {
+            console.log('Novos registros encontrados:', result.newRecords.length);
+
+            // Adiciona novos registros ao IndexedDB
+            const records = result.newRecords.map((record, idx) => ({
+              id: Date.now() + idx, // ID único
+              row: record.row,
+              item: record.row[1] ? record.row[1].toString().trim().toLowerCase() : '',
+              date: record.date,
+              background: record.background
+            }));
+
+            await saveToIndexedDB(records);
+
+            // Atualiza timestamp
+            const transaction = db.transaction([DB_CONFIG.metaStore], 'readwrite');
+            transaction.objectStore(DB_CONFIG.metaStore).put({ key: 'lastSync', value: Date.now() });
+
+            // Atualiza índice em memória
+            buildMemoryIndexFromIDB();
+
+            // Mostra indicador discreto
+            showSyncStatus('+' + result.newRecords.length + ' novos', 'success');
+            setTimeout(() => hideSyncStatus(), 1500);
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.log('Erro sync incremental:', error.message);
+        })
+        .getNewRecordsSince(lastSync);
+    }
+
+    /**
+     * Inicia sincronização automática a cada 10 segundos
+     */
+    function startAutoSync() {
+      if (syncTimer) clearInterval(syncTimer);
+
+      syncTimer = setInterval(() => {
+        incrementalSync();
+      }, DB_CONFIG.syncInterval);
+
+      console.log('Auto-sync iniciado: a cada ' + (DB_CONFIG.syncInterval/1000) + ' segundos');
+    }
+
+    /**
+     * Para sincronização automática
+     */
+    function stopAutoSync() {
+      if (syncTimer) {
+        clearInterval(syncTimer);
+        syncTimer = null;
+      }
+    }
+
+    /**
+     * Constrói índice em memória a partir do IndexedDB
+     */
+    async function buildMemoryIndexFromIDB() {
+      const allRecords = await getAllFromIndexedDB();
+      const index = {};
+
+      allRecords.forEach(record => {
+        const itemKey = record.item;
+        if (!itemKey) return;
+
+        if (!index[itemKey]) {
+          index[itemKey] = {
+            info: {
+              item: record.row[1],
+              group: record.row[0],
+              lastDate: record.row[3],
+              lastStock: record.row[9],
+              unidade: record.row[2]
+            },
+            history: []
+          };
+        }
+
+        index[itemKey].history.push({
+          row: record.row,
+          date: record.date,
+          background: record.background
+        });
+
+        // Atualiza info se mais recente
+        if (record.date > new Date(index[itemKey].info.lastDate).getTime()) {
+          index[itemKey].info.lastDate = record.row[3];
+          index[itemKey].info.lastStock = record.row[9];
+          index[itemKey].info.group = record.row[0];
+        }
+      });
+
+      // Ordena histórico de cada item
+      for (const key in index) {
+        index[key].history.sort((a, b) => b.date - a.date);
+        index[key].history = index[key].history.slice(0, 20); // Mantém últimos 20
+      }
+
+      itemHistoryIndex = index;
+      console.log('Índice em memória atualizado: ' + Object.keys(index).length + ' itens');
+    }
+
+    /**
+     * Mostra status de sincronização
+     */
+    function showSyncStatus(message, type) {
+      let statusEl = document.getElementById('syncStatus');
+      if (!statusEl) {
+        statusEl = document.createElement('div');
+        statusEl.id = 'syncStatus';
+        statusEl.style.cssText = 'position:fixed;bottom:20px;right:20px;padding:8px 16px;border-radius:4px;font-size:12px;z-index:9999;transition:opacity 0.3s;';
+        document.body.appendChild(statusEl);
+      }
+
+      statusEl.textContent = message;
+      statusEl.style.opacity = '1';
+
+      if (type === 'success') {
+        statusEl.style.background = '#4CAF50';
+        statusEl.style.color = 'white';
+      } else if (type === 'error') {
+        statusEl.style.background = '#f44336';
+        statusEl.style.color = 'white';
+      } else {
+        statusEl.style.background = '#2196F3';
+        statusEl.style.color = 'white';
+      }
+    }
+
+    function hideSyncStatus() {
+      const statusEl = document.getElementById('syncStatus');
+      if (statusEl) {
+        statusEl.style.opacity = '0';
+      }
+    }
+
+    // ========================================
     // CACHE NO CLIENTE - localStorage
     // ========================================
     const CLIENT_CACHE = {
@@ -1243,16 +1603,28 @@
       showLoading(true);
 
       google.script.run
-        .withSuccessHandler(function(result) {
+        .withSuccessHandler(async function(result) {
           showLoading(false);
           if (result.success) {
             currentUser = result.user;
             document.getElementById('userName').textContent = currentUser;
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('mainApp').style.display = 'block';
+
+            // Carrega dados básicos
             loadDashboardData();
             loadAutocompleteData();
-            loadItemHistoryIndex(); // NOVO: Carrega índice de histórico para acesso instantâneo
+
+            // Inicializa IndexedDB e sincronização
+            try {
+              await initIndexedDB();
+              await initialSync(); // Carrega todos os dados
+              startAutoSync(); // Inicia sync automático a cada 10 segundos
+            } catch (e) {
+              console.error('Erro ao inicializar IndexedDB:', e);
+              // Fallback: usa método antigo
+              loadItemHistoryIndex();
+            }
           } else {
             showMessage('loginMessage', result.message || 'Login falhou', 'error');
           }
@@ -1269,6 +1641,7 @@
     // Logout handler
     function handleLogout() {
       if (confirm('Deseja realmente sair?')) {
+        stopAutoSync(); // Para sincronização automática
         google.script.run
           .withSuccessHandler(function() {
             location.reload();
@@ -1755,77 +2128,71 @@
         }
       }
 
-      showLoading(true);
-
-      // Guarda o item para buscar histórico depois
+      // Guarda o item para uso posterior
       const itemInserido = formData.item;
       const entradaValor = entrada;
       const saidaValor = saida;
 
+      // ========================================
+      // OTIMIZAÇÃO: Mostra resultado INSTANTÂNEO (antes de enviar ao servidor)
+      // ========================================
+
+      // 1. Mostra mensagem de sucesso imediatamente
+      const tipoMov = entradaValor > 0 ? 'ENTRADA' : 'SAÍDA';
+      const qtdMov = entradaValor > 0 ? entradaValor : saidaValor;
+      document.getElementById('estoqueResultMessage').innerHTML =
+        '<strong>' + tipoMov + '</strong> de <strong>' + qtdMov + '</strong> unidade(s) do item <strong>' + itemInserido + '</strong> registrada com sucesso!';
+
+      // 2. Mostra histórico do índice local INSTANTANEAMENTE
+      const localHistory = getItemHistoryFromIndex(itemInserido);
+      if (localHistory) {
+        const displayData = formatHistoryForDisplay(localHistory, 20);
+        if (displayData && displayData.rows.length > 0) {
+          displayTable('estoqueResultTable', displayData);
+        } else {
+          document.getElementById('estoqueResultTable').innerHTML = '<p style="text-align:center;padding:10px;">Salvando...</p>';
+        }
+      } else {
+        document.getElementById('estoqueResultTable').innerHTML = '<p style="text-align:center;padding:10px;">Salvando...</p>';
+      }
+
+      // 3. Esconde formulário e mostra resultados IMEDIATAMENTE
+      document.getElementById('estoqueFormArea').style.display = 'none';
+      document.getElementById('estoqueResultArea').style.display = 'block';
+      document.querySelector('#estoqueResultArea .btn-group').style.display = 'flex'; // Mostra botão imediatamente
+      resetEstoqueForm();
+
+      // 4. Envia para servidor EM BACKGROUND
+      showSyncStatus('Sincronizando...', 'info');
+
       google.script.run
-        .withSuccessHandler(function(result) {
-          showLoading(false);
+        .withSuccessHandler(async function(result) {
           if (result.success) {
-            clearClientCache(); // Limpa cache cliente para forçar atualização
+            clearClientCache();
             loadDashboardData();
             loadAutocompleteData();
 
-            // Mostra mensagem de sucesso na área de resultados
-            const tipoMov = entradaValor > 0 ? 'ENTRADA' : 'SAÍDA';
-            const qtdMov = entradaValor > 0 ? entradaValor : saidaValor;
-            document.getElementById('estoqueResultMessage').innerHTML =
-              '<strong>' + tipoMov + '</strong> de <strong>' + qtdMov + '</strong> unidade(s) do item <strong>' + itemInserido + '</strong> registrada com sucesso!';
+            // Força sincronização para pegar o novo registro
+            await incrementalSync();
 
-            // Mostra indicador de carregamento na tabela
-            document.getElementById('estoqueResultTable').innerHTML = '<p style="text-align:center;padding:20px;">⏳ Carregando histórico...</p>';
-
-            // Esconde formulário e mostra área de resultados (SEM botão ainda)
-            document.getElementById('estoqueFormArea').style.display = 'none';
-            document.getElementById('estoqueResultArea').style.display = 'block';
-            document.querySelector('#estoqueResultArea .btn-group').style.display = 'none'; // Esconde botão
-
-            // Busca histórico atualizado usando getItemHistory (mais rápido, usa índice)
+            // Atualiza a tabela com dados reais do servidor
             google.script.run
               .withSuccessHandler(function(histResult) {
                 if (histResult.success && histResult.data && histResult.data.rows.length > 0) {
                   displayTable('estoqueResultTable', histResult.data);
-                } else {
-                  // Fallback: busca completa no servidor se índice não encontrar
-                  google.script.run
-                    .withSuccessHandler(function(fullResult) {
-                      if (fullResult.success && fullResult.data) {
-                        displayTable('estoqueResultTable', fullResult.data);
-                      } else {
-                        document.getElementById('estoqueResultTable').innerHTML = '<p>Registro inserido, mas histórico não disponível.</p>';
-                      }
-                      // Mostra botão após carregar
-                      document.querySelector('#estoqueResultArea .btn-group').style.display = 'flex';
-                    })
-                    .withFailureHandler(function(err) {
-                      document.getElementById('estoqueResultTable').innerHTML = '<p>Erro ao carregar histórico.</p>';
-                      document.querySelector('#estoqueResultArea .btn-group').style.display = 'flex';
-                    })
-                    .buscarProduto(itemInserido, null, null);
-                  return;
                 }
-                // Mostra botão após carregar lista
-                document.querySelector('#estoqueResultArea .btn-group').style.display = 'flex';
-              })
-              .withFailureHandler(function(err) {
-                document.getElementById('estoqueResultTable').innerHTML = '<p>Erro ao carregar histórico.</p>';
-                document.querySelector('#estoqueResultArea .btn-group').style.display = 'flex';
               })
               .getItemHistory(itemInserido);
 
-            // Recarrega índice de histórico em background (para próximas consultas)
-            fetchHistoryIndexFromServer();
-            resetEstoqueForm();
+            showSyncStatus('Salvo!', 'success');
+            setTimeout(() => hideSyncStatus(), 1500);
           } else {
+            showSyncStatus('Erro ao salvar', 'error');
             showMessage('estoqueMessage', result.message || 'Erro ao inserir estoque', 'error');
           }
         })
         .withFailureHandler(function(error) {
-          showLoading(false);
+          showSyncStatus('Erro: ' + error.message, 'error');
           showMessage('estoqueMessage', 'Erro: ' + error.message, 'error');
         })
         .processEstoqueWebApp(formData);
