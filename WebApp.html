@@ -698,59 +698,76 @@
         <!-- Inserir Estoque Module -->
         <div id="module-inserir-estoque" class="module-container">
           <div class="content-card">
-            <h2>📦 Inserir Estoque</h2>
-            <div id="estoqueMessage" class="message"></div>
-            <form id="estoqueForm" onsubmit="return handleInserirEstoque(event)">
-              <div class="form-group">
-                <label for="estoqueItem">Produto *</label>
-                <input type="text" id="estoqueItem" list="itemList" required>
-                <datalist id="itemList"></datalist>
-              </div>
-              <div class="form-group">
-                <label for="estoqueGroup">Grupo *</label>
-                <input type="text" id="estoqueGroup" list="groupList" required>
-                <datalist id="groupList"></datalist>
-              </div>
-              <div class="form-group">
-                <label for="estoqueNF">NF</label>
-                <input type="text" id="estoqueNF" list="nfList">
-                <datalist id="nfList"></datalist>
-              </div>
-              <div class="form-group">
-                <label for="estoqueUnidade">Unidade de Medida *</label>
-                <select id="estoqueUnidade" required>
-                  <option value="">Selecione...</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="estoqueObs">Observação</label>
-                <select id="estoqueObs">
-                  <option value="">Selecione...</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="estoqueEntrada">Entrada</label>
-                <input type="number" id="estoqueEntrada" step="0.01" value="0" onchange="toggleValorUnitario()">
-              </div>
-              <div class="form-group">
-                <label for="estoqueSaida">Saída</label>
-                <input type="number" id="estoqueSaida" step="0.01" value="0" onchange="toggleValorUnitario()">
-              </div>
-              <div class="form-group" id="valorUnitarioGroup" style="display: none;">
-                <label for="estoqueValorUnitario">Valor Unitário (R$) *</label>
-                <input type="number" id="estoqueValorUnitario" step="0.01" min="0">
-              </div>
-              <div class="btn-group">
-                <button type="submit" class="btn btn-success">✓ Confirmar</button>
-                <button type="button" class="btn btn-warning" onclick="resetEstoqueForm()">↻ Limpar</button>
-              </div>
-            </form>
+            <!-- FORMULÁRIO DE INSERÇÃO -->
+            <div id="estoqueFormArea">
+              <h2>📦 Inserir Estoque</h2>
+              <div id="estoqueMessage" class="message"></div>
+              <form id="estoqueForm" onsubmit="return handleInserirEstoque(event)">
+                <!-- Grid compacto 2 colunas -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="estoqueItem" style="font-size: 0.85rem;">Produto *</label>
+                    <input type="text" id="estoqueItem" list="itemList" required style="padding: 6px;">
+                    <datalist id="itemList"></datalist>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="estoqueGroup" style="font-size: 0.85rem;">Grupo *</label>
+                    <input type="text" id="estoqueGroup" list="groupList" required style="padding: 6px;">
+                    <datalist id="groupList"></datalist>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="estoqueUnidade" style="font-size: 0.85rem;">Unidade *</label>
+                    <select id="estoqueUnidade" required style="padding: 6px;">
+                      <option value="">Selecione...</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="estoqueNF" style="font-size: 0.85rem;">NF</label>
+                    <input type="text" id="estoqueNF" list="nfList" style="padding: 6px;">
+                    <datalist id="nfList"></datalist>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="estoqueObs" style="font-size: 0.85rem;">Observação</label>
+                    <select id="estoqueObs" style="padding: 6px;">
+                      <option value="">Selecione...</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="estoqueEntrada" style="font-size: 0.85rem;">Entrada</label>
+                    <input type="number" id="estoqueEntrada" step="0.01" value="0" onchange="toggleValorUnitario()" style="padding: 6px;">
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="estoqueSaida" style="font-size: 0.85rem;">Saída</label>
+                    <input type="number" id="estoqueSaida" step="0.01" value="0" onchange="toggleValorUnitario()" style="padding: 6px;">
+                  </div>
+                  <div class="form-group" id="valorUnitarioGroup" style="margin-bottom: 8px; display: none;">
+                    <label for="estoqueValorUnitario" style="font-size: 0.85rem;">Valor Unit. (R$) *</label>
+                    <input type="number" id="estoqueValorUnitario" step="0.01" min="0" style="padding: 6px;">
+                  </div>
+                </div>
+                <div class="btn-group" style="margin-top: 10px;">
+                  <button type="submit" class="btn btn-success">✓ Confirmar</button>
+                  <button type="button" class="btn btn-warning" onclick="resetEstoqueForm()">↻ Limpar</button>
+                </div>
+              </form>
 
-            <!-- Histórico do Produto -->
-            <div id="estoqueHistorico" style="display: none; margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 4px;">
-              <h3 style="margin-top: 0; color: #666; font-size: 0.9rem;">📊 Histórico do Produto</h3>
-              <div id="estoqueHistoricoContent" class="table-container" style="max-height: 300px; overflow-y: auto;">
-                <!-- Tabela de histórico será inserida aqui -->
+              <!-- Histórico do Produto (durante digitação) -->
+              <div id="estoqueHistorico" style="display: none; margin-top: 15px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
+                <h3 style="margin: 0 0 10px 0; color: #666; font-size: 0.85rem;">📊 Histórico do Produto</h3>
+                <div id="estoqueHistoricoContent" class="table-container" style="max-height: 200px; overflow-y: auto;">
+                </div>
+              </div>
+            </div>
+
+            <!-- ÁREA DE RESULTADOS APÓS INSERÇÃO -->
+            <div id="estoqueResultArea" style="display: none;">
+              <h2>✅ Estoque Inserido com Sucesso!</h2>
+              <div id="estoqueResultMessage" style="background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 15px;"></div>
+              <h3 style="margin: 15px 0 10px 0; font-size: 0.9rem;">📋 Movimentações do Item:</h3>
+              <div id="estoqueResultTable" class="table-container" style="max-height: 400px; overflow-y: auto;">
+              </div>
+              <div class="btn-group" style="margin-top: 15px;">
+                <button type="button" class="btn btn-primary" onclick="voltarParaFormulario()">✓ OK - Inserir Novo</button>
               </div>
             </div>
           </div>
@@ -1460,15 +1477,42 @@
 
       showLoading(true);
 
+      // Guarda o item para buscar histórico depois
+      const itemInserido = formData.item;
+      const entradaValor = entrada;
+      const saidaValor = saida;
+
       google.script.run
         .withSuccessHandler(function(result) {
           showLoading(false);
           if (result.success) {
-            showMessage('estoqueMessage', 'Estoque inserido com sucesso!', 'success');
-            resetEstoqueForm();
             loadDashboardData();
-            // loadAllEstoqueData(true); // REMOVIDO - busca direto da planilha
-            loadAutocompleteData(); // Atualiza autocomplete com novos itens
+            loadAutocompleteData();
+
+            // Mostra mensagem de sucesso na área de resultados
+            const tipoMov = entradaValor > 0 ? 'ENTRADA' : 'SAÍDA';
+            const qtdMov = entradaValor > 0 ? entradaValor : saidaValor;
+            document.getElementById('estoqueResultMessage').innerHTML =
+              '<strong>' + tipoMov + '</strong> de <strong>' + qtdMov + '</strong> unidade(s) do item <strong>' + itemInserido + '</strong> registrada com sucesso!';
+
+            // Busca histórico atualizado do item no servidor
+            google.script.run
+              .withSuccessHandler(function(histResult) {
+                if (histResult.success && histResult.data) {
+                  displayTable('estoqueResultTable', histResult.data);
+                } else {
+                  document.getElementById('estoqueResultTable').innerHTML = '<p>Nenhum histórico encontrado.</p>';
+                }
+              })
+              .withFailureHandler(function(err) {
+                document.getElementById('estoqueResultTable').innerHTML = '<p>Erro ao carregar histórico.</p>';
+              })
+              .buscarProduto(itemInserido, null, null);
+
+            // Esconde formulário e mostra resultados
+            document.getElementById('estoqueFormArea').style.display = 'none';
+            document.getElementById('estoqueResultArea').style.display = 'block';
+            resetEstoqueForm();
           } else {
             showMessage('estoqueMessage', result.message || 'Erro ao inserir estoque', 'error');
           }
@@ -1490,6 +1534,13 @@
       document.getElementById('estoqueValorUnitario').value = '';
       document.getElementById('valorUnitarioGroup').style.display = 'none';
       document.getElementById('estoqueHistorico').style.display = 'none';
+      document.getElementById('estoqueItem').focus();
+    }
+
+    // Volta da área de resultados para o formulário de inserção
+    function voltarParaFormulario() {
+      document.getElementById('estoqueResultArea').style.display = 'none';
+      document.getElementById('estoqueFormArea').style.display = 'block';
       document.getElementById('estoqueItem').focus();
     }
 
