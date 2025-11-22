@@ -1288,8 +1288,7 @@ function calcularEstoque3Meses(listaItens) {
 // ========================================
 
 /**
- * buscarCoresDesatualizadas: Lista itens com mais de 15 dias sem lançamento
- * e sem a palavra ATUALIZAÇÃO na coluna obs do último lançamento
+ * buscarCoresDesatualizadas: Lista itens que NÃO tiveram lançamento com ATUALIZAÇÃO nos últimos 15 dias
  * @return {object} - { success, data: { headers, rows, colors }, totalItens }
  */
 function buscarCoresDesatualizadas() {
@@ -1309,14 +1308,14 @@ function buscarCoresDesatualizadas() {
     // Data limite: 15 dias atrás
     var dataLimite = new Date();
     dataLimite.setDate(dataLimite.getDate() - 15);
-    dataLimite.setHours(23, 59, 59, 999);
+    dataLimite.setHours(0, 0, 0, 0);
 
     // Lê todos os dados
     var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, 13);
     var data = dataRange.getDisplayValues();
     var backgrounds = dataRange.getBackgrounds();
 
-    // Mapeia o último registro de cada item
+    // Mapeia: último registro de cada item E se teve ATUALIZAÇÃO nos últimos 15 dias
     var itemsMap = {};
 
     for (var i = 0; i < data.length; i++) {
@@ -1329,21 +1328,35 @@ function buscarCoresDesatualizadas() {
       var obs = data[i][5] ? data[i][5].toString().toUpperCase() : ''; // Coluna F (Obs)
       var rowIndex = i;
 
-      // Se não existe ou é mais recente, atualiza
-      if (!itemsMap[itemKey] ||
-          rowDate > itemsMap[itemKey].date ||
-          (rowDate.getTime() === itemsMap[itemKey].date.getTime() && rowIndex > itemsMap[itemKey].rowIndex)) {
+      // Inicializa o item se não existir
+      if (!itemsMap[itemKey]) {
         itemsMap[itemKey] = {
           row: data[i],
           date: rowDate,
           rowIndex: rowIndex,
-          obs: obs,
-          background: backgrounds[i][0] || null
+          background: backgrounds[i][0] || null,
+          teveAtualizacao15Dias: false
         };
+      }
+
+      // Atualiza último registro se este for mais recente
+      if (rowDate > itemsMap[itemKey].date ||
+          (rowDate.getTime() === itemsMap[itemKey].date.getTime() && rowIndex > itemsMap[itemKey].rowIndex)) {
+        itemsMap[itemKey].row = data[i];
+        itemsMap[itemKey].date = rowDate;
+        itemsMap[itemKey].rowIndex = rowIndex;
+        itemsMap[itemKey].background = backgrounds[i][0] || null;
+      }
+
+      // Verifica se este lançamento está nos últimos 15 dias E tem ATUALIZAÇÃO
+      if (rowDate >= dataLimite) {
+        if (obs.indexOf('ATUALIZAÇÃO') >= 0 || obs.indexOf('ATUALIZACAO') >= 0) {
+          itemsMap[itemKey].teveAtualizacao15Dias = true;
+        }
       }
     }
 
-    // Filtra itens desatualizados (mais de 15 dias E sem ATUALIZAÇÃO na obs)
+    // Filtra itens que NÃO tiveram ATUALIZAÇÃO nos últimos 15 dias
     var rows = [];
     var colors = [];
     var itemKeys = Object.keys(itemsMap);
@@ -1353,23 +1366,20 @@ function buscarCoresDesatualizadas() {
       var key = itemKeys[j];
       var item = itemsMap[key];
 
-      // Verifica se tem mais de 15 dias
-      if (item.date > dataLimite) continue;
-
-      // Verifica se NÃO tem ATUALIZAÇÃO na obs
-      if (item.obs.indexOf('ATUALIZAÇÃO') >= 0 || item.obs.indexOf('ATUALIZACAO') >= 0) continue;
-
-      rows.push(item.row);
-      colors.push(item.background);
+      // Se NÃO teve ATUALIZAÇÃO nos últimos 15 dias, lista
+      if (!item.teveAtualizacao15Dias) {
+        rows.push(item.row);
+        colors.push(item.background);
+      }
     }
 
     if (rows.length === 0) {
-      return { success: false, message: "Nenhum item desatualizado encontrado (todos estão em dia ou com ATUALIZAÇÃO)" };
+      return { success: false, message: "Todos os itens tiveram ATUALIZAÇÃO nos últimos 15 dias" };
     }
 
     var headers = ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"];
 
-    Logger.log("buscarCoresDesatualizadas: " + rows.length + " itens encontrados");
+    Logger.log("buscarCoresDesatualizadas: " + rows.length + " itens sem ATUALIZAÇÃO nos últimos 15 dias");
 
     return {
       success: true,
