@@ -899,7 +899,10 @@
               </div>
             </form>
             <div id="relatorioResults" class="table-container" style="display: none;">
-              <h3>Relatório de Estoque</h3>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0;">Relatório de Estoque - <span id="relatorioTotal">0</span> lançamentos</h3>
+                <button class="btn btn-primary" onclick="printRelatorio()" style="padding: 0.5rem 1rem;">🖨️ Imprimir</button>
+              </div>
               <div id="relatorioTableContainer"></div>
             </div>
           </div>
@@ -2711,11 +2714,16 @@
       const dataInicio = document.getElementById('relatorioDataInicio').value;
       const dataFim = document.getElementById('relatorioDataFim').value;
 
+      showMessage('relatorioMessage', 'Buscando lançamentos...', 'info');
+      document.getElementById('relatorioResults').style.display = 'none';
+
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success && result.data) {
             displayTable('relatorioTableContainer', result.data);
+            document.getElementById('relatorioTotal').textContent = result.data.rows.length;
             document.getElementById('relatorioResults').style.display = 'block';
+            showMessage('relatorioMessage', 'Encontrados ' + result.data.rows.length + ' lançamentos no período', 'success');
           } else {
             showMessage('relatorioMessage', result.message || 'Nenhum resultado encontrado', 'warning');
           }
@@ -2728,7 +2736,47 @@
       return false;
     }
 
-    // Handle Relatório por Grupo
+    // Imprimir Relatório de Estoque
+    function printRelatorio() {
+      const resultsDiv = document.getElementById('relatorioResults');
+      if (!resultsDiv || resultsDiv.style.display === 'none') {
+        alert('Nenhum resultado para imprimir');
+        return;
+      }
+      const dataInicio = document.getElementById('relatorioDataInicio').value;
+      const dataFim = document.getElementById('relatorioDataFim').value;
+      const printWindow = window.open('', '_blank');
+      const tableHTML = document.getElementById('relatorioTableContainer').innerHTML;
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Relatório de Estoque</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; }
+            h1 { text-align: center; margin-bottom: 20px; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            th, td { border: 1px solid #333; padding: 5px 8px; text-align: left; }
+            th { background-color: #4a6da7; color: white; }
+            tr:nth-child(even) { background-color: #f2f2f2; }
+            .row-red { background-color: #ffcccc !important; }
+            .row-yellow { background-color: #ffffcc !important; }
+            .info { text-align: center; margin-bottom: 10px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <h1>Relatório de Estoque</h1>
+          <p class="info">Período: ${dataInicio} a ${dataFim} | Total: ${document.getElementById('relatorioTotal').textContent} lançamentos | Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+          ${tableHTML}
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => printWindow.print(), 500);
+    }
+
+    // Handle Relatório por Grupo (mantido para compatibilidade)
     function handleRelatorioPorGrupo(event) {
       event.preventDefault();
 
