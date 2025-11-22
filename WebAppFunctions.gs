@@ -894,6 +894,37 @@ function getNewRecordsSince(sinceTimestamp) {
 // ========================================
 
 /**
+ * parseDateBR: Converte data no formato brasileiro para Date
+ * Suporta DD/MM/YYYY ou DD/MM/YYYY HH:MM:SS
+ */
+function parseDateBR(dateStr) {
+  if (!dateStr) return new Date(0);
+
+  // Se já for um objeto Date válido
+  if (dateStr instanceof Date && !isNaN(dateStr)) {
+    return dateStr;
+  }
+
+  var str = dateStr.toString().trim();
+
+  // Tenta formato DD/MM/YYYY HH:MM:SS ou DD/MM/YYYY
+  var match = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (match) {
+    var day = parseInt(match[1], 10);
+    var month = parseInt(match[2], 10) - 1; // Mês é 0-indexed
+    var year = parseInt(match[3], 10);
+    var hour = match[4] ? parseInt(match[4], 10) : 0;
+    var min = match[5] ? parseInt(match[5], 10) : 0;
+    var sec = match[6] ? parseInt(match[6], 10) : 0;
+    return new Date(year, month, day, hour, min, sec);
+  }
+
+  // Fallback: tenta parse padrão
+  var parsed = new Date(str);
+  return isNaN(parsed) ? new Date(0) : parsed;
+}
+
+/**
  * buscarUltimoLancamentoPorGrupo: Retorna o último lançamento de cada item de um grupo
  * Busca diretamente na planilha
  * @param {string} grupo - Nome do grupo para buscar
@@ -938,13 +969,18 @@ function buscarUltimoLancamentoPorGrupo(grupo) {
 
       var itemKey = itemName.toUpperCase();
       var dateStr = data[i][3]; // Coluna D (Data)
-      var rowDate = dateStr ? new Date(dateStr) : new Date(0);
+      var rowDate = parseDateBR(dateStr);
+      var rowIndex = i; // Índice da linha (maior = mais recente se mesma data)
 
       // Se não existe ou é mais recente, atualiza
-      if (!itemsMap[itemKey] || rowDate > itemsMap[itemKey].date) {
+      // Usa rowIndex como desempate quando datas são iguais
+      if (!itemsMap[itemKey] ||
+          rowDate > itemsMap[itemKey].date ||
+          (rowDate.getTime() === itemsMap[itemKey].date.getTime() && rowIndex > itemsMap[itemKey].rowIndex)) {
         itemsMap[itemKey] = {
           row: data[i],
           date: rowDate,
+          rowIndex: rowIndex,
           background: backgrounds[i][0] || null
         };
       }
@@ -1046,13 +1082,18 @@ function buscarUltimoLancamentoPorItens(listaItens) {
       itensEncontrados[itemName] = true;
 
       var dateStr = data[i][3]; // Coluna D (Data)
-      var rowDate = dateStr ? new Date(dateStr) : new Date(0);
+      var rowDate = parseDateBR(dateStr);
+      var rowIndex = i; // Índice da linha (maior = mais recente se mesma data)
 
       // Se não existe ou é mais recente, atualiza
-      if (!itemsMap[itemName] || rowDate > itemsMap[itemName].date) {
+      // Usa rowIndex como desempate quando datas são iguais
+      if (!itemsMap[itemName] ||
+          rowDate > itemsMap[itemName].date ||
+          (rowDate.getTime() === itemsMap[itemName].date.getTime() && rowIndex > itemsMap[itemName].rowIndex)) {
         itemsMap[itemName] = {
           row: data[i],
           date: rowDate,
+          rowIndex: rowIndex,
           background: backgrounds[i][0] || null
         };
       }
