@@ -986,14 +986,16 @@ function buscarUltimoLancamentoPorGrupo(grupo) {
       }
     }
 
-    // Converte mapa em arrays
-    var rows = [];
-    var colors = [];
+    // Converte mapa em arrays e ordena por data (mais recente primeiro)
     var itemKeys = Object.keys(itemsMap);
 
-    // Ordena por nome do item
-    itemKeys.sort();
+    // Ordena por data decrescente (mais recente primeiro)
+    itemKeys.sort(function(a, b) {
+      return itemsMap[b].date.getTime() - itemsMap[a].date.getTime();
+    });
 
+    var rows = [];
+    var colors = [];
     for (var j = 0; j < itemKeys.length; j++) {
       var key = itemKeys[j];
       rows.push(itemsMap[key].row);
@@ -1107,14 +1109,16 @@ function buscarUltimoLancamentoPorItens(listaItens) {
       }
     }
 
-    // Converte mapa em arrays
-    var rows = [];
-    var colors = [];
+    // Converte mapa em arrays e ordena por data (mais recente primeiro)
     var itemKeys = Object.keys(itemsMap);
 
-    // Ordena por nome do item
-    itemKeys.sort();
+    // Ordena por data decrescente (mais recente primeiro)
+    itemKeys.sort(function(a, b) {
+      return itemsMap[b].date.getTime() - itemsMap[a].date.getTime();
+    });
 
+    var rows = [];
+    var colors = [];
     for (var j = 0; j < itemKeys.length; j++) {
       var key = itemKeys[j];
       rows.push(itemsMap[key].row);
@@ -1357,11 +1361,15 @@ function buscarCoresDesatualizadas() {
     }
 
     // Filtra itens que NÃO tiveram ATUALIZAÇÃO nos últimos 15 dias
+    var itemKeys = Object.keys(itemsMap);
+
+    // Ordena por data decrescente (mais recente primeiro)
+    itemKeys.sort(function(a, b) {
+      return itemsMap[b].date.getTime() - itemsMap[a].date.getTime();
+    });
+
     var rows = [];
     var colors = [];
-    var itemKeys = Object.keys(itemsMap);
-    itemKeys.sort();
-
     for (var j = 0; j < itemKeys.length; j++) {
       var key = itemKeys[j];
       var item = itemsMap[key];
