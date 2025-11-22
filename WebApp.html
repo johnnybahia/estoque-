@@ -844,23 +844,36 @@
           <div class="content-card">
             <h2>📋 Listagem de Estoque</h2>
             <div id="listagemMessage" class="message"></div>
-            <form id="listagemForm" onsubmit="return handleListagemEstoque(event)">
-              <div class="form-group">
-                <label for="listagemGroup">Grupo</label>
-                <input type="text" id="listagemGroup" list="listagemGroupList">
-                <datalist id="listagemGroupList"></datalist>
+
+            <!-- Opção 1: Busca por Grupo -->
+            <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+              <h3 style="margin: 0 0 10px 0; font-size: 1rem; color: #1565c0;">📁 Buscar por Grupo</h3>
+              <p style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">Mostra o último lançamento de cada item do grupo selecionado</p>
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label for="listagemGroup">Selecione o Grupo</label>
+                <select id="listagemGroup" style="width: 100%; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
+                  <option value="">-- Selecione um grupo --</option>
+                </select>
               </div>
-              <div class="form-group">
-                <label for="listagemItem">Item</label>
-                <input type="text" id="listagemItem" list="listagemItemList">
-                <datalist id="listagemItemList"></datalist>
+              <button type="button" class="btn btn-primary" onclick="handleBuscaPorGrupo()">📊 Buscar Itens do Grupo</button>
+            </div>
+
+            <!-- Opção 2: Busca por Lista de Itens -->
+            <div style="background: #e8f5e9; padding: 15px; border-radius: 8px;">
+              <h3 style="margin: 0 0 10px 0; font-size: 1rem; color: #2e7d32;">📝 Buscar Lista de Itens</h3>
+              <p style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">Digite ou cole os nomes dos itens (um por linha ou separados por vírgula)</p>
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label for="listagemItens">Lista de Itens</label>
+                <textarea id="listagemItens" rows="5" style="width: 100%; padding: 10px; border-radius: 4px; border: 1px solid #ddd; resize: vertical;" placeholder="ITEM 1&#10;ITEM 2&#10;ITEM 3&#10;&#10;ou: ITEM 1, ITEM 2, ITEM 3"></textarea>
               </div>
-              <div class="btn-group">
-                <button type="submit" class="btn btn-primary">📊 Gerar Listagem</button>
+              <button type="button" class="btn btn-success" onclick="handleBuscaPorListaItens()">🔍 Buscar Itens da Lista</button>
+            </div>
+
+            <div id="listagemResults" class="table-container" style="display: none; margin-top: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0;">Resultado (<span id="listagemTotal">0</span> itens)</h3>
+                <button class="btn btn-primary" onclick="printListagem()" style="padding: 0.5rem 1rem;">🖨️ Imprimir</button>
               </div>
-            </form>
-            <div id="listagemResults" class="table-container" style="display: none;">
-              <h3>Listagem de Estoque</h3>
               <div id="listagemTableContainer"></div>
             </div>
           </div>
@@ -1890,6 +1903,7 @@
       populateAutocomplete('listagemGroupList', data.groups || []);
       populateAutocomplete('listagemItemList', data.items || []);
       populateSelect('relatorioGrupoSelect', data.groups || []);
+      populateSelect('listagemGroup', data.groups || []);
       populateSelect('estoqueUnidade', data.medidas || []);
       populateSelect('estoqueObs', data.observacoes || []);
 
@@ -2560,13 +2574,13 @@
       }
     }
 
-    // Handle Listagem Estoque
+    // Handle Listagem Estoque (legado - não mais usado)
     function handleListagemEstoque(event) {
       event.preventDefault();
 
       const formData = {
         group: document.getElementById('listagemGroup').value,
-        item: document.getElementById('listagemItem').value
+        item: document.getElementById('listagemItem') ? document.getElementById('listagemItem').value : ''
       };
 
       google.script.run
@@ -2584,6 +2598,124 @@
         .gerarListagemEstoqueWebApp(formData);
 
       return false;
+    }
+
+    // Handle Busca por Grupo - Retorna último lançamento de cada item do grupo
+    function handleBuscaPorGrupo() {
+      const grupo = document.getElementById('listagemGroup').value;
+
+      if (!grupo) {
+        showMessage('listagemMessage', 'Selecione um grupo para buscar', 'warning');
+        return;
+      }
+
+      // Mostra loading
+      showMessage('listagemMessage', 'Buscando itens do grupo...', 'info');
+      document.getElementById('listagemResults').style.display = 'none';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success && result.data) {
+            displayTable('listagemTableContainer', result.data);
+            document.getElementById('listagemTotal').textContent = result.totalItens || result.data.rows.length;
+            document.getElementById('listagemResults').style.display = 'block';
+            showMessage('listagemMessage', 'Encontrados ' + (result.totalItens || result.data.rows.length) + ' itens no grupo "' + grupo + '"', 'success');
+          } else {
+            showMessage('listagemMessage', result.message || 'Nenhum resultado encontrado', 'warning');
+            document.getElementById('listagemResults').style.display = 'none';
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('listagemMessage', 'Erro: ' + error.message, 'error');
+          document.getElementById('listagemResults').style.display = 'none';
+        })
+        .buscarUltimoLancamentoPorGrupo(grupo);
+    }
+
+    // Handle Busca por Lista de Itens - Retorna último lançamento de cada item da lista
+    function handleBuscaPorListaItens() {
+      const listaItens = document.getElementById('listagemItens').value;
+
+      if (!listaItens || listaItens.trim() === '') {
+        showMessage('listagemMessage', 'Digite ou cole os nomes dos itens para buscar', 'warning');
+        return;
+      }
+
+      // Mostra loading
+      showMessage('listagemMessage', 'Buscando itens da lista...', 'info');
+      document.getElementById('listagemResults').style.display = 'none';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success && result.data) {
+            displayTable('listagemTableContainer', result.data);
+            document.getElementById('listagemTotal').textContent = result.totalItens || result.data.rows.length;
+            document.getElementById('listagemResults').style.display = 'block';
+
+            let msg = 'Encontrados ' + (result.totalItens || result.data.rows.length) + ' itens';
+
+            // Mostra itens não encontrados, se houver
+            if (result.itensNaoEncontrados && result.itensNaoEncontrados.length > 0) {
+              msg += '. Não encontrados: ' + result.itensNaoEncontrados.join(', ');
+              showMessage('listagemMessage', msg, 'warning');
+            } else {
+              showMessage('listagemMessage', msg, 'success');
+            }
+          } else {
+            showMessage('listagemMessage', result.message || 'Nenhum resultado encontrado', 'warning');
+            document.getElementById('listagemResults').style.display = 'none';
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('listagemMessage', 'Erro: ' + error.message, 'error');
+          document.getElementById('listagemResults').style.display = 'none';
+        })
+        .buscarUltimoLancamentoPorItens(listaItens);
+    }
+
+    // Imprimir Listagem de Estoque
+    function printListagem() {
+      const resultsDiv = document.getElementById('listagemResults');
+      if (!resultsDiv || resultsDiv.style.display === 'none') {
+        alert('Nenhum resultado para imprimir');
+        return;
+      }
+
+      const printWindow = window.open('', '_blank');
+      const tableHTML = document.getElementById('listagemTableContainer').innerHTML;
+
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Listagem de Estoque</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; }
+            h1 { text-align: center; margin-bottom: 20px; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            th, td { border: 1px solid #333; padding: 5px 8px; text-align: left; }
+            th { background-color: #4a6da7; color: white; }
+            tr:nth-child(even) { background-color: #f2f2f2; }
+            .row-red { background-color: #ffcccc !important; }
+            .row-yellow { background-color: #ffffcc !important; }
+            .info { text-align: center; margin-bottom: 10px; color: #666; }
+            @media print {
+              body { padding: 0; }
+              table { font-size: 9px; }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>Listagem de Estoque</h1>
+          <p class="info">Total: ${document.getElementById('listagemTotal').textContent} itens - Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+          ${tableHTML}
+        </body>
+        </html>
+      `);
+
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => printWindow.print(), 500);
     }
 
     // Handle Relatório Estoque

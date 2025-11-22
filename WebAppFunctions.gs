@@ -888,3 +888,219 @@ function getNewRecordsSince(sinceTimestamp) {
     return { success: false, message: "Erro ao buscar novos registros: " + error.message };
   }
 }
+
+// ========================================
+// LISTAGEM DE ESTOQUE - Busca por Grupo e Lista de Itens
+// ========================================
+
+/**
+ * buscarUltimoLancamentoPorGrupo: Retorna o último lançamento de cada item de um grupo
+ * Busca diretamente na planilha
+ * @param {string} grupo - Nome do grupo para buscar
+ * @return {object} - { success, data: { headers, rows, colors }, totalItens }
+ */
+function buscarUltimoLancamentoPorGrupo(grupo) {
+  try {
+    if (!grupo || grupo.trim() === '') {
+      return { success: false, message: "Grupo não informado" };
+    }
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum dado encontrado na planilha" };
+    }
+
+    // Lê todos os dados
+    var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, 13);
+    var data = dataRange.getDisplayValues();
+    var backgrounds = dataRange.getBackgrounds();
+
+    var grupoNormalized = grupo.toString().trim().toUpperCase();
+
+    // Mapeia o último registro de cada item do grupo
+    var itemsMap = {};
+
+    for (var i = 0; i < data.length; i++) {
+      var rowGroup = data[i][0] ? data[i][0].toString().trim().toUpperCase() : '';
+
+      // Filtra apenas itens do grupo selecionado
+      if (rowGroup !== grupoNormalized) continue;
+
+      var itemName = data[i][1] ? data[i][1].toString().trim() : '';
+      if (!itemName) continue;
+
+      var itemKey = itemName.toUpperCase();
+      var dateStr = data[i][3]; // Coluna D (Data)
+      var rowDate = dateStr ? new Date(dateStr) : new Date(0);
+
+      // Se não existe ou é mais recente, atualiza
+      if (!itemsMap[itemKey] || rowDate > itemsMap[itemKey].date) {
+        itemsMap[itemKey] = {
+          row: data[i],
+          date: rowDate,
+          background: backgrounds[i][0] || null
+        };
+      }
+    }
+
+    // Converte mapa em arrays
+    var rows = [];
+    var colors = [];
+    var itemKeys = Object.keys(itemsMap);
+
+    // Ordena por nome do item
+    itemKeys.sort();
+
+    for (var j = 0; j < itemKeys.length; j++) {
+      var key = itemKeys[j];
+      rows.push(itemsMap[key].row);
+      colors.push(itemsMap[key].background);
+    }
+
+    if (rows.length === 0) {
+      return { success: false, message: "Nenhum item encontrado para o grupo '" + grupo + "'" };
+    }
+
+    var headers = ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"];
+
+    Logger.log("buscarUltimoLancamentoPorGrupo: " + rows.length + " itens encontrados para o grupo " + grupo);
+
+    return {
+      success: true,
+      data: {
+        headers: headers,
+        rows: rows,
+        colors: colors
+      },
+      totalItens: rows.length
+    };
+
+  } catch (error) {
+    Logger.log("Erro buscarUltimoLancamentoPorGrupo: " + error);
+    return { success: false, message: "Erro ao buscar itens do grupo: " + error.message };
+  }
+}
+
+/**
+ * buscarUltimoLancamentoPorItens: Retorna o último lançamento de cada item em uma lista
+ * Busca diretamente na planilha
+ * @param {string} listaItens - Lista de itens separados por vírgula ou linha
+ * @return {object} - { success, data: { headers, rows, colors }, totalItens, itensNaoEncontrados }
+ */
+function buscarUltimoLancamentoPorItens(listaItens) {
+  try {
+    if (!listaItens || listaItens.trim() === '') {
+      return { success: false, message: "Lista de itens não informada" };
+    }
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum dado encontrado na planilha" };
+    }
+
+    // Processa a lista de itens (separados por vírgula, quebra de linha, ou ponto e vírgula)
+    var itensArray = listaItens.split(/[,;\n\r]+/)
+      .map(function(item) { return item.trim().toUpperCase(); })
+      .filter(function(item) { return item !== ''; });
+
+    if (itensArray.length === 0) {
+      return { success: false, message: "Nenhum item válido na lista" };
+    }
+
+    // Cria um Set para busca rápida
+    var itensSet = {};
+    for (var k = 0; k < itensArray.length; k++) {
+      itensSet[itensArray[k]] = true;
+    }
+
+    // Lê todos os dados
+    var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, 13);
+    var data = dataRange.getDisplayValues();
+    var backgrounds = dataRange.getBackgrounds();
+
+    // Mapeia o último registro de cada item da lista
+    var itemsMap = {};
+    var itensEncontrados = {};
+
+    for (var i = 0; i < data.length; i++) {
+      var itemName = data[i][1] ? data[i][1].toString().trim().toUpperCase() : '';
+      if (!itemName) continue;
+
+      // Verifica se o item está na lista
+      if (!itensSet[itemName]) continue;
+
+      itensEncontrados[itemName] = true;
+
+      var dateStr = data[i][3]; // Coluna D (Data)
+      var rowDate = dateStr ? new Date(dateStr) : new Date(0);
+
+      // Se não existe ou é mais recente, atualiza
+      if (!itemsMap[itemName] || rowDate > itemsMap[itemName].date) {
+        itemsMap[itemName] = {
+          row: data[i],
+          date: rowDate,
+          background: backgrounds[i][0] || null
+        };
+      }
+    }
+
+    // Identifica itens não encontrados
+    var itensNaoEncontrados = [];
+    for (var m = 0; m < itensArray.length; m++) {
+      if (!itensEncontrados[itensArray[m]]) {
+        itensNaoEncontrados.push(itensArray[m]);
+      }
+    }
+
+    // Converte mapa em arrays
+    var rows = [];
+    var colors = [];
+    var itemKeys = Object.keys(itemsMap);
+
+    // Ordena por nome do item
+    itemKeys.sort();
+
+    for (var j = 0; j < itemKeys.length; j++) {
+      var key = itemKeys[j];
+      rows.push(itemsMap[key].row);
+      colors.push(itemsMap[key].background);
+    }
+
+    if (rows.length === 0) {
+      return { success: false, message: "Nenhum item da lista foi encontrado na planilha" };
+    }
+
+    var headers = ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"];
+
+    Logger.log("buscarUltimoLancamentoPorItens: " + rows.length + " itens encontrados de " + itensArray.length + " solicitados");
+
+    return {
+      success: true,
+      data: {
+        headers: headers,
+        rows: rows,
+        colors: colors
+      },
+      totalItens: rows.length,
+      itensNaoEncontrados: itensNaoEncontrados
+    };
+
+  } catch (error) {
+    Logger.log("Erro buscarUltimoLancamentoPorItens: " + error);
+    return { success: false, message: "Erro ao buscar itens da lista: " + error.message };
+  }
+}
