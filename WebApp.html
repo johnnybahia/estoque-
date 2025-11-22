@@ -1804,15 +1804,15 @@
         atualizarListaGrupos();
       }
 
-      // Hide sidebar on mobile or when needed
-      if (window.innerWidth <= 768) {
-        const sidebar = document.getElementById('sidebar');
-        const mainContent = document.getElementById('mainContent');
-        const toggleBtn = document.querySelector('.sidebar-toggle');
+      // Fecha o sidebar automaticamente após selecionar um módulo
+      const sidebar = document.getElementById('sidebar');
+      const mainContent = document.getElementById('mainContent');
+      const toggleBtn = document.querySelector('.sidebar-toggle');
 
-        sidebar.classList.add('hidden');
-        mainContent.classList.add('expanded');
-        toggleBtn.innerHTML = '☰ Mostrar Menu';
+      sidebar.classList.add('hidden');
+      mainContent.classList.add('expanded');
+      if (toggleBtn) {
+        toggleBtn.innerHTML = '☰ Menu';
       }
     }
 
