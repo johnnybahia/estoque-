@@ -593,6 +593,7 @@
   <!-- Login Screen -->
   <div id="loginScreen" class="login-container">
     <div class="login-card">
+      <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="Logo Marfim" style="width: 120px; height: auto; margin-bottom: 15px; border-radius: 8px;">
       <h2>🔐 Login</h2>
       <div id="loginMessage" class="message"></div>
       <form id="loginForm" onsubmit="return handleLogin(event)">
@@ -617,7 +618,10 @@
   <div id="mainApp" style="display: none;">
     <!-- Header -->
     <header class="header">
-      <h1>📦 Sistema de Gestão de Estoque</h1>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="Logo Marfim" style="width: 40px; height: 40px; border-radius: 6px; object-fit: cover;">
+        <h1 style="margin: 0;">Sistema de Gestão de Estoque</h1>
+      </div>
       <div class="user-info">
         <span id="userName">Usuário</span>
         <button class="logout-btn" onclick="handleLogout()">Sair</button>
@@ -634,7 +638,7 @@
         <nav>
           <ul>
             <li class="section-title">Principal</li>
-            <li><a href="#" onclick="showModule('dashboard')" data-module="dashboard" class="active">📊 Dashboard</a></li>
+            <li><a href="#" onclick="showModule('dashboard')" data-module="dashboard" class="active">🏠 Início</a></li>
 
             <li class="separator"></li>
             <li class="section-title">Operações</li>
@@ -661,29 +665,17 @@
 
       <!-- Main Content -->
       <main class="main-content" id="mainContent">
-        <!-- Dashboard Module -->
+        <!-- Página Inicial Module -->
         <div id="module-dashboard" class="module-container active">
-          <div class="content-card">
-            <h2>Dashboard</h2>
-            <div class="dashboard-stats">
-              <div class="stat-card">
-                <h3 id="totalItems">-</h3>
-                <p>Total de Itens</p>
-              </div>
-              <div class="stat-card">
-                <h3 id="totalGroups">-</h3>
-                <p>Grupos Cadastrados</p>
-              </div>
-              <div class="stat-card">
-                <h3 id="recentEntries">-</h3>
-                <p>Entradas (Hoje)</p>
-              </div>
-              <div class="stat-card">
-                <h3 id="recentExits">-</h3>
-                <p>Saídas (Hoje)</p>
-              </div>
+          <div class="content-card" style="text-align: center; padding: 40px 20px;">
+            <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="Logo Marfim" style="width: 180px; height: auto; border-radius: 12px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <h2 style="font-size: 1.8rem; color: #2c3e50; margin-bottom: 10px;">Sistema de Gestão de Estoque Inteligente</h2>
+            <h3 style="font-size: 1.4rem; color: #3498db; margin-bottom: 30px; font-weight: 500;">Marfim</h3>
+            <p style="color: #7f8c8d; margin-bottom: 30px;">Use o menu lateral para navegar pelas funcionalidades.</p>
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+              <p style="font-size: 0.85rem; color: #95a5a6; margin: 0;">Autor: Johnny</p>
+              <p style="font-size: 0.85rem; color: #95a5a6; margin: 5px 0 0 0;">Versão: 2.9.7</p>
             </div>
-            <p>Bem-vindo ao Sistema de Gestão de Estoque. Use o menu lateral para navegar pelas funcionalidades.</p>
           </div>
         </div>
 
