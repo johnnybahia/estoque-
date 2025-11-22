@@ -1225,11 +1225,13 @@
       return new Promise((resolve, reject) => {
         google.script.run
           .withSuccessHandler(async function(result) {
-            if (result && result.success && result.data) {
-              await reloadIndexedDB(result.data);
+            if (result && result.success) {
+              // result.data pode ser array vazio, isso é OK
+              const data = result.data || [];
+              await reloadIndexedDB(data);
               // Também atualiza o índice em memória
-              buildMemoryIndexFromIDB();
-              showSyncStatus('Dados carregados!', 'success');
+              await buildMemoryIndexFromIDB();
+              showSyncStatus('Dados carregados! (' + data.length + ')', 'success');
               setTimeout(() => hideSyncStatus(), 2000);
               resolve();
             } else {
