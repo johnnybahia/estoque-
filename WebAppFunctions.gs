@@ -760,8 +760,9 @@ function limparFiltroEstoqueWebApp() {
 // ========================================
 
 /**
- * getAllDataForSync: Retorna TODOS os dados formatados para sincronização inicial
- * Usado apenas no primeiro carregamento ou refresh completo
+ * getAllDataForSync: Retorna dados para sincronização inicial
+ * LIMITADO aos últimos 90 dias para não exceder limite de transferência
+ * Para histórico completo, use busca específica por item
  */
 function getAllDataForSync() {
   try {
@@ -774,27 +775,41 @@ function getAllDataForSync() {
 
     var lastRow = sheetEstoque.getLastRow();
     if (lastRow < 2) {
-      return { success: true, data: [] };
+      return { success: true, data: [], totalRows: 0 };
     }
 
     var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, 13);
     var data = dataRange.getDisplayValues();
     var backgrounds = dataRange.getBackgrounds();
 
+    // Filtra apenas registros dos últimos 90 dias
+    var cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - 90);
+
     var records = [];
     for (var i = 0; i < data.length; i++) {
       var dateStr = data[i][3]; // Coluna D (Data)
       var rowDate = dateStr ? new Date(dateStr) : new Date(0);
 
-      records.push({
-        row: data[i],
-        date: rowDate.getTime(),
-        background: backgrounds[i][0] || null
-      });
+      // Só inclui se for dos últimos 90 dias
+      if (rowDate >= cutoffDate) {
+        records.push({
+          row: data[i],
+          date: rowDate.getTime(),
+          background: backgrounds[i][0] || null
+        });
+      }
     }
 
-    Logger.log("getAllDataForSync: " + records.length + " registros");
-    return { success: true, data: records };
+    // Limita a 5000 registros máximo para não exceder limite de transferência
+    if (records.length > 5000) {
+      // Ordena por data (mais recente primeiro) e pega os 5000 mais recentes
+      records.sort(function(a, b) { return b.date - a.date; });
+      records = records.slice(0, 5000);
+    }
+
+    Logger.log("getAllDataForSync: " + records.length + " registros (últimos 90 dias, total na planilha: " + data.length + ")");
+    return { success: true, data: records, totalRows: data.length };
 
   } catch (error) {
     Logger.log("Erro getAllDataForSync: " + error);
