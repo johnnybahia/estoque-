@@ -806,16 +806,21 @@
           <div class="content-card">
             <h2>🔍 Localizar Produto</h2>
             <div id="localizarMessage" class="message"></div>
-            <form id="localizarForm" onsubmit="return handleLocalizarProduto(event)">
+            <form id="localizarForm" onsubmit="return handleBuscaRapida(event)">
               <div class="form-group">
                 <label for="localizarItem">Nome do Produto *</label>
                 <input type="text" id="localizarItem" list="localizarItemList" required>
                 <datalist id="localizarItemList"></datalist>
               </div>
-              <div class="btn-group">
-                <button type="submit" class="btn btn-primary">🔍 Buscar</button>
+              <div class="btn-group" style="flex-wrap: wrap;">
+                <button type="submit" class="btn btn-primary">⚡ Busca Rápida (últimos 20)</button>
+                <button type="button" class="btn btn-success" onclick="handleHistoricoCompleto()">📜 Histórico Completo</button>
                 <button type="button" class="btn btn-warning" onclick="showAllProducts()">📋 Mostrar Todos</button>
               </div>
+              <small style="color: #666; margin-top: 8px; display: block;">
+                <strong>Busca Rápida:</strong> Instantânea, últimos 20 registros (cache) |
+                <strong>Histórico Completo:</strong> Todos os registros do item (servidor)
+              </small>
             </form>
             <div id="localizarResults" class="table-container" style="display: none;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 1rem;">
@@ -2414,8 +2419,15 @@
       container.innerHTML = html;
     }
 
-    // Handle Localizar Produto (OTIMIZADO: índice local para últimos 20, servidor para completo)
-    function handleLocalizarProduto(event) {
+    // ========================================
+    // FUNÇÕES DE BUSCA - Localizar Produto
+    // ========================================
+
+    /**
+     * Busca Rápida - Usa índice em memória (INSTANTÂNEO)
+     * Mostra últimos 20 registros do item
+     */
+    function handleBuscaRapida(event) {
       event.preventDefault();
 
       const item = document.getElementById('localizarItem').value;
@@ -2425,52 +2437,77 @@
         return false;
       }
 
-      // 1. TENTA ÍNDICE LOCAL PRIMEIRO (INSTANTÂNEO - últimos 20 registros)
+      // Primeiro atualiza o índice do servidor (em background)
+      refreshHistoryIndexInBackground();
+
+      // Busca no índice local (instantâneo)
       const localHistory = getItemHistoryFromIndex(item);
+
       if (localHistory) {
-        const displayData = formatHistoryForDisplay(localHistory, 20); // Mostra até 20 registros
+        const displayData = formatHistoryForDisplay(localHistory, 20);
         if (displayData && displayData.rows.length > 0) {
-          // Adiciona info do item e botão para histórico completo
+          // Mostra resumo do item
           const infoHtml = '<div style="margin-bottom:10px;padding:10px;background:#e3f2fd;border-radius:4px;">' +
             '<strong>📊 Resumo:</strong> ' +
             'Saldo Atual: <strong>' + (localHistory.info.lastStock || '0') + '</strong> | ' +
             'Última Atualização: <strong>' + (localHistory.info.lastDate || '-') + '</strong> | ' +
             'Grupo: <strong>' + (localHistory.info.group || '-') + '</strong>' +
-            '<br><small style="color:#666;">Exibindo últimos ' + displayData.rows.length + ' registros (cache local). ' +
-            '<a href="#" onclick="buscarHistoricoCompleto(\'' + item.replace(/'/g, "\\'") + '\'); return false;" style="color:#1976d2;">Clique aqui para histórico completo</a></small>' +
+            '<br><small style="color:#666;">⚡ Busca Rápida - Últimos ' + displayData.rows.length + ' registros (cache)</small>' +
             '</div>';
 
           document.getElementById('localizarTableContainer').innerHTML = infoHtml;
           displayTable('localizarTableContainer', displayData);
           document.getElementById('localizarResults').style.display = 'block';
           document.getElementById('totalResults').textContent = displayData.rows.length + ' (últimos)';
-          showMessage('localizarMessage', '⚡ ' + displayData.rows.length + ' registros (cache instantâneo)', 'success');
-          console.log('Localizar: usando índice local (instantâneo)');
+          showMessage('localizarMessage', '⚡ ' + displayData.rows.length + ' registros encontrados (instantâneo)', 'success');
           return false;
         }
       }
 
-      // 2. FALLBACK: Busca completa no servidor
-      showMessage('localizarMessage', '🔍 Buscando histórico completo...', 'info');
-      document.getElementById('localizarResults').style.display = 'none';
+      // Se não encontrou no índice local, busca no servidor
+      showMessage('localizarMessage', '🔍 Item não encontrado no cache, buscando no servidor...', 'info');
       buscarHistoricoCompleto(item);
 
       return false;
     }
 
-    // Função separada para buscar histórico completo no servidor
+    /**
+     * Histórico Completo - Busca TODOS os registros do servidor
+     */
+    function handleHistoricoCompleto() {
+      const item = document.getElementById('localizarItem').value;
+
+      if (!item || item.trim() === '') {
+        showMessage('localizarMessage', 'Por favor, informe um item para buscar', 'warning');
+        return;
+      }
+
+      buscarHistoricoCompleto(item);
+    }
+
+    /**
+     * Busca histórico completo no servidor (todos os registros)
+     */
     function buscarHistoricoCompleto(item) {
-      showMessage('localizarMessage', '🔍 Buscando histórico completo no servidor...', 'info');
+      showMessage('localizarMessage', '📜 Buscando histórico completo no servidor...', 'info');
+      document.getElementById('localizarResults').style.display = 'none';
 
       google.script.run
         .withSuccessHandler(function(result) {
-          if (result.success && result.data) {
+          if (result.success && result.data && result.data.rows.length > 0) {
+            // Mostra resumo
+            const infoHtml = '<div style="margin-bottom:10px;padding:10px;background:#e8f5e9;border-radius:4px;">' +
+              '<strong>📜 Histórico Completo:</strong> ' + result.data.rows.length + ' registros encontrados' +
+              '<br><small style="color:#666;">Dados carregados diretamente da planilha</small>' +
+              '</div>';
+
+            document.getElementById('localizarTableContainer').innerHTML = infoHtml;
             displayTable('localizarTableContainer', result.data);
             document.getElementById('localizarResults').style.display = 'block';
             document.getElementById('totalResults').textContent = result.data.rows.length;
             showMessage('localizarMessage', '✅ ' + result.data.rows.length + ' registros encontrados (histórico completo)', 'success');
           } else {
-            showMessage('localizarMessage', result.message || 'Nenhum resultado encontrado', 'warning');
+            showMessage('localizarMessage', result.message || 'Nenhum registro encontrado para este item', 'warning');
             document.getElementById('localizarResults').style.display = 'none';
           }
         })
