@@ -1305,6 +1305,7 @@
 
     /**
      * Salva uma página de dados no IndexedDB
+     * Formato compacto do servidor: [[row, timestamp], ...]
      */
     async function savePageToIndexedDB(records, pageNum) {
       if (!db || !records || records.length === 0) return;
@@ -1314,13 +1315,17 @@
         const store = transaction.objectStore(DB_CONFIG.storeName);
 
         records.forEach((record, idx) => {
-          const id = (pageNum * 10000) + idx + 1; // ID único por página
+          // Suporta formato compacto [row, timestamp] e formato antigo {row, date}
+          const row = Array.isArray(record) ? record[0] : record.row;
+          const date = Array.isArray(record) ? record[1] : record.date;
+
+          const id = (pageNum * 10000) + idx + 1;
           store.put({
             id: id,
-            row: record.row,
-            item: record.row[1] ? record.row[1].toString().trim().toLowerCase() : '',
-            date: record.date,
-            background: record.background
+            row: row,
+            item: row[1] ? row[1].toString().trim().toLowerCase() : '',
+            date: date,
+            background: null
           });
         });
 

@@ -762,7 +762,7 @@ function limparFiltroEstoqueWebApp() {
 /**
  * Constantes de paginação para sync
  */
-var SYNC_PAGE_SIZE = 2000; // Registros por página (seguro para transferência)
+var SYNC_PAGE_SIZE = 500; // Registros por página (reduzido para garantir transferência)
 
 /**
  * getAllDataForSync: Retorna dados para sincronização inicial (PAGINADO)
@@ -782,7 +782,7 @@ function getAllDataForSync(page) {
 
     var lastRow = sheetEstoque.getLastRow();
     if (lastRow < 2) {
-      return { success: true, data: [], page: 0, totalPages: 0, totalRows: 0 };
+      return { success: true, data: [], page: 0, totalPages: 0, totalRows: 0, done: true };
     }
 
     var totalRows = lastRow - 1;
@@ -798,18 +798,18 @@ function getAllDataForSync(page) {
 
     var dataRange = sheetEstoque.getRange(startRow, 1, rowsToGet, 13);
     var data = dataRange.getDisplayValues();
-    var backgrounds = dataRange.getBackgrounds();
 
+    // Formato compacto: só envia dados essenciais (sem backgrounds para economizar)
     var records = [];
     for (var i = 0; i < data.length; i++) {
       var dateStr = data[i][3]; // Coluna D (Data)
       var rowDate = dateStr ? new Date(dateStr) : new Date(0);
 
-      records.push({
-        row: data[i],
-        date: rowDate.getTime(),
-        background: backgrounds[i][0] || null
-      });
+      // Formato compacto: array ao invés de objeto
+      records.push([
+        data[i], // row completa
+        rowDate.getTime() // timestamp
+      ]);
     }
 
     var isLastPage = (page >= totalPages - 1);
