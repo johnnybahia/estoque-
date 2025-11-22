@@ -1715,16 +1715,9 @@
             loadDashboardData();
             loadAutocompleteData();
 
-            // Inicializa IndexedDB e sincronização
-            try {
-              await initIndexedDB();
-              await initialSync(); // Carrega todos os dados
-              startAutoSync(); // Inicia sync automático a cada 10 segundos
-            } catch (e) {
-              console.error('Erro ao inicializar IndexedDB:', e);
-              // Fallback: usa método antigo
-              loadItemHistoryIndex();
-            }
+            // Carrega índice de histórico (últimos 20 registros por item)
+            // O índice usa cache do servidor (5 min) + cache localStorage
+            loadItemHistoryIndex();
           } else {
             showMessage('loginMessage', result.message || 'Login falhou', 'error');
           }
