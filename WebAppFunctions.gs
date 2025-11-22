@@ -453,6 +453,120 @@ function processEstoqueWebApp(formData) {
 }
 
 /**
+ * processMultipleEstoqueItems: Processa múltiplos itens de uma NF de uma vez
+ * @param {Array} itens - Array de objetos com {item, unidade, nf, obs, entrada, saida, valorUnitario}
+ */
+function processMultipleEstoqueItems(itens) {
+  try {
+    if (!itens || itens.length === 0) {
+      return { success: false, message: "Nenhum item para processar" };
+    }
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var now = new Date();
+    var user = getLoggedUser();
+    var processados = 0;
+    var erros = [];
+
+    PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
+
+    for (var i = 0; i < itens.length; i++) {
+      var itemData = itens[i];
+
+      try {
+        var nextRow = sheetEstoque.getLastRow() + 1;
+
+        // Busca grupo do item se existir
+        var grupoItem = getItemGroup(itemData.item) || '';
+
+        // Recupera último registro para cálculo de saldo
+        var lastReg = getLastRegistration(itemData.item, nextRow);
+        var previousSaldo = parseFloat(lastReg.lastStock) || 0;
+        var entrada = parseFloat(itemData.entrada) || 0;
+        var saida = parseFloat(itemData.saida) || 0;
+        var newSaldo = previousSaldo + entrada - saida;
+
+        var rowData = [
+          grupoItem,                    // A: Grupo
+          itemData.item,                // B: Item
+          itemData.unidade || '',       // C: Unidade de Medida
+          now,                          // D: Data
+          itemData.nf || '',            // E: NF (concatenado com Pedido e Lote)
+          itemData.obs || '',           // F: Obs
+          previousSaldo,                // G: Saldo Anterior
+          entrada,                      // H: Entrada
+          saida,                        // I: Saída
+          newSaldo,                     // J: Saldo
+          parseFloat(itemData.valorUnitario) || 0,  // K: Valor Unitário
+          now,                          // L: Alterado Em
+          user                          // M: Alterado Por
+        ];
+
+        sheetEstoque.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
+
+        // Marca linha com amarelo para indicar entrada
+        if (entrada > 0) {
+          var lastColumn = sheetEstoque.getLastColumn();
+          sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("yellow");
+        }
+
+        processados++;
+      } catch (itemError) {
+        erros.push("Item " + (i + 1) + " (" + itemData.item + "): " + itemError.message);
+      }
+    }
+
+    PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
+
+    // Invalida caches
+    invalidateCache();
+    invalidateCacheOpt();
+    backupEstoqueData();
+
+    if (erros.length > 0) {
+      return {
+        success: processados > 0,
+        message: "Processados: " + processados + "/" + itens.length + ". Erros: " + erros.join("; ")
+      };
+    }
+
+    return {
+      success: true,
+      message: processados + " item(ns) inserido(s) com sucesso!"
+    };
+  } catch (error) {
+    PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
+    Logger.log("Erro processMultipleEstoqueItems: " + error);
+    return { success: false, message: "Erro ao processar itens: " + error.message };
+  }
+}
+
+/**
+ * getItemGroup: Busca o grupo de um item existente
+ */
+function getItemGroup(itemName) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) return '';
+
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 2).getValues(); // Colunas A (Grupo) e B (Item)
+    var itemNormalized = itemName.toString().trim().toUpperCase();
+
+    for (var i = data.length - 1; i >= 0; i--) {
+      if (data[i][1] && data[i][1].toString().trim().toUpperCase() === itemNormalized) {
+        return data[i][0] || '';
+      }
+    }
+    return '';
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
  * gerarListagemEstoqueWebApp: Wrapper para gerar listagem de estoque via web app
  */
 function gerarListagemEstoqueWebApp(formData) {
@@ -529,7 +643,7 @@ function gerarRelatorioEstoqueWebApp(dataInicio, dataFim) {
       return { success: false, message: "Nenhum dado encontrado" };
     }
 
-    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getValues();
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
     var results = [];
 
     var inicio = new Date(dataInicio);
@@ -538,9 +652,12 @@ function gerarRelatorioEstoqueWebApp(dataInicio, dataFim) {
     fim.setHours(23, 59, 59, 999);
 
     for (var i = 0; i < data.length; i++) {
-      var dataMovimento = new Date(data[i][3]); // Coluna D (índice 3)
+      var dataMovimento = parseDateBR(data[i][3]); // Coluna D (índice 3) - usa parseDateBR para formato brasileiro
       if (dataMovimento >= inicio && dataMovimento <= fim) {
-        results.push(data[i]);
+        results.push({
+          row: data[i],
+          date: dataMovimento
+        });
       }
     }
 
@@ -548,11 +665,16 @@ function gerarRelatorioEstoqueWebApp(dataInicio, dataFim) {
       return { success: false, message: "Nenhum movimento encontrado no período" };
     }
 
+    // Ordena por data decrescente (mais recente primeiro)
+    results.sort(function(a, b) {
+      return b.date - a.date;
+    });
+
     return {
       success: true,
       data: {
         headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
-        rows: results
+        rows: results.map(function(r) { return r.row; })
       }
     };
   } catch (error) {

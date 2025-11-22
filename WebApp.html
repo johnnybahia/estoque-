@@ -587,6 +587,42 @@
       color: #7f8c8d;
       font-size: 0.9rem;
     }
+
+    /* Autocomplete customizado (busca do início) */
+    .autocomplete-wrapper {
+      position: relative;
+    }
+    .autocomplete-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      max-height: 200px;
+      overflow-y: auto;
+      background: white;
+      border: 1px solid var(--border-color);
+      border-top: none;
+      border-radius: 0 0 4px 4px;
+      z-index: 1000;
+      display: none;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .autocomplete-dropdown.show {
+      display: block;
+    }
+    .autocomplete-option {
+      padding: 8px 12px;
+      cursor: pointer;
+      border-bottom: 1px solid #eee;
+    }
+    .autocomplete-option:hover,
+    .autocomplete-option.selected {
+      background: var(--secondary-color);
+      color: white;
+    }
+    .autocomplete-option:last-child {
+      border-bottom: none;
+    }
   </style>
 </head>
 <body>
@@ -643,6 +679,7 @@
             <li class="separator"></li>
             <li class="section-title">Operações</li>
             <li><a href="#" onclick="showModule('inserir-estoque')" data-module="inserir-estoque">📦 Inserir Estoque</a></li>
+            <li><a href="#" onclick="showModule('inserir-nf')" data-module="inserir-nf">📄 Inserir NF</a></li>
             <li><a href="#" onclick="showModule('inserir-grupo')" data-module="inserir-grupo">📁 Inserir Grupo</a></li>
             <li><a href="#" onclick="showModule('apagar-linha')" data-module="apagar-linha">🗑️ Apagar Última Linha</a></li>
 
@@ -752,6 +789,70 @@
               </div>
               <div class="btn-group" style="margin-top: 15px;">
                 <button type="button" class="btn btn-primary" onclick="voltarParaFormulario()">✓ OK - Inserir Novo</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Inserir NF Module (múltiplos itens) -->
+        <div id="module-inserir-nf" class="module-container">
+          <div class="content-card">
+            <div id="nfFormArea">
+              <h2>📄 Inserir NF (Múltiplos Itens)</h2>
+              <p style="font-size: 0.85rem; color: #666; margin-bottom: 15px;">Insira NF, Pedido, Unidade e Observação uma vez. Depois adicione os itens com seus respectivos preços, lotes e quantidades.</p>
+              <div id="nfMessage" class="message"></div>
+
+              <!-- Campos Globais -->
+              <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                <h4 style="margin: 0 0 10px 0; color: #1976d2;">Dados Gerais</h4>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label style="font-size: 0.85rem;">NF *</label>
+                    <input type="text" id="nfNumero" required style="padding: 6px;" placeholder="Número da NF">
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label style="font-size: 0.85rem;">Pedido</label>
+                    <input type="text" id="nfPedido" style="padding: 6px;" placeholder="Número do Pedido">
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label style="font-size: 0.85rem;">Unidade *</label>
+                    <select id="nfUnidade" required style="padding: 6px;">
+                      <option value="">Selecione...</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label style="font-size: 0.85rem;">Observação</label>
+                    <select id="nfObs" style="padding: 6px;">
+                      <option value="">Selecione...</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Lista de Itens -->
+              <div style="background: #fff8e1; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                <h4 style="margin: 0 0 10px 0; color: #f57c00;">Itens da NF</h4>
+                <div id="nfItensContainer">
+                  <!-- Itens serão adicionados aqui -->
+                </div>
+                <button type="button" class="btn btn-primary" onclick="adicionarItemNF()" style="margin-top: 10px;">
+                  + Adicionar Item
+                </button>
+              </div>
+
+              <div class="btn-group">
+                <button type="button" class="btn btn-success" onclick="handleInserirNF()">✓ Confirmar Inserção</button>
+                <button type="button" class="btn btn-warning" onclick="limparFormNF()">↻ Limpar</button>
+              </div>
+            </div>
+
+            <!-- Área de Resultados -->
+            <div id="nfResultArea" style="display: none;">
+              <h2>✅ Itens Inseridos com Sucesso!</h2>
+              <div id="nfResultMessage" style="background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 15px;"></div>
+              <div id="nfResultTable" class="table-container" style="max-height: 400px; overflow-y: auto;"></div>
+              <div class="btn-group" style="margin-top: 15px;">
+                <button type="button" class="btn btn-primary" onclick="voltarParaNF()">✓ OK - Inserir Nova NF</button>
               </div>
             </div>
           </div>
@@ -1843,6 +1944,14 @@
       populateSelect('listagemGroup', data.groups || []);
       populateSelect('estoqueUnidade', data.medidas || []);
       populateSelect('estoqueObs', data.observacoes || []);
+      populateSelect('nfUnidade', data.medidas || []);
+      populateSelect('nfObs', data.observacoes || []);
+
+      // Inicializa autocompletes customizados (apenas uma vez)
+      if (!window.customAutocompletesInitialized) {
+        initCustomAutocompletes();
+        window.customAutocompletesInitialized = true;
+      }
 
       console.log('Autocomplete aplicado - itens:', (data.items || []).length, ', grupos:', (data.groups || []).length);
     }
@@ -2080,6 +2189,108 @@
       });
     }
 
+    // Autocomplete customizado que filtra do início (esquerda para direita)
+    function setupCustomAutocomplete(inputId, getDataFn) {
+      const input = document.getElementById(inputId);
+      if (!input) return;
+
+      // Remove datalist attribute se existir
+      input.removeAttribute('list');
+
+      // Cria wrapper e dropdown
+      const wrapper = document.createElement('div');
+      wrapper.className = 'autocomplete-wrapper';
+      input.parentNode.insertBefore(wrapper, input);
+      wrapper.appendChild(input);
+
+      const dropdown = document.createElement('div');
+      dropdown.className = 'autocomplete-dropdown';
+      dropdown.id = inputId + '-dropdown';
+      wrapper.appendChild(dropdown);
+
+      let selectedIndex = -1;
+
+      // Filtra e mostra opções
+      function showOptions() {
+        const value = input.value.toUpperCase().trim();
+        const data = getDataFn();
+        if (!data || data.length === 0) {
+          dropdown.classList.remove('show');
+          return;
+        }
+
+        // Filtra itens que COMEÇAM com o texto digitado
+        const filtered = data.filter(item =>
+          item && item.toUpperCase().startsWith(value)
+        ).slice(0, 15); // Limita a 15 resultados
+
+        if (filtered.length === 0 || value === '') {
+          dropdown.classList.remove('show');
+          return;
+        }
+
+        dropdown.innerHTML = filtered.map((item, idx) =>
+          `<div class="autocomplete-option" data-index="${idx}" data-value="${item}">${item}</div>`
+        ).join('');
+        dropdown.classList.add('show');
+        selectedIndex = -1;
+      }
+
+      // Seleciona opção
+      function selectOption(value) {
+        input.value = value;
+        dropdown.classList.remove('show');
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+
+      // Eventos
+      input.addEventListener('input', showOptions);
+      input.addEventListener('focus', showOptions);
+
+      input.addEventListener('keydown', function(e) {
+        const options = dropdown.querySelectorAll('.autocomplete-option');
+        if (!dropdown.classList.contains('show') || options.length === 0) return;
+
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          selectedIndex = Math.min(selectedIndex + 1, options.length - 1);
+          options.forEach((opt, i) => opt.classList.toggle('selected', i === selectedIndex));
+          if (options[selectedIndex]) options[selectedIndex].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          selectedIndex = Math.max(selectedIndex - 1, 0);
+          options.forEach((opt, i) => opt.classList.toggle('selected', i === selectedIndex));
+          if (options[selectedIndex]) options[selectedIndex].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'Enter' && selectedIndex >= 0) {
+          e.preventDefault();
+          selectOption(options[selectedIndex].dataset.value);
+        } else if (e.key === 'Escape') {
+          dropdown.classList.remove('show');
+        }
+      });
+
+      dropdown.addEventListener('click', function(e) {
+        if (e.target.classList.contains('autocomplete-option')) {
+          selectOption(e.target.dataset.value);
+        }
+      });
+
+      // Fecha ao clicar fora
+      document.addEventListener('click', function(e) {
+        if (!wrapper.contains(e.target)) {
+          dropdown.classList.remove('show');
+        }
+      });
+    }
+
+    // Inicializa autocompletes customizados após carregar dados
+    function initCustomAutocompletes() {
+      setupCustomAutocomplete('estoqueItem', () => autocompleteData?.items || []);
+      setupCustomAutocomplete('estoqueGroup', () => autocompleteData?.groups || []);
+      setupCustomAutocomplete('estoqueNF', () => autocompleteData?.nfs || []);
+      setupCustomAutocomplete('localizarItem', () => autocompleteData?.items || []);
+    }
+
     // Populate select
     function populateSelect(selectId, items) {
       const select = document.getElementById(selectId);
@@ -2268,6 +2479,171 @@
       document.getElementById('estoqueResultArea').style.display = 'none';
       document.getElementById('estoqueFormArea').style.display = 'block';
       document.getElementById('estoqueItem').focus();
+    }
+
+    // ========== FUNÇÕES INSERIR NF (MÚLTIPLOS ITENS) ==========
+    let nfItemCounter = 0;
+
+    // Adicionar item na lista de NF
+    function adicionarItemNF() {
+      nfItemCounter++;
+      const container = document.getElementById('nfItensContainer');
+      const itemDiv = document.createElement('div');
+      itemDiv.id = 'nfItem-' + nfItemCounter;
+      itemDiv.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 8px; margin-bottom: 10px; padding: 10px; background: white; border-radius: 4px; align-items: end;';
+      itemDiv.innerHTML = `
+        <div class="form-group" style="margin-bottom: 0;">
+          <label style="font-size: 0.75rem;">Item *</label>
+          <input type="text" class="nf-item-nome" list="nfItemDatalist-${nfItemCounter}" required style="padding: 6px;" placeholder="Nome do item">
+          <datalist id="nfItemDatalist-${nfItemCounter}"></datalist>
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label style="font-size: 0.75rem;">Preço *</label>
+          <input type="number" class="nf-item-preco" step="0.01" min="0" required style="padding: 6px;" placeholder="0.00">
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label style="font-size: 0.75rem;">Lote</label>
+          <input type="text" class="nf-item-lote" style="padding: 6px;" placeholder="Lote">
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label style="font-size: 0.75rem;">Entrada *</label>
+          <input type="number" class="nf-item-entrada" step="0.01" min="0.01" required style="padding: 6px;" placeholder="Qtd">
+        </div>
+        <button type="button" class="btn btn-danger" onclick="removerItemNF(${nfItemCounter})" style="padding: 6px 10px; height: fit-content;">✕</button>
+      `;
+      container.appendChild(itemDiv);
+
+      // Popula datalist do item
+      const datalist = document.getElementById('nfItemDatalist-' + nfItemCounter);
+      if (autocompleteData && autocompleteData.items) {
+        autocompleteData.items.forEach(item => {
+          const option = document.createElement('option');
+          option.value = item;
+          datalist.appendChild(option);
+        });
+      }
+    }
+
+    // Remover item da lista de NF
+    function removerItemNF(id) {
+      const itemDiv = document.getElementById('nfItem-' + id);
+      if (itemDiv) {
+        itemDiv.remove();
+      }
+    }
+
+    // Limpar formulário NF
+    function limparFormNF() {
+      document.getElementById('nfNumero').value = '';
+      document.getElementById('nfPedido').value = '';
+      document.getElementById('nfUnidade').selectedIndex = 0;
+      document.getElementById('nfObs').selectedIndex = 0;
+      document.getElementById('nfItensContainer').innerHTML = '';
+      nfItemCounter = 0;
+      showMessage('nfMessage', '', '');
+    }
+
+    // Voltar para formulário NF após inserção
+    function voltarParaNF() {
+      document.getElementById('nfResultArea').style.display = 'none';
+      document.getElementById('nfFormArea').style.display = 'block';
+      limparFormNF();
+    }
+
+    // Processar inserção de NF com múltiplos itens
+    function handleInserirNF() {
+      // Validar campos globais
+      const nfNumero = document.getElementById('nfNumero').value.trim();
+      const nfPedido = document.getElementById('nfPedido').value.trim();
+      const nfUnidade = document.getElementById('nfUnidade').value;
+      const nfObs = document.getElementById('nfObs').value;
+
+      if (!nfNumero) {
+        showMessage('nfMessage', 'Informe o número da NF', 'error');
+        return;
+      }
+      if (!nfUnidade) {
+        showMessage('nfMessage', 'Selecione a unidade', 'error');
+        return;
+      }
+
+      // Coletar itens
+      const container = document.getElementById('nfItensContainer');
+      const itemDivs = container.querySelectorAll('[id^="nfItem-"]');
+
+      if (itemDivs.length === 0) {
+        showMessage('nfMessage', 'Adicione pelo menos um item', 'error');
+        return;
+      }
+
+      const itens = [];
+      let hasError = false;
+
+      itemDivs.forEach((div, index) => {
+        const nome = div.querySelector('.nf-item-nome').value.trim().toUpperCase();
+        const preco = parseFloat(div.querySelector('.nf-item-preco').value) || 0;
+        const lote = div.querySelector('.nf-item-lote').value.trim();
+        const entrada = parseFloat(div.querySelector('.nf-item-entrada').value) || 0;
+
+        if (!nome) {
+          showMessage('nfMessage', `Item ${index + 1}: Nome do item é obrigatório`, 'error');
+          hasError = true;
+          return;
+        }
+        if (preco <= 0) {
+          showMessage('nfMessage', `Item ${index + 1} (${nome}): Preço é obrigatório`, 'error');
+          hasError = true;
+          return;
+        }
+        if (entrada <= 0) {
+          showMessage('nfMessage', `Item ${index + 1} (${nome}): Entrada é obrigatória`, 'error');
+          hasError = true;
+          return;
+        }
+
+        // Concatena NF + Pedido + Lote
+        let nfConcatenado = nfNumero;
+        if (nfPedido) nfConcatenado += ' ' + nfPedido;
+        if (lote) nfConcatenado += ' ' + lote;
+
+        itens.push({
+          item: nome,
+          unidade: nfUnidade,
+          nf: nfConcatenado,
+          obs: nfObs,
+          entrada: entrada,
+          saida: 0,
+          valorUnitario: preco
+        });
+      });
+
+      if (hasError) return;
+
+      showMessage('nfMessage', 'Inserindo ' + itens.length + ' itens...', 'info');
+
+      // Envia para servidor
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            document.getElementById('nfFormArea').style.display = 'none';
+            document.getElementById('nfResultArea').style.display = 'block';
+            document.getElementById('nfResultMessage').innerHTML =
+              '<strong>' + itens.length + '</strong> item(ns) inserido(s) com sucesso na NF <strong>' + nfNumero + '</strong>';
+
+            // Atualiza cache e autocomplete
+            clearClientCache();
+            loadDashboardData();
+            loadAutocompleteData();
+
+            showMessage('nfMessage', '', '');
+          } else {
+            showMessage('nfMessage', result.message || 'Erro ao inserir itens', 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('nfMessage', 'Erro: ' + error.message, 'error');
+        })
+        .processMultipleEstoqueItems(itens);
     }
 
     // Handle Inserir Grupo
