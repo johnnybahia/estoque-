@@ -1145,3 +1145,302 @@ function buscarUltimoLancamentoPorItens(listaItens) {
     return { success: false, message: "Erro ao buscar itens da lista: " + error.message };
   }
 }
+
+// ========================================
+// ESTOQUE 3 MESES - Total de Saídas por Item
+// ========================================
+
+/**
+ * calcularEstoque3Meses: Calcula o total de saídas de cada item nos últimos 3 meses
+ * @param {string} listaItens - Lista de itens separados por vírgula
+ * @return {object} - { success, data: { headers, rows }, totalItens, itensNaoEncontrados }
+ */
+function calcularEstoque3Meses(listaItens) {
+  try {
+    if (!listaItens || listaItens.trim() === '') {
+      return { success: false, message: "Lista de itens não informada" };
+    }
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum dado encontrado na planilha" };
+    }
+
+    // Processa a lista de itens
+    var itensArray = listaItens.split(/[,;\n\r]+/)
+      .map(function(item) { return item.trim().toUpperCase(); })
+      .filter(function(item) { return item !== ''; });
+
+    if (itensArray.length === 0) {
+      return { success: false, message: "Nenhum item válido na lista" };
+    }
+
+    // Cria Set para busca rápida
+    var itensSet = {};
+    for (var k = 0; k < itensArray.length; k++) {
+      itensSet[itensArray[k]] = true;
+    }
+
+    // Data limite: 3 meses atrás
+    var dataLimite = new Date();
+    dataLimite.setMonth(dataLimite.getMonth() - 3);
+    dataLimite.setHours(0, 0, 0, 0);
+
+    // Lê todos os dados
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
+
+    // Mapeia total de saídas por item
+    var itemsMap = {};
+    var itensEncontrados = {};
+
+    for (var i = 0; i < data.length; i++) {
+      var itemName = data[i][1] ? data[i][1].toString().trim().toUpperCase() : '';
+      if (!itemName) continue;
+
+      // Verifica se o item está na lista
+      if (!itensSet[itemName]) continue;
+
+      var dateStr = data[i][3]; // Coluna D (Data)
+      var rowDate = parseDateBR(dateStr);
+
+      // Verifica se está dentro dos últimos 3 meses
+      if (rowDate < dataLimite) continue;
+
+      itensEncontrados[itemName] = true;
+
+      var saida = parseFloat(data[i][8]) || 0; // Coluna I (Saída)
+
+      // Inicializa ou soma ao total
+      if (!itemsMap[itemName]) {
+        itemsMap[itemName] = {
+          item: data[i][1], // Nome original
+          grupo: data[i][0],
+          unidade: data[i][2],
+          totalSaidas: 0,
+          lancamentos: 0
+        };
+      }
+
+      if (saida > 0) {
+        itemsMap[itemName].totalSaidas += saida;
+        itemsMap[itemName].lancamentos++;
+      }
+    }
+
+    // Identifica itens não encontrados
+    var itensNaoEncontrados = [];
+    for (var m = 0; m < itensArray.length; m++) {
+      if (!itensEncontrados[itensArray[m]]) {
+        itensNaoEncontrados.push(itensArray[m]);
+      }
+    }
+
+    // Converte mapa em array de linhas
+    var rows = [];
+    var itemKeys = Object.keys(itemsMap);
+    itemKeys.sort();
+
+    for (var j = 0; j < itemKeys.length; j++) {
+      var key = itemKeys[j];
+      var item = itemsMap[key];
+      rows.push([
+        item.grupo,
+        item.item,
+        item.unidade,
+        item.totalSaidas,
+        item.lancamentos
+      ]);
+    }
+
+    if (rows.length === 0) {
+      return { success: false, message: "Nenhum item encontrado com saídas nos últimos 3 meses" };
+    }
+
+    var headers = ["Grupo", "Item", "Unidade", "Total Saídas (3 meses)", "Nº Lançamentos"];
+
+    Logger.log("calcularEstoque3Meses: " + rows.length + " itens calculados");
+
+    return {
+      success: true,
+      data: {
+        headers: headers,
+        rows: rows
+      },
+      totalItens: rows.length,
+      itensNaoEncontrados: itensNaoEncontrados
+    };
+
+  } catch (error) {
+    Logger.log("Erro calcularEstoque3Meses: " + error);
+    return { success: false, message: "Erro ao calcular estoque: " + error.message };
+  }
+}
+
+// ========================================
+// CORES DESATUALIZADAS - 15 dias sem ATUALIZAÇÃO
+// ========================================
+
+/**
+ * buscarCoresDesatualizadas: Lista itens com mais de 15 dias sem lançamento
+ * e sem a palavra ATUALIZAÇÃO na coluna obs do último lançamento
+ * @return {object} - { success, data: { headers, rows, colors }, totalItens }
+ */
+function buscarCoresDesatualizadas() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum dado encontrado na planilha" };
+    }
+
+    // Data limite: 15 dias atrás
+    var dataLimite = new Date();
+    dataLimite.setDate(dataLimite.getDate() - 15);
+    dataLimite.setHours(23, 59, 59, 999);
+
+    // Lê todos os dados
+    var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, 13);
+    var data = dataRange.getDisplayValues();
+    var backgrounds = dataRange.getBackgrounds();
+
+    // Mapeia o último registro de cada item
+    var itemsMap = {};
+
+    for (var i = 0; i < data.length; i++) {
+      var itemName = data[i][1] ? data[i][1].toString().trim() : '';
+      if (!itemName) continue;
+
+      var itemKey = itemName.toUpperCase();
+      var dateStr = data[i][3]; // Coluna D (Data)
+      var rowDate = parseDateBR(dateStr);
+      var obs = data[i][5] ? data[i][5].toString().toUpperCase() : ''; // Coluna F (Obs)
+      var rowIndex = i;
+
+      // Se não existe ou é mais recente, atualiza
+      if (!itemsMap[itemKey] ||
+          rowDate > itemsMap[itemKey].date ||
+          (rowDate.getTime() === itemsMap[itemKey].date.getTime() && rowIndex > itemsMap[itemKey].rowIndex)) {
+        itemsMap[itemKey] = {
+          row: data[i],
+          date: rowDate,
+          rowIndex: rowIndex,
+          obs: obs,
+          background: backgrounds[i][0] || null
+        };
+      }
+    }
+
+    // Filtra itens desatualizados (mais de 15 dias E sem ATUALIZAÇÃO na obs)
+    var rows = [];
+    var colors = [];
+    var itemKeys = Object.keys(itemsMap);
+    itemKeys.sort();
+
+    for (var j = 0; j < itemKeys.length; j++) {
+      var key = itemKeys[j];
+      var item = itemsMap[key];
+
+      // Verifica se tem mais de 15 dias
+      if (item.date > dataLimite) continue;
+
+      // Verifica se NÃO tem ATUALIZAÇÃO na obs
+      if (item.obs.indexOf('ATUALIZAÇÃO') >= 0 || item.obs.indexOf('ATUALIZACAO') >= 0) continue;
+
+      rows.push(item.row);
+      colors.push(item.background);
+    }
+
+    if (rows.length === 0) {
+      return { success: false, message: "Nenhum item desatualizado encontrado (todos estão em dia ou com ATUALIZAÇÃO)" };
+    }
+
+    var headers = ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"];
+
+    Logger.log("buscarCoresDesatualizadas: " + rows.length + " itens encontrados");
+
+    return {
+      success: true,
+      data: {
+        headers: headers,
+        rows: rows,
+        colors: colors
+      },
+      totalItens: rows.length
+    };
+
+  } catch (error) {
+    Logger.log("Erro buscarCoresDesatualizadas: " + error);
+    return { success: false, message: "Erro ao buscar cores desatualizadas: " + error.message };
+  }
+}
+
+// ========================================
+// APAGAR ÚLTIMA LINHA - Listar últimas 20 entradas
+// ========================================
+
+/**
+ * getUltimas20Entradas: Retorna as últimas 20 entradas da planilha
+ * @return {object} - { success, data: { headers, rows, colors } }
+ */
+function getUltimas20Entradas() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhuma entrada encontrada" };
+    }
+
+    // Calcula a linha inicial (últimas 20)
+    var numRows = Math.min(20, lastRow - 1);
+    var startRow = lastRow - numRows + 1;
+
+    // Lê as últimas 20 linhas
+    var dataRange = sheetEstoque.getRange(startRow, 1, numRows, 13);
+    var data = dataRange.getDisplayValues();
+    var backgrounds = dataRange.getBackgrounds();
+
+    // Inverte para mostrar mais recente primeiro
+    var rows = [];
+    var colors = [];
+    for (var i = data.length - 1; i >= 0; i--) {
+      rows.push(data[i]);
+      colors.push(backgrounds[i][0] || null);
+    }
+
+    var headers = ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"];
+
+    Logger.log("getUltimas20Entradas: " + rows.length + " entradas retornadas");
+
+    return {
+      success: true,
+      data: {
+        headers: headers,
+        rows: rows,
+        colors: colors
+      }
+    };
+
+  } catch (error) {
+    Logger.log("Erro getUltimas20Entradas: " + error);
+    return { success: false, message: "Erro ao buscar últimas entradas: " + error.message };
+  }
+}

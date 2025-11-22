@@ -640,6 +640,7 @@
             <li class="section-title">Operações</li>
             <li><a href="#" onclick="showModule('inserir-estoque')" data-module="inserir-estoque">📦 Inserir Estoque</a></li>
             <li><a href="#" onclick="showModule('inserir-grupo')" data-module="inserir-grupo">📁 Inserir Grupo</a></li>
+            <li><a href="#" onclick="showModule('apagar-linha')" data-module="apagar-linha">🗑️ Apagar Última Linha</a></li>
 
             <li class="separator"></li>
             <li class="section-title">Consultas</li>
@@ -649,20 +650,11 @@
             <li class="separator"></li>
             <li class="section-title">Relatórios</li>
             <li><a href="#" onclick="showModule('relatorio-estoque')" data-module="relatorio-estoque">📊 Gerar Relatório</a></li>
-            <li><a href="#" onclick="showModule('relatorio-grupo')" data-module="relatorio-grupo">📈 Relatório por Grupo</a></li>
-            <li><a href="#" onclick="showModule('estoque-periodo')" data-module="estoque-periodo">📅 Estoque por Período</a></li>
             <li><a href="#" onclick="showModule('estoque-3-meses')" data-module="estoque-3-meses">📦 Estoque 3 Meses</a></li>
 
             <li class="separator"></li>
             <li class="section-title">Cores</li>
             <li><a href="#" onclick="showModule('cores-desatualizadas')" data-module="cores-desatualizadas">🎨 Cores Desatualizadas</a></li>
-
-            <li class="separator"></li>
-            <li class="section-title">Administração</li>
-            <li><a href="#" onclick="showModule('atualizar-fio')" data-module="atualizar-fio">🔄 Atualizar Compra de Fio</a></li>
-            <li><a href="#" onclick="showModule('atualizar-embarcado')" data-module="atualizar-embarcado">🚢 Atualizar Total Embarcado</a></li>
-            <li><a href="#" onclick="showModule('apagar-linha')" data-module="apagar-linha">🗑️ Apagar Última Linha</a></li>
-            <li><a href="#" onclick="showModule('limpar-filtro')" data-module="limpar-filtro">🔄 Limpar Filtro</a></li>
           </ul>
         </nav>
       </aside>
@@ -913,64 +905,34 @@
           </div>
         </div>
 
-        <!-- Relatório por Grupo Module -->
-        <div id="module-relatorio-grupo" class="module-container">
-          <div class="content-card">
-            <h2>📈 Relatório por Grupo</h2>
-            <div id="relatorioGrupoMessage" class="message"></div>
-            <form id="relatorioGrupoForm" onsubmit="return handleRelatorioPorGrupo(event)">
-              <div class="form-group">
-                <label for="relatorioGrupoSelect">Grupo *</label>
-                <select id="relatorioGrupoSelect" required>
-                  <option value="">Selecione um grupo...</option>
-                </select>
-              </div>
-              <div class="btn-group">
-                <button type="submit" class="btn btn-primary">📊 Gerar Relatório</button>
-              </div>
-            </form>
-            <div id="relatorioGrupoResults" class="table-container" style="display: none;">
-              <h3>Relatório por Grupo</h3>
-              <div id="relatorioGrupoTableContainer"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Estoque por Período Module -->
-        <div id="module-estoque-periodo" class="module-container">
-          <div class="content-card">
-            <h2>📅 Estoque por Período</h2>
-            <div id="estoquePeriodoMessage" class="message"></div>
-            <form id="estoquePeriodoForm" onsubmit="return handleEstoquePorPeriodo(event)">
-              <div class="form-group">
-                <label for="periodoDataInicio">Data Início *</label>
-                <input type="date" id="periodoDataInicio" required>
-              </div>
-              <div class="form-group">
-                <label for="periodoDataFim">Data Fim *</label>
-                <input type="date" id="periodoDataFim" required>
-              </div>
-              <div class="btn-group">
-                <button type="submit" class="btn btn-primary">📊 Filtrar</button>
-              </div>
-            </form>
-            <div id="estoquePeriodoResults" class="table-container" style="display: none;">
-              <h3>Estoque no Período</h3>
-              <div id="estoquePeriodoTableContainer"></div>
-            </div>
-          </div>
-        </div>
-
         <!-- Estoque 3 Meses Module -->
         <div id="module-estoque-3-meses" class="module-container">
           <div class="content-card">
             <h2>📦 Estoque 3 Meses</h2>
+            <p style="font-size: 0.9rem; color: #666; margin-bottom: 15px;">Calcula o total de saídas de cada item nos últimos 3 meses</p>
             <div id="estoque3MesesMessage" class="message"></div>
-            <div class="btn-group">
-              <button class="btn btn-primary" onclick="handleEstoque3Meses()">📊 Gerar Relatório (Últimos 3 Meses)</button>
+
+            <div style="background: #fff3e0; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+              <h3 style="margin: 0 0 10px 0; font-size: 1rem; color: #e65100;">📝 Selecione os Itens</h3>
+              <div id="estoque3MesesItensContainer">
+                <div class="estoque3m-item-row" style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center;">
+                  <input type="text" class="estoque3m-item-input" list="estoque3MesesItemDatalist" placeholder="Digite o nome do item..." style="flex: 1; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
+                  <button type="button" onclick="removerItemEstoque3M(this)" style="background: #f44336; color: white; border: none; border-radius: 4px; width: 36px; height: 36px; cursor: pointer; font-size: 1.2rem;" title="Remover item">×</button>
+                </div>
+              </div>
+              <datalist id="estoque3MesesItemDatalist"></datalist>
+
+              <div style="display: flex; gap: 10px; margin-top: 10px;">
+                <button type="button" class="btn btn-secondary" onclick="adicionarItemEstoque3M()" style="background: #607d8b; flex: 1;">➕ Adicionar Mais Item</button>
+                <button type="button" class="btn btn-primary" onclick="handleEstoque3Meses()" style="flex: 1;">📊 Calcular Saídas</button>
+              </div>
             </div>
+
             <div id="estoque3MesesResults" class="table-container" style="display: none;">
-              <h3>Estoque dos Últimos 3 Meses</h3>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0;">Total de Saídas (Últimos 3 Meses) - <span id="estoque3MesesTotal">0</span> itens</h3>
+                <button class="btn btn-primary" onclick="printEstoque3Meses()" style="padding: 0.5rem 1rem;">🖨️ Imprimir</button>
+              </div>
               <div id="estoque3MesesTableContainer"></div>
             </div>
           </div>
@@ -980,47 +942,17 @@
         <div id="module-cores-desatualizadas" class="module-container">
           <div class="content-card">
             <h2>🎨 Cores Desatualizadas</h2>
+            <p style="font-size: 0.9rem; color: #666; margin-bottom: 15px;">Lista itens sem lançamento há mais de 15 dias e sem "ATUALIZAÇÃO" na observação</p>
             <div id="coresMessage" class="message"></div>
-            <form id="coresForm" onsubmit="return handleCoresDesatualizadas(event)">
-              <div class="form-group">
-                <label for="coresMesesAtras">Meses Atrás</label>
-                <input type="number" id="coresMesesAtras" value="3" min="1" max="12">
-              </div>
-              <div class="form-group">
-                <label for="coresObservacao">Observação</label>
-                <input type="text" id="coresObservacao" placeholder="Ex: TINTURA, TECELAGEM, etc.">
-              </div>
-              <div class="btn-group">
-                <button type="submit" class="btn btn-primary">🔍 Buscar Cores</button>
-              </div>
-            </form>
+            <div class="btn-group">
+              <button class="btn btn-primary" onclick="handleCoresDesatualizadas()">🔍 Buscar Cores Desatualizadas</button>
+            </div>
             <div id="coresResults" class="table-container" style="display: none;">
-              <h3>Cores Desatualizadas</h3>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0;">Cores Desatualizadas - <span id="coresTotal">0</span> itens</h3>
+                <button class="btn btn-primary" onclick="printCores()" style="padding: 0.5rem 1rem;">🖨️ Imprimir</button>
+              </div>
               <div id="coresTableContainer"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Atualizar Compra de Fio Module -->
-        <div id="module-atualizar-fio" class="module-container">
-          <div class="content-card">
-            <h2>🔄 Atualizar Compra de Fio e Histórico</h2>
-            <div id="atualizarFioMessage" class="message"></div>
-            <p>Esta função atualiza as informações de compra de fio e histórico na planilha.</p>
-            <div class="btn-group">
-              <button class="btn btn-warning" onclick="handleAtualizarFio()">🔄 Atualizar Agora</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Atualizar Total Embarcado Module -->
-        <div id="module-atualizar-embarcado" class="module-container">
-          <div class="content-card">
-            <h2>🚢 Atualizar Total Embarcado</h2>
-            <div id="atualizarEmbarcadoMessage" class="message"></div>
-            <p>Esta função atualiza o total embarcado na planilha.</p>
-            <div class="btn-group">
-              <button class="btn btn-warning" onclick="handleAtualizarEmbarcado()">🚢 Atualizar Agora</button>
             </div>
           </div>
         </div>
@@ -1029,22 +961,22 @@
         <div id="module-apagar-linha" class="module-container">
           <div class="content-card">
             <h2>🗑️ Apagar Última Linha</h2>
+            <p style="font-size: 0.9rem; color: #666; margin-bottom: 15px;">Visualize as últimas entradas e corrija lançamentos errados</p>
             <div id="apagarLinhaMessage" class="message"></div>
-            <p style="color: var(--danger-color); font-weight: bold;">⚠️ Atenção: Esta ação não pode ser desfeita!</p>
-            <div class="btn-group">
-              <button class="btn btn-danger" onclick="handleApagarLinha()">🗑️ Apagar Última Linha</button>
-            </div>
-          </div>
-        </div>
 
-        <!-- Limpar Filtro Module -->
-        <div id="module-limpar-filtro" class="module-container">
-          <div class="content-card">
-            <h2>🔄 Limpar Filtro</h2>
-            <div id="limparFiltroMessage" class="message"></div>
-            <p>Remove todos os filtros aplicados na aba ESTOQUE.</p>
-            <div class="btn-group">
-              <button class="btn btn-warning" onclick="handleLimparFiltro()">🔄 Limpar Filtro</button>
+            <div class="btn-group" style="margin-bottom: 15px;">
+              <button class="btn btn-primary" onclick="carregarUltimasEntradas()">🔄 Carregar Últimas 20 Entradas</button>
+            </div>
+
+            <div id="ultimasEntradasArea" style="display: none;">
+              <div style="background: #ffebee; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                <p style="color: #c62828; font-weight: bold; margin: 0 0 10px 0;">⚠️ A última entrada será apagada. Esta ação não pode ser desfeita!</p>
+                <div id="ultimaEntradaInfo" style="background: white; padding: 10px; border-radius: 4px; margin-bottom: 10px; font-size: 0.9rem;"></div>
+                <button class="btn btn-danger" onclick="confirmarApagarLinha()" style="width: 100%;">🗑️ CONFIRMAR EXCLUSÃO DA ÚLTIMA ENTRADA</button>
+              </div>
+
+              <h3>Últimas 20 Entradas</h3>
+              <div id="ultimasEntradasTableContainer"></div>
             </div>
           </div>
         </div>
@@ -1912,7 +1844,7 @@
       populateAutocomplete('listagemGroupList', data.groups || []);
       populateAutocomplete('listagemItemList', data.items || []);
       populateAutocomplete('listagemItemDatalist', data.items || []);
-      populateSelect('relatorioGrupoSelect', data.groups || []);
+      populateAutocomplete('estoque3MesesItemDatalist', data.items || []);
       populateSelect('listagemGroup', data.groups || []);
       populateSelect('estoqueUnidade', data.medidas || []);
       populateSelect('estoqueObs', data.observacoes || []);
@@ -2842,13 +2774,66 @@
       return false;
     }
 
-    // Handle Estoque 3 Meses
+    // ========================================
+    // ESTOQUE 3 MESES - Funções
+    // ========================================
+
+    // Adicionar campo de item no Estoque 3 Meses
+    function adicionarItemEstoque3M() {
+      const container = document.getElementById('estoque3MesesItensContainer');
+      const newRow = document.createElement('div');
+      newRow.className = 'estoque3m-item-row';
+      newRow.style.cssText = 'display: flex; gap: 8px; margin-bottom: 8px; align-items: center;';
+      newRow.innerHTML = `
+        <input type="text" class="estoque3m-item-input" list="estoque3MesesItemDatalist" placeholder="Digite o nome do item..." style="flex: 1; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
+        <button type="button" onclick="removerItemEstoque3M(this)" style="background: #f44336; color: white; border: none; border-radius: 4px; width: 36px; height: 36px; cursor: pointer; font-size: 1.2rem;" title="Remover item">×</button>
+      `;
+      container.appendChild(newRow);
+      newRow.querySelector('input').focus();
+    }
+
+    // Remover campo de item do Estoque 3 Meses
+    function removerItemEstoque3M(button) {
+      const container = document.getElementById('estoque3MesesItensContainer');
+      const rows = container.querySelectorAll('.estoque3m-item-row');
+      if (rows.length <= 1) {
+        rows[0].querySelector('input').value = '';
+        return;
+      }
+      button.closest('.estoque3m-item-row').remove();
+    }
+
+    // Handle Estoque 3 Meses - Calcula total de saídas por item
     function handleEstoque3Meses() {
+      const inputs = document.querySelectorAll('#estoque3MesesItensContainer .estoque3m-item-input');
+      const itens = [];
+      inputs.forEach(input => {
+        const valor = input.value.trim();
+        if (valor) itens.push(valor);
+      });
+
+      if (itens.length === 0) {
+        showMessage('estoque3MesesMessage', 'Selecione pelo menos um item', 'warning');
+        return;
+      }
+
+      showMessage('estoque3MesesMessage', 'Calculando saídas dos últimos 3 meses...', 'info');
+      document.getElementById('estoque3MesesResults').style.display = 'none';
+
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success && result.data) {
             displayTable('estoque3MesesTableContainer', result.data);
+            document.getElementById('estoque3MesesTotal').textContent = result.totalItens || result.data.rows.length;
             document.getElementById('estoque3MesesResults').style.display = 'block';
+
+            let msg = 'Calculado para ' + (result.totalItens || result.data.rows.length) + ' itens';
+            if (result.itensNaoEncontrados && result.itensNaoEncontrados.length > 0) {
+              msg += '. Não encontrados: ' + result.itensNaoEncontrados.join(', ');
+              showMessage('estoque3MesesMessage', msg, 'warning');
+            } else {
+              showMessage('estoque3MesesMessage', msg, 'success');
+            }
           } else {
             showMessage('estoque3MesesMessage', result.message || 'Nenhum resultado encontrado', 'warning');
           }
@@ -2856,106 +2841,168 @@
         .withFailureHandler(function(error) {
           showMessage('estoque3MesesMessage', 'Erro: ' + error.message, 'error');
         })
-        .getEstoque3Meses();
+        .calcularEstoque3Meses(itens.join(','));
     }
 
-    // Handle Cores Desatualizadas
-    function handleCoresDesatualizadas(event) {
-      event.preventDefault();
+    // Imprimir Estoque 3 Meses
+    function printEstoque3Meses() {
+      const resultsDiv = document.getElementById('estoque3MesesResults');
+      if (!resultsDiv || resultsDiv.style.display === 'none') {
+        alert('Nenhum resultado para imprimir');
+        return;
+      }
+      const printWindow = window.open('', '_blank');
+      const tableHTML = document.getElementById('estoque3MesesTableContainer').innerHTML;
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Estoque 3 Meses - Saídas</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; }
+            h1 { text-align: center; margin-bottom: 20px; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            th, td { border: 1px solid #333; padding: 5px 8px; text-align: left; }
+            th { background-color: #e65100; color: white; }
+            tr:nth-child(even) { background-color: #f2f2f2; }
+            .info { text-align: center; margin-bottom: 10px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <h1>Total de Saídas - Últimos 3 Meses</h1>
+          <p class="info">Total: ${document.getElementById('estoque3MesesTotal').textContent} itens - Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+          ${tableHTML}
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => printWindow.print(), 500);
+    }
 
-      const formData = {
-        mesesAtras: document.getElementById('coresMesesAtras').value,
-        observacao: document.getElementById('coresObservacao').value
-      };
+    // ========================================
+    // CORES DESATUALIZADAS - Funções
+    // ========================================
+
+    // Handle Cores Desatualizadas - 15 dias sem ATUALIZAÇÃO
+    function handleCoresDesatualizadas() {
+      showMessage('coresMessage', 'Buscando cores desatualizadas...', 'info');
+      document.getElementById('coresResults').style.display = 'none';
 
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success && result.data) {
             displayTable('coresTableContainer', result.data);
+            document.getElementById('coresTotal').textContent = result.totalItens || result.data.rows.length;
             document.getElementById('coresResults').style.display = 'block';
+            showMessage('coresMessage', 'Encontrados ' + (result.totalItens || result.data.rows.length) + ' itens desatualizados', 'success');
           } else {
-            showMessage('coresMessage', result.message || 'Nenhum resultado encontrado', 'warning');
+            showMessage('coresMessage', result.message || 'Nenhum item desatualizado encontrado', 'success');
           }
         })
         .withFailureHandler(function(error) {
           showMessage('coresMessage', 'Erro: ' + error.message, 'error');
         })
-        .gerarListagemCoresDesatualizadasWebApp(formData);
-
-      return false;
+        .buscarCoresDesatualizadas();
     }
 
-    // Handle Atualizar Fio
-    function handleAtualizarFio() {
-      if (!confirm('Deseja realmente atualizar a compra de fio e histórico?')) return;
+    // Imprimir Cores Desatualizadas
+    function printCores() {
+      const resultsDiv = document.getElementById('coresResults');
+      if (!resultsDiv || resultsDiv.style.display === 'none') {
+        alert('Nenhum resultado para imprimir');
+        return;
+      }
+      const printWindow = window.open('', '_blank');
+      const tableHTML = document.getElementById('coresTableContainer').innerHTML;
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Cores Desatualizadas</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; }
+            h1 { text-align: center; margin-bottom: 20px; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            th, td { border: 1px solid #333; padding: 5px 8px; text-align: left; }
+            th { background-color: #7b1fa2; color: white; }
+            tr:nth-child(even) { background-color: #f2f2f2; }
+            .info { text-align: center; margin-bottom: 10px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <h1>Cores Desatualizadas (Mais de 15 dias)</h1>
+          <p class="info">Total: ${document.getElementById('coresTotal').textContent} itens - Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+          ${tableHTML}
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => printWindow.print(), 500);
+    }
+
+    // ========================================
+    // APAGAR ÚLTIMA LINHA - Funções
+    // ========================================
+
+    // Carregar últimas 20 entradas
+    function carregarUltimasEntradas() {
+      showMessage('apagarLinhaMessage', 'Carregando últimas entradas...', 'info');
+      document.getElementById('ultimasEntradasArea').style.display = 'none';
 
       google.script.run
         .withSuccessHandler(function(result) {
-          if (result.success) {
-            showMessage('atualizarFioMessage', 'Compra de fio atualizada com sucesso!', 'success');
+          if (result.success && result.data) {
+            // Exibe informação da última entrada
+            const ultimaRow = result.data.rows[0];
+            if (ultimaRow) {
+              document.getElementById('ultimaEntradaInfo').innerHTML = `
+                <strong>Última entrada:</strong><br>
+                <strong>Item:</strong> ${ultimaRow[1] || '-'} |
+                <strong>Grupo:</strong> ${ultimaRow[0] || '-'} |
+                <strong>Data:</strong> ${ultimaRow[3] || '-'} |
+                <strong>Entrada:</strong> ${ultimaRow[7] || '0'} |
+                <strong>Saída:</strong> ${ultimaRow[8] || '0'} |
+                <strong>Saldo:</strong> ${ultimaRow[9] || '-'}
+              `;
+            }
+            displayTable('ultimasEntradasTableContainer', result.data);
+            document.getElementById('ultimasEntradasArea').style.display = 'block';
+            showMessage('apagarLinhaMessage', '', '');
           } else {
-            showMessage('atualizarFioMessage', result.message || 'Erro ao atualizar', 'error');
+            showMessage('apagarLinhaMessage', result.message || 'Nenhuma entrada encontrada', 'warning');
           }
         })
         .withFailureHandler(function(error) {
-          showMessage('atualizarFioMessage', 'Erro: ' + error.message, 'error');
+          showMessage('apagarLinhaMessage', 'Erro: ' + error.message, 'error');
         })
-        .atualizarCompraDeFioEHistoricoWebApp();
+        .getUltimas20Entradas();
     }
 
-    // Handle Atualizar Embarcado
-    function handleAtualizarEmbarcado() {
-      if (!confirm('Deseja realmente atualizar o total embarcado?')) return;
+    // Confirmar exclusão da última linha
+    function confirmarApagarLinha() {
+      if (!confirm('⚠️ ATENÇÃO FINAL!\n\nVocê está prestes a APAGAR PERMANENTEMENTE a última entrada.\n\nEsta ação NÃO PODE SER DESFEITA!\n\nTem certeza que deseja continuar?')) return;
+
+      showMessage('apagarLinhaMessage', 'Apagando última entrada...', 'info');
 
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
-            showMessage('atualizarEmbarcadoMessage', 'Total embarcado atualizado com sucesso!', 'success');
-          } else {
-            showMessage('atualizarEmbarcadoMessage', result.message || 'Erro ao atualizar', 'error');
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('atualizarEmbarcadoMessage', 'Erro: ' + error.message, 'error');
-        })
-        .atualizarTotalEmbarcadoWebApp();
-    }
-
-    // Handle Apagar Linha
-    function handleApagarLinha() {
-      if (!confirm('⚠️ ATENÇÃO!\n\nEsta ação irá apagar a última linha da planilha ESTOQUE.\n\nEsta ação NÃO PODE SER DESFEITA!\n\nDeseja continuar?')) return;
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success) {
-            showMessage('apagarLinhaMessage', 'Última linha apagada com sucesso!', 'success');
+            showMessage('apagarLinhaMessage', 'Última entrada apagada com sucesso!', 'success');
+            document.getElementById('ultimasEntradasArea').style.display = 'none';
             loadDashboardData();
-            // loadAllEstoqueData(true); // REMOVIDO - busca direto da planilha
-            loadAutocompleteData(); // Atualiza autocomplete
+            loadAutocompleteData();
+            // Recarrega a lista após 1 segundo
+            setTimeout(carregarUltimasEntradas, 1000);
           } else {
-            showMessage('apagarLinhaMessage', result.message || 'Erro ao apagar linha', 'error');
+            showMessage('apagarLinhaMessage', result.message || 'Erro ao apagar', 'error');
           }
         })
         .withFailureHandler(function(error) {
           showMessage('apagarLinhaMessage', 'Erro: ' + error.message, 'error');
         })
         .apagarUltimaLinhaWebApp();
-    }
-
-    // Handle Limpar Filtro
-    function handleLimparFiltro() {
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success) {
-            showMessage('limparFiltroMessage', 'Filtro removido com sucesso!', 'success');
-          } else {
-            showMessage('limparFiltroMessage', result.message || 'Erro ao remover filtro', 'error');
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('limparFiltroMessage', 'Erro: ' + error.message, 'error');
-        })
-        .limparFiltroEstoqueWebApp();
     }
 
     // Display table from data with row colors
