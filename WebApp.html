@@ -861,12 +861,21 @@
             <!-- Opção 2: Busca por Lista de Itens -->
             <div style="background: #e8f5e9; padding: 15px; border-radius: 8px;">
               <h3 style="margin: 0 0 10px 0; font-size: 1rem; color: #2e7d32;">📝 Buscar Lista de Itens</h3>
-              <p style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">Digite ou cole os nomes dos itens (um por linha ou separados por vírgula)</p>
-              <div class="form-group" style="margin-bottom: 10px;">
-                <label for="listagemItens">Lista de Itens</label>
-                <textarea id="listagemItens" rows="5" style="width: 100%; padding: 10px; border-radius: 4px; border: 1px solid #ddd; resize: vertical;" placeholder="ITEM 1&#10;ITEM 2&#10;ITEM 3&#10;&#10;ou: ITEM 1, ITEM 2, ITEM 3"></textarea>
+              <p style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">Selecione os itens que deseja buscar (use autocomplete)</p>
+
+              <div id="listagemItensContainer">
+                <!-- Primeiro item (sempre visível) -->
+                <div class="listagem-item-row" style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center;">
+                  <input type="text" class="listagem-item-input" list="listagemItemDatalist" placeholder="Digite o nome do item..." style="flex: 1; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
+                  <button type="button" class="btn-remove-item" onclick="removerItemListagem(this)" style="background: #f44336; color: white; border: none; border-radius: 4px; width: 36px; height: 36px; cursor: pointer; font-size: 1.2rem;" title="Remover item">×</button>
+                </div>
               </div>
-              <button type="button" class="btn btn-success" onclick="handleBuscaPorListaItens()">🔍 Buscar Itens da Lista</button>
+              <datalist id="listagemItemDatalist"></datalist>
+
+              <div style="display: flex; gap: 10px; margin-top: 10px;">
+                <button type="button" class="btn btn-secondary" onclick="adicionarItemListagem()" style="background: #607d8b; flex: 1;">➕ Adicionar Mais Item</button>
+                <button type="button" class="btn btn-success" onclick="handleBuscaPorListaItens()" style="flex: 1;">🔍 Buscar Itens</button>
+              </div>
             </div>
 
             <div id="listagemResults" class="table-container" style="display: none; margin-top: 20px;">
@@ -1902,6 +1911,7 @@
       populateAutocomplete('localizarItemList', data.items || []);
       populateAutocomplete('listagemGroupList', data.groups || []);
       populateAutocomplete('listagemItemList', data.items || []);
+      populateAutocomplete('listagemItemDatalist', data.items || []);
       populateSelect('relatorioGrupoSelect', data.groups || []);
       populateSelect('listagemGroup', data.groups || []);
       populateSelect('estoqueUnidade', data.medidas || []);
@@ -2632,17 +2642,61 @@
         .buscarUltimoLancamentoPorGrupo(grupo);
     }
 
-    // Handle Busca por Lista de Itens - Retorna último lançamento de cada item da lista
-    function handleBuscaPorListaItens() {
-      const listaItens = document.getElementById('listagemItens').value;
+    // Adicionar novo campo de item na Listagem de Estoque
+    function adicionarItemListagem() {
+      const container = document.getElementById('listagemItensContainer');
+      const newRow = document.createElement('div');
+      newRow.className = 'listagem-item-row';
+      newRow.style.cssText = 'display: flex; gap: 8px; margin-bottom: 8px; align-items: center;';
+      newRow.innerHTML = `
+        <input type="text" class="listagem-item-input" list="listagemItemDatalist" placeholder="Digite o nome do item..." style="flex: 1; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
+        <button type="button" class="btn-remove-item" onclick="removerItemListagem(this)" style="background: #f44336; color: white; border: none; border-radius: 4px; width: 36px; height: 36px; cursor: pointer; font-size: 1.2rem;" title="Remover item">×</button>
+      `;
+      container.appendChild(newRow);
 
-      if (!listaItens || listaItens.trim() === '') {
-        showMessage('listagemMessage', 'Digite ou cole os nomes dos itens para buscar', 'warning');
+      // Foca no novo input
+      newRow.querySelector('input').focus();
+    }
+
+    // Remover campo de item da Listagem de Estoque
+    function removerItemListagem(button) {
+      const container = document.getElementById('listagemItensContainer');
+      const rows = container.querySelectorAll('.listagem-item-row');
+
+      // Mantém pelo menos um campo
+      if (rows.length <= 1) {
+        // Apenas limpa o campo em vez de remover
+        rows[0].querySelector('input').value = '';
         return;
       }
 
+      // Remove a linha do botão clicado
+      button.closest('.listagem-item-row').remove();
+    }
+
+    // Handle Busca por Lista de Itens - Retorna último lançamento de cada item da lista
+    function handleBuscaPorListaItens() {
+      // Coleta todos os valores dos inputs dinâmicos
+      const inputs = document.querySelectorAll('#listagemItensContainer .listagem-item-input');
+      const itens = [];
+
+      inputs.forEach(input => {
+        const valor = input.value.trim();
+        if (valor) {
+          itens.push(valor);
+        }
+      });
+
+      if (itens.length === 0) {
+        showMessage('listagemMessage', 'Selecione pelo menos um item para buscar', 'warning');
+        return;
+      }
+
+      // Junta os itens em uma string separada por vírgula
+      const listaItens = itens.join(',');
+
       // Mostra loading
-      showMessage('listagemMessage', 'Buscando itens da lista...', 'info');
+      showMessage('listagemMessage', 'Buscando ' + itens.length + ' item(ns)...', 'info');
       document.getElementById('listagemResults').style.display = 'none';
 
       google.script.run
