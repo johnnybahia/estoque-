@@ -781,12 +781,23 @@
             <form id="grupoForm" onsubmit="return handleInserirGrupo(event)">
               <div class="form-group">
                 <label for="grupoNome">Nome do Grupo *</label>
-                <input type="text" id="grupoNome" required>
+                <input type="text" id="grupoNome" required style="text-transform: uppercase;"
+                       oninput="this.value = this.value.toUpperCase(); validarGrupoDuplicado();"
+                       placeholder="Digite o nome do grupo">
+                <small id="grupoValidation" style="display:none; color: #e74c3c; margin-top: 5px;"></small>
               </div>
               <div class="btn-group">
-                <button type="submit" class="btn btn-success">✓ Adicionar Grupo</button>
+                <button type="submit" id="btnAdicionarGrupo" class="btn btn-success">✓ Adicionar Grupo</button>
               </div>
             </form>
+
+            <!-- Lista de grupos existentes -->
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd;">
+              <h3 style="font-size: 1rem; color: #666; margin-bottom: 10px;">📋 Grupos Existentes (<span id="totalGrupos">0</span>)</h3>
+              <div id="listaGruposExistentes" style="max-height: 300px; overflow-y: auto; background: #f9f9f9; padding: 10px; border-radius: 4px;">
+                <p style="color: #999;">Carregando grupos...</p>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1701,6 +1712,11 @@
       });
       document.querySelector('[data-module="' + moduleName + '"]').classList.add('active');
 
+      // Ações específicas por módulo
+      if (moduleName === 'inserir-grupo') {
+        atualizarListaGrupos();
+      }
+
       // Hide sidebar on mobile or when needed
       if (window.innerWidth <= 768) {
         const sidebar = document.getElementById('sidebar');
@@ -2222,7 +2238,19 @@
     function handleInserirGrupo(event) {
       event.preventDefault();
 
-      const grupo = document.getElementById('grupoNome').value;
+      // Converte para maiúscula
+      const grupo = document.getElementById('grupoNome').value.toUpperCase().trim();
+
+      if (!grupo) {
+        showMessage('grupoMessage', 'Digite o nome do grupo', 'error');
+        return false;
+      }
+
+      // Verifica se grupo já existe
+      if (grupoJaExiste(grupo)) {
+        showMessage('grupoMessage', 'Este grupo já existe! Escolha outro nome.', 'error');
+        return false;
+      }
 
       showLoading(true);
 
@@ -2230,9 +2258,10 @@
         .withSuccessHandler(function(result) {
           showLoading(false);
           if (result.success) {
-            showMessage('grupoMessage', 'Grupo inserido com sucesso!', 'success');
+            showMessage('grupoMessage', 'Grupo "' + grupo + '" inserido com sucesso!', 'success');
             document.getElementById('grupoForm').reset();
             loadAutocompleteData();
+            atualizarListaGrupos(); // Atualiza a lista
           } else {
             showMessage('grupoMessage', result.message || 'Erro ao inserir grupo', 'error');
           }
@@ -2244,6 +2273,63 @@
         .insertGroup(grupo);
 
       return false;
+    }
+
+    // Verifica se grupo já existe na lista de autocomplete
+    function grupoJaExiste(grupo) {
+      if (!autocompleteData || !autocompleteData.groups) return false;
+      const grupoUpper = grupo.toUpperCase().trim();
+      return autocompleteData.groups.some(g => g.toUpperCase().trim() === grupoUpper);
+    }
+
+    // Valida em tempo real se grupo já existe
+    function validarGrupoDuplicado() {
+      const input = document.getElementById('grupoNome');
+      const validation = document.getElementById('grupoValidation');
+      const btn = document.getElementById('btnAdicionarGrupo');
+      const grupo = input.value.toUpperCase().trim();
+
+      if (!grupo) {
+        validation.style.display = 'none';
+        btn.disabled = false;
+        return;
+      }
+
+      if (grupoJaExiste(grupo)) {
+        validation.textContent = '⚠️ Este grupo já existe!';
+        validation.style.display = 'block';
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+      } else {
+        validation.style.display = 'none';
+        btn.disabled = false;
+        btn.style.opacity = '1';
+      }
+    }
+
+    // Atualiza a lista de grupos existentes na tela
+    function atualizarListaGrupos() {
+      const container = document.getElementById('listaGruposExistentes');
+      const contador = document.getElementById('totalGrupos');
+
+      if (!autocompleteData || !autocompleteData.groups || autocompleteData.groups.length === 0) {
+        container.innerHTML = '<p style="color: #999;">Nenhum grupo cadastrado.</p>';
+        contador.textContent = '0';
+        return;
+      }
+
+      // Ordena alfabeticamente
+      const gruposOrdenados = [...autocompleteData.groups].sort();
+
+      contador.textContent = gruposOrdenados.length;
+
+      let html = '<div style="display: flex; flex-wrap: wrap; gap: 8px;">';
+      gruposOrdenados.forEach(grupo => {
+        html += '<span style="background: #e3f2fd; color: #1565c0; padding: 4px 10px; border-radius: 4px; font-size: 0.85rem;">' + grupo + '</span>';
+      });
+      html += '</div>';
+
+      container.innerHTML = html;
     }
 
     // Handle Localizar Produto (OTIMIZADO: índice local para últimos 20, servidor para completo)
