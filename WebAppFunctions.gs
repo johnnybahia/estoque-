@@ -760,12 +760,19 @@ function limparFiltroEstoqueWebApp() {
 // ========================================
 
 /**
- * getAllDataForSync: Retorna dados para sincronização inicial
- * LIMITADO aos últimos 90 dias para não exceder limite de transferência
- * Para histórico completo, use busca específica por item
+ * Constantes de paginação para sync
  */
-function getAllDataForSync() {
+var SYNC_PAGE_SIZE = 2000; // Registros por página (seguro para transferência)
+
+/**
+ * getAllDataForSync: Retorna dados para sincronização inicial (PAGINADO)
+ * @param {number} page - Número da página (0-indexed)
+ * @return {object} - { success, data, page, totalPages, totalRows }
+ */
+function getAllDataForSync(page) {
   try {
+    page = page || 0;
+
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheetEstoque = ss.getSheetByName("ESTOQUE");
 
@@ -775,41 +782,48 @@ function getAllDataForSync() {
 
     var lastRow = sheetEstoque.getLastRow();
     if (lastRow < 2) {
-      return { success: true, data: [], totalRows: 0 };
+      return { success: true, data: [], page: 0, totalPages: 0, totalRows: 0 };
     }
 
-    var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, 13);
+    var totalRows = lastRow - 1;
+    var totalPages = Math.ceil(totalRows / SYNC_PAGE_SIZE);
+
+    // Calcula range para esta página
+    var startRow = 2 + (page * SYNC_PAGE_SIZE);
+    var rowsToGet = Math.min(SYNC_PAGE_SIZE, lastRow - startRow + 1);
+
+    if (startRow > lastRow || rowsToGet <= 0) {
+      return { success: true, data: [], page: page, totalPages: totalPages, totalRows: totalRows, done: true };
+    }
+
+    var dataRange = sheetEstoque.getRange(startRow, 1, rowsToGet, 13);
     var data = dataRange.getDisplayValues();
     var backgrounds = dataRange.getBackgrounds();
-
-    // Filtra apenas registros dos últimos 90 dias
-    var cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - 90);
 
     var records = [];
     for (var i = 0; i < data.length; i++) {
       var dateStr = data[i][3]; // Coluna D (Data)
       var rowDate = dateStr ? new Date(dateStr) : new Date(0);
 
-      // Só inclui se for dos últimos 90 dias
-      if (rowDate >= cutoffDate) {
-        records.push({
-          row: data[i],
-          date: rowDate.getTime(),
-          background: backgrounds[i][0] || null
-        });
-      }
+      records.push({
+        row: data[i],
+        date: rowDate.getTime(),
+        background: backgrounds[i][0] || null
+      });
     }
 
-    // Limita a 5000 registros máximo para não exceder limite de transferência
-    if (records.length > 5000) {
-      // Ordena por data (mais recente primeiro) e pega os 5000 mais recentes
-      records.sort(function(a, b) { return b.date - a.date; });
-      records = records.slice(0, 5000);
-    }
+    var isLastPage = (page >= totalPages - 1);
 
-    Logger.log("getAllDataForSync: " + records.length + " registros (últimos 90 dias, total na planilha: " + data.length + ")");
-    return { success: true, data: records, totalRows: data.length };
+    Logger.log("getAllDataForSync: página " + (page + 1) + "/" + totalPages + " (" + records.length + " registros)");
+
+    return {
+      success: true,
+      data: records,
+      page: page,
+      totalPages: totalPages,
+      totalRows: totalRows,
+      done: isLastPage
+    };
 
   } catch (error) {
     Logger.log("Erro getAllDataForSync: " + error);

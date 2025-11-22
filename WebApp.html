@@ -1216,48 +1216,116 @@
     }
 
     /**
-     * Sincronização inicial - carrega todos os dados do servidor
+     * Sincronização inicial - carrega TODOS os dados do servidor (PAGINADO)
+     * Carrega 2000 registros por vez até completar todos os dados
      */
     async function initialSync() {
-      console.log('Sincronização inicial...');
-      showSyncStatus('Carregando dados...');
+      console.log('Sincronização inicial (paginada)...');
 
+      let totalRecords = 0;
+      let currentPage = 0;
+      let totalPages = 1;
+      let totalRows = 0;
+
+      // Limpa IndexedDB antes de carregar tudo
+      if (db) {
+        try {
+          const transaction = db.transaction([DB_CONFIG.storeName], 'readwrite');
+          transaction.objectStore(DB_CONFIG.storeName).clear();
+        } catch (e) {
+          console.log('Erro ao limpar IndexedDB:', e);
+        }
+      }
+
+      // Carrega página por página
+      while (currentPage < totalPages) {
+        showSyncStatus('Carregando ' + (currentPage + 1) + '/' + totalPages + '...', 'info');
+
+        try {
+          const result = await loadSyncPage(currentPage);
+
+          if (result && result.success) {
+            totalPages = result.totalPages || 1;
+            totalRows = result.totalRows || 0;
+
+            if (result.data && result.data.length > 0) {
+              // Salva esta página no IndexedDB
+              await savePageToIndexedDB(result.data, currentPage);
+              totalRecords += result.data.length;
+              console.log('Página ' + (currentPage + 1) + '/' + totalPages + ': ' + result.data.length + ' registros (total: ' + totalRecords + ')');
+            }
+
+            if (result.done) {
+              break;
+            }
+
+            currentPage++;
+          } else {
+            console.error('Erro na página ' + currentPage + ':', result);
+            break;
+          }
+        } catch (e) {
+          console.error('Erro ao carregar página ' + currentPage + ':', e);
+          break;
+        }
+      }
+
+      // Salva timestamp da sincronização
+      if (db) {
+        try {
+          const metaTransaction = db.transaction([DB_CONFIG.metaStore], 'readwrite');
+          const metaStore = metaTransaction.objectStore(DB_CONFIG.metaStore);
+          metaStore.put({ key: 'lastSync', value: Date.now() });
+          metaStore.put({ key: 'recordCount', value: totalRecords });
+        } catch (e) {
+          console.log('Erro ao salvar meta:', e);
+        }
+      }
+
+      // Constrói índice em memória
+      await buildMemoryIndexFromIDB();
+
+      showSyncStatus('Sincronizado! (' + totalRecords + '/' + totalRows + ')', 'success');
+      setTimeout(() => hideSyncStatus(), 3000);
+
+      console.log('Sincronização completa: ' + totalRecords + ' registros carregados');
+    }
+
+    /**
+     * Carrega uma página de dados do servidor
+     */
+    function loadSyncPage(page) {
       return new Promise((resolve, reject) => {
         google.script.run
-          .withSuccessHandler(async function(result) {
-            console.log('getAllDataForSync resultado:', JSON.stringify(result).substring(0, 200));
-            try {
-              if (result && result.success) {
-                // result.data pode ser array vazio, isso é OK
-                const data = result.data || [];
-                console.log('Sincronizando ' + data.length + ' registros para IndexedDB...');
-                await reloadIndexedDB(data);
-                // Também atualiza o índice em memória
-                await buildMemoryIndexFromIDB();
-                showSyncStatus('Sincronizado! (' + data.length + ')', 'success');
-                setTimeout(() => hideSyncStatus(), 2000);
-                resolve();
-              } else {
-                const errorMsg = result ? (result.message || 'Resposta sem success=true') : 'Resposta vazia';
-                console.error('getAllDataForSync falhou:', errorMsg, result);
-                showSyncStatus('Erro sync', 'error');
-                // Não rejeita, apenas loga - permite continuar sem IndexedDB
-                resolve();
-              }
-            } catch (e) {
-              console.error('Erro ao processar sync:', e);
-              showSyncStatus('Erro ao processar', 'error');
-              // Não rejeita, apenas loga - permite continuar sem IndexedDB
-              resolve();
-            }
-          })
-          .withFailureHandler(function(error) {
-            console.error('getAllDataForSync failure handler:', error);
-            showSyncStatus('Sync falhou', 'error');
-            // Não rejeita, apenas loga - permite continuar sem IndexedDB
-            resolve();
-          })
-          .getAllDataForSync();
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)
+          .getAllDataForSync(page);
+      });
+    }
+
+    /**
+     * Salva uma página de dados no IndexedDB
+     */
+    async function savePageToIndexedDB(records, pageNum) {
+      if (!db || !records || records.length === 0) return;
+
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([DB_CONFIG.storeName], 'readwrite');
+        const store = transaction.objectStore(DB_CONFIG.storeName);
+
+        records.forEach((record, idx) => {
+          const id = (pageNum * 10000) + idx + 1; // ID único por página
+          store.put({
+            id: id,
+            row: record.row,
+            item: record.row[1] ? record.row[1].toString().trim().toLowerCase() : '',
+            date: record.date,
+            background: record.background
+          });
+        });
+
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
       });
     }
 
