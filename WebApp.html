@@ -623,6 +623,143 @@
     .autocomplete-option:last-child {
       border-bottom: none;
     }
+
+    /* Modal de Confirmação NF */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 2000;
+    }
+    .modal-overlay.show {
+      display: flex;
+    }
+    .modal-content {
+      background: white;
+      border-radius: 8px;
+      max-width: 95%;
+      max-height: 90vh;
+      width: 900px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+    .modal-header {
+      background: var(--primary-color);
+      color: white;
+      padding: 15px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-header h3 {
+      margin: 0;
+      font-size: 1.2rem;
+    }
+    .modal-close {
+      background: none;
+      border: none;
+      color: white;
+      font-size: 1.5rem;
+      cursor: pointer;
+      padding: 0 5px;
+    }
+    .modal-body {
+      padding: 20px;
+      max-height: calc(90vh - 140px);
+      overflow-y: auto;
+    }
+    .modal-footer {
+      padding: 15px 20px;
+      background: #f5f5f5;
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      border-top: 1px solid #ddd;
+    }
+    .confirm-item-row {
+      display: grid;
+      grid-template-columns: 40px 2fr 1fr 1fr 1fr 1fr 60px;
+      gap: 10px;
+      padding: 12px;
+      border-bottom: 1px solid #eee;
+      align-items: center;
+      background: #fafafa;
+      margin-bottom: 5px;
+      border-radius: 4px;
+    }
+    .confirm-item-row.item-novo {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+    }
+    .confirm-item-row .item-index {
+      font-weight: bold;
+      color: #666;
+      text-align: center;
+    }
+    .confirm-item-row .item-nome {
+      font-weight: 600;
+    }
+    .confirm-item-row .item-novo-badge {
+      background: #dc3545;
+      color: white;
+      font-size: 0.7rem;
+      padding: 2px 6px;
+      border-radius: 3px;
+      margin-left: 5px;
+    }
+    .confirm-item-row .btn-ok-item {
+      background: #28a745;
+      color: white;
+      border: none;
+      padding: 8px 15px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .confirm-item-row .btn-ok-item:hover {
+      background: #218838;
+    }
+    .confirm-item-row .btn-ok-item.confirmed {
+      background: #6c757d;
+    }
+    .confirm-item-row .btn-ok-item.confirmed::after {
+      content: ' ✓';
+    }
+    .confirm-header-row {
+      display: grid;
+      grid-template-columns: 40px 2fr 1fr 1fr 1fr 1fr 60px;
+      gap: 10px;
+      padding: 10px 12px;
+      background: var(--primary-color);
+      color: white;
+      font-weight: 600;
+      font-size: 0.85rem;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+    .novo-item-warning {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      color: #856404;
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+    }
+    .novo-item-warning strong {
+      color: #dc3545;
+    }
+    .grupo-field-novo {
+      display: none;
+    }
+    .grupo-field-novo.show {
+      display: block;
+    }
   </style>
 </head>
 <body>
@@ -723,15 +860,23 @@
             <div id="estoqueFormArea">
               <h2>📦 Inserir Estoque</h2>
               <div id="estoqueMessage" class="message"></div>
-              <form id="estoqueForm" onsubmit="return handleInserirEstoque(event)">
+
+              <!-- Aviso de item novo -->
+              <div id="avisoItemNovoEstoque" class="novo-item-warning" style="display: none;">
+                <strong>⚠️ ATENÇÃO:</strong> Este item é <strong>NOVO</strong> e não existe na base de dados!
+                <br>Certifique-se de que digitou corretamente para evitar problemas futuros.
+              </div>
+
+              <form id="estoqueForm" onsubmit="return handleInserirEstoque(event)" novalidate>
                 <!-- Grid compacto 2 colunas -->
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                   <div class="form-group" style="margin-bottom: 8px;">
                     <label for="estoqueItem" style="font-size: 0.85rem;">Produto *</label>
-                    <input type="text" id="estoqueItem" list="itemList" required style="padding: 6px;">
+                    <input type="text" id="estoqueItem" list="itemList" required style="padding: 6px;" onblur="verificarItemNovoEstoque()">
                     <datalist id="itemList"></datalist>
+                    <small id="avisoItemNovoSmall" style="display: none; color: #dc3545; font-size: 0.75rem;">⚠️ Item NOVO - Verifique a digitação!</small>
                   </div>
-                  <div class="form-group" style="margin-bottom: 8px;">
+                  <div class="form-group" style="margin-bottom: 8px;" id="estoqueGroupContainer">
                     <label for="estoqueGroup" style="font-size: 0.85rem;">Grupo *</label>
                     <input type="text" id="estoqueGroup" list="groupList" required style="padding: 6px;">
                     <datalist id="groupList"></datalist>
@@ -1973,6 +2118,96 @@
       }
     }
 
+    // Timeout para verificação de item novo (evita disparar durante seleção do autocomplete)
+    let verificarItemNovoTimeout;
+
+    // Cache de saldo pré-carregado para acelerar exibição do resultado
+    let saldoPreCarregado = {
+      item: null,
+      saldo: 0,
+      carregando: false
+    };
+
+    // Pré-carrega o saldo do item em background
+    function preCarregarSaldo(itemName) {
+      if (!itemName || itemName.trim() === '') return;
+
+      const itemNormalizado = itemName.trim();
+
+      // Se já está carregando o mesmo item, não faz nada
+      if (saldoPreCarregado.item === itemNormalizado && saldoPreCarregado.carregando) return;
+
+      // Se já tem o saldo deste item, não precisa buscar
+      if (saldoPreCarregado.item === itemNormalizado && !saldoPreCarregado.carregando) return;
+
+      saldoPreCarregado.item = itemNormalizado;
+      saldoPreCarregado.carregando = true;
+      saldoPreCarregado.saldo = 0;
+
+      console.log('Pré-carregando saldo para:', itemNormalizado);
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result && saldoPreCarregado.item === itemNormalizado) {
+            saldoPreCarregado.saldo = parseFloat(result.lastStock) || 0;
+            saldoPreCarregado.carregando = false;
+            console.log('Saldo pré-carregado:', saldoPreCarregado.saldo);
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.log('Erro ao pré-carregar saldo:', error);
+          saldoPreCarregado.carregando = false;
+        })
+        .getLastRegistrationOpt(itemNormalizado);
+    }
+
+    // Verifica se o item é novo no módulo Inserir Estoque
+    // Usa delay para aguardar o usuário terminar de selecionar do autocomplete
+    function verificarItemNovoEstoque() {
+      // Limpa timeout anterior
+      clearTimeout(verificarItemNovoTimeout);
+
+      // Aguarda 400ms após o blur para verificar (tempo para selecionar do datalist)
+      verificarItemNovoTimeout = setTimeout(function() {
+        const itemInput = document.getElementById('estoqueItem');
+        const nomeItem = itemInput.value.trim().toUpperCase();
+        const avisoGrande = document.getElementById('avisoItemNovoEstoque');
+        const avisoPequeno = document.getElementById('avisoItemNovoSmall');
+        const grupoContainer = document.getElementById('estoqueGroupContainer');
+
+        if (!nomeItem) {
+          avisoGrande.style.display = 'none';
+          avisoPequeno.style.display = 'none';
+          grupoContainer.style.background = '';
+          grupoContainer.style.padding = '';
+          grupoContainer.style.border = '';
+          return;
+        }
+
+        // Pré-carrega o saldo do item em background (para acelerar resultado)
+        preCarregarSaldo(itemInput.value.trim());
+
+        // Verifica se item existe na lista de autocomplete
+        const itemExiste = autocompleteData && autocompleteData.items &&
+          autocompleteData.items.some(item => item.toUpperCase() === nomeItem);
+
+        if (!itemExiste) {
+          avisoGrande.style.display = 'block';
+          avisoPequeno.style.display = 'block';
+          grupoContainer.style.background = '#fff3cd';
+          grupoContainer.style.padding = '8px';
+          grupoContainer.style.borderRadius = '4px';
+          grupoContainer.style.border = '1px solid #ffc107';
+        } else {
+          avisoGrande.style.display = 'none';
+          avisoPequeno.style.display = 'none';
+          grupoContainer.style.background = '';
+          grupoContainer.style.padding = '';
+          grupoContainer.style.border = '';
+        }
+      }, 400);
+    }
+
     // Show product history when item is typed (OTIMIZADO: índice local primeiro, servidor como fallback)
     let historyTimeout;
     function showProductHistory(item) {
@@ -2219,12 +2454,18 @@
           return;
         }
 
-        // Filtra itens que COMEÇAM com o texto digitado
-        const filtered = data.filter(item =>
-          item && item.toUpperCase().startsWith(value)
-        ).slice(0, 15); // Limita a 15 resultados
+        let filtered;
+        if (value === '') {
+          // Se não digitou nada, mostra as primeiras 15 opções
+          filtered = data.slice(0, 15);
+        } else {
+          // Filtra itens que COMEÇAM com o texto digitado
+          filtered = data.filter(item =>
+            item && item.toUpperCase().startsWith(value)
+          ).slice(0, 15); // Limita a 15 resultados
+        }
 
-        if (filtered.length === 0 || value === '') {
+        if (filtered.length === 0) {
           dropdown.classList.remove('show');
           return;
         }
@@ -2348,7 +2589,7 @@
       }
     });
 
-    // Handle Inserir Estoque
+    // Handle Inserir Estoque - Insere e mostra resultado
     function handleInserirEstoque(event) {
       event.preventDefault();
 
@@ -2362,6 +2603,25 @@
         saida: document.getElementById('estoqueSaida').value,
         valorUnitario: document.getElementById('estoqueValorUnitario').value
       };
+
+      // Validação de campos obrigatórios
+      if (!formData.item.trim()) {
+        showMessage('estoqueMessage', 'Informe o produto.', 'error');
+        document.getElementById('estoqueItem').focus();
+        return false;
+      }
+
+      if (!formData.group.trim()) {
+        showMessage('estoqueMessage', 'Informe o grupo.', 'error');
+        document.getElementById('estoqueGroup').focus();
+        return false;
+      }
+
+      if (!formData.unidade) {
+        showMessage('estoqueMessage', 'Selecione a unidade.', 'error');
+        document.getElementById('estoqueUnidade').focus();
+        return false;
+      }
 
       // Validation
       const entrada = parseFloat(formData.entrada) || 0;
@@ -2384,78 +2644,56 @@
         return false;
       }
 
-      // Warning for entrada > 0
-      if (entrada > 0) {
-        if (!confirm('⚠️ ATENÇÃO!\n\nVocê está registrando uma ENTRADA no estoque.\n\nCertifique-se de ATUALIZAR o inventário físico para evitar discrepâncias.\n\nDeseja continuar?')) {
-          return false;
-        }
-      }
+      // Verifica se é item novo
+      const nomeItemUpper = formData.item.trim().toUpperCase();
+      const isItemNovo = !(autocompleteData && autocompleteData.items &&
+        autocompleteData.items.some(item => item.toUpperCase() === nomeItemUpper));
 
-      // Guarda o item para uso posterior
-      const itemInserido = formData.item;
-      const entradaValor = entrada;
-      const saidaValor = saida;
+      // Mostra loading enquanto processa
+      showMessage('estoqueMessage', 'Processando lançamento...', 'info');
 
-      // ========================================
-      // OTIMIZAÇÃO: Mostra resultado INSTANTÂNEO (antes de enviar ao servidor)
-      // ========================================
-
-      // 1. Mostra mensagem de sucesso imediatamente
-      const tipoMov = entradaValor > 0 ? 'ENTRADA' : 'SAÍDA';
-      const qtdMov = entradaValor > 0 ? entradaValor : saidaValor;
-      document.getElementById('estoqueResultMessage').innerHTML =
-        '<strong>' + tipoMov + '</strong> de <strong>' + qtdMov + '</strong> unidade(s) do item <strong>' + itemInserido + '</strong> registrada com sucesso!';
-
-      // 2. Mostra histórico do índice local INSTANTANEAMENTE
-      const localHistory = getItemHistoryFromIndex(itemInserido);
-      if (localHistory) {
-        const displayData = formatHistoryForDisplay(localHistory, 20);
-        if (displayData && displayData.rows.length > 0) {
-          displayTable('estoqueResultTable', displayData);
-        } else {
-          document.getElementById('estoqueResultTable').innerHTML = '<p style="text-align:center;padding:10px;">Salvando...</p>';
-        }
-      } else {
-        document.getElementById('estoqueResultTable').innerHTML = '<p style="text-align:center;padding:10px;">Salvando...</p>';
-      }
-
-      // 3. Esconde formulário e mostra resultados IMEDIATAMENTE
-      document.getElementById('estoqueFormArea').style.display = 'none';
-      document.getElementById('estoqueResultArea').style.display = 'block';
-      document.querySelector('#estoqueResultArea .btn-group').style.display = 'flex'; // Mostra botão imediatamente
-      resetEstoqueForm();
-
-      // 4. Envia para servidor EM BACKGROUND
-      showSyncStatus('Sincronizando...', 'info');
-
+      // Envia para servidor e AGUARDA confirmação antes de mostrar resultado
       google.script.run
-        .withSuccessHandler(async function(result) {
+        .withSuccessHandler(function(result) {
+          hideMessage('estoqueMessage');
+
           if (result.success) {
+            // Preenche modal de resultado com dados CONFIRMADOS do servidor
+            document.getElementById('resultProduto').textContent = formData.item;
+            document.getElementById('resultGrupo').textContent = formData.group || '-';
+            document.getElementById('resultNF').textContent = formData.nf || '-';
+            document.getElementById('resultObs').textContent = formData.obs || '-';
+
+            document.getElementById('resultTipo').innerHTML = entrada > 0 ?
+              '<span style="color: #28a745; font-weight: bold;">ENTRADA</span>' :
+              '<span style="color: #dc3545; font-weight: bold;">SAÍDA</span>';
+            document.getElementById('resultQtd').textContent = entrada > 0 ? entrada : saida;
+
+            // Mostra saldos CONFIRMADOS do servidor
+            const saldoAnterior = result.saldoAnterior !== undefined ? result.saldoAnterior : 0;
+            const novoSaldo = result.novoSaldo !== undefined ? result.novoSaldo : 0;
+            document.getElementById('resultSaldoAnterior').textContent = saldoAnterior;
+            document.getElementById('resultNovoSaldo').textContent = novoSaldo;
+
+            // Mostra aviso de item novo
+            document.getElementById('avisoItemNovoModal').style.display = isItemNovo ? 'block' : 'none';
+
+            // Abre modal de resultado APÓS confirmação do servidor
+            document.getElementById('modalResultadoEstoque').classList.add('show');
+
+            // Reseta formulário
+            resetEstoqueForm();
+
+            // Atualiza caches em background
             clearClientCache();
             loadDashboardData();
             loadAutocompleteData();
-
-            // Força sincronização para pegar o novo registro
-            await incrementalSync();
-
-            // Atualiza a tabela com dados reais do servidor
-            google.script.run
-              .withSuccessHandler(function(histResult) {
-                if (histResult.success && histResult.data && histResult.data.rows.length > 0) {
-                  displayTable('estoqueResultTable', histResult.data);
-                }
-              })
-              .getItemHistory(itemInserido);
-
-            showSyncStatus('Salvo!', 'success');
-            setTimeout(() => hideSyncStatus(), 1500);
           } else {
-            showSyncStatus('Erro ao salvar', 'error');
             showMessage('estoqueMessage', result.message || 'Erro ao inserir estoque', 'error');
           }
         })
         .withFailureHandler(function(error) {
-          showSyncStatus('Erro: ' + error.message, 'error');
+          hideMessage('estoqueMessage');
           showMessage('estoqueMessage', 'Erro: ' + error.message, 'error');
         })
         .processEstoqueWebApp(formData);
@@ -2463,14 +2701,47 @@
       return false;
     }
 
-    // Reset estoque form
+    // Fecha modal de resultado e volta para inserir outro item
+    function fecharModalResultado() {
+      document.getElementById('modalResultadoEstoque').classList.remove('show');
+      // Garante que o formulário está limpo
+      resetEstoqueForm();
+    }
+
+    // Reset estoque form - limpa todos os campos completamente
     function resetEstoqueForm() {
-      document.getElementById('estoqueForm').reset();
+      // Limpa campos de texto
+      document.getElementById('estoqueItem').value = '';
+      document.getElementById('estoqueGroup').value = '';
+      document.getElementById('estoqueNF').value = '';
+
+      // Reseta selects para primeira opção (vazia)
+      const unidadeSelect = document.getElementById('estoqueUnidade');
+      if (unidadeSelect) unidadeSelect.selectedIndex = 0;
+
+      const obsSelect = document.getElementById('estoqueObs');
+      if (obsSelect) obsSelect.selectedIndex = 0;
+
+      // Reseta valores numéricos
       document.getElementById('estoqueEntrada').value = '0';
       document.getElementById('estoqueSaida').value = '0';
       document.getElementById('estoqueValorUnitario').value = '';
+
+      // Esconde campos condicionais
       document.getElementById('valorUnitarioGroup').style.display = 'none';
       document.getElementById('estoqueHistorico').style.display = 'none';
+
+      // Limpa avisos de item novo
+      document.getElementById('avisoItemNovoEstoque').style.display = 'none';
+      document.getElementById('avisoItemNovoSmall').style.display = 'none';
+
+      // Reseta estilo do grupo
+      const grupoContainer = document.getElementById('estoqueGroupContainer');
+      grupoContainer.style.background = '';
+      grupoContainer.style.padding = '';
+      grupoContainer.style.border = '';
+
+      // Foca no campo de item
       document.getElementById('estoqueItem').focus();
     }
 
@@ -2490,12 +2761,19 @@
       const container = document.getElementById('nfItensContainer');
       const itemDiv = document.createElement('div');
       itemDiv.id = 'nfItem-' + nfItemCounter;
-      itemDiv.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 8px; margin-bottom: 10px; padding: 10px; background: white; border-radius: 4px; align-items: end;';
+      itemDiv.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr auto; gap: 8px; margin-bottom: 10px; padding: 10px; background: white; border-radius: 4px; align-items: end;';
       itemDiv.innerHTML = `
         <div class="form-group" style="margin-bottom: 0;">
           <label style="font-size: 0.75rem;">Item *</label>
-          <input type="text" class="nf-item-nome" list="nfItemDatalist-${nfItemCounter}" required style="padding: 6px;" placeholder="Nome do item">
+          <input type="text" class="nf-item-nome" list="nfItemDatalist-${nfItemCounter}" required style="padding: 6px;" placeholder="Nome do item" onblur="verificarItemNovo(this, ${nfItemCounter})">
           <datalist id="nfItemDatalist-${nfItemCounter}"></datalist>
+          <small class="nf-item-novo-aviso" style="display: none; color: #dc3545; font-size: 0.7rem;">⚠️ Item NOVO!</small>
+        </div>
+        <div class="form-group grupo-field-novo" id="grupoField-${nfItemCounter}" style="margin-bottom: 0;">
+          <label style="font-size: 0.75rem;">Grupo *</label>
+          <select class="nf-item-grupo" style="padding: 6px;">
+            <option value="">Selecione...</option>
+          </select>
         </div>
         <div class="form-group" style="margin-bottom: 0;">
           <label style="font-size: 0.75rem;">Preço *</label>
@@ -2522,6 +2800,60 @@
           datalist.appendChild(option);
         });
       }
+
+      // Popula select de grupos
+      const grupoSelect = itemDiv.querySelector('.nf-item-grupo');
+      if (autocompleteData && autocompleteData.groups) {
+        autocompleteData.groups.forEach(grupo => {
+          const option = document.createElement('option');
+          option.value = grupo;
+          option.textContent = grupo;
+          grupoSelect.appendChild(option);
+        });
+      }
+    }
+
+    // Timeout para verificação de item novo na NF
+    let verificarItemNFTimeout = {};
+
+    // Verifica se o item é novo (não existe na base)
+    // Usa delay para aguardar o usuário terminar de selecionar do autocomplete
+    function verificarItemNovo(input, itemId) {
+      // Limpa timeout anterior para este item
+      clearTimeout(verificarItemNFTimeout[itemId]);
+
+      // Aguarda 400ms após o blur para verificar
+      verificarItemNFTimeout[itemId] = setTimeout(function() {
+        const nomeItem = input.value.trim().toUpperCase();
+        const grupoField = document.getElementById('grupoField-' + itemId);
+        const avisoNovo = input.parentElement.querySelector('.nf-item-novo-aviso');
+
+        if (!nomeItem) {
+          grupoField.classList.remove('show');
+          avisoNovo.style.display = 'none';
+          return;
+        }
+
+        // Verifica se item existe na lista de autocomplete
+        const itemExiste = autocompleteData && autocompleteData.items &&
+          autocompleteData.items.some(item => item.toUpperCase() === nomeItem);
+
+        if (!itemExiste) {
+          grupoField.classList.add('show');
+          avisoNovo.style.display = 'block';
+        } else {
+          grupoField.classList.remove('show');
+          avisoNovo.style.display = 'none';
+        }
+      }, 400);
+    }
+
+    // Verifica se um item existe na base
+    function itemExisteNaBase(nomeItem) {
+      if (!nomeItem) return false;
+      const nomeUpper = nomeItem.trim().toUpperCase();
+      return autocompleteData && autocompleteData.items &&
+        autocompleteData.items.some(item => item.toUpperCase() === nomeUpper);
     }
 
     // Remover item da lista de NF
@@ -2550,7 +2882,11 @@
       limparFormNF();
     }
 
-    // Processar inserção de NF com múltiplos itens
+    // Variável global para armazenar itens pendentes de confirmação
+    let itensParaConfirmar = [];
+    let itensConfirmados = new Set();
+
+    // Processar inserção de NF com múltiplos itens - Abre modal de confirmação
     function handleInserirNF() {
       // Validar campos globais
       const nfNumero = document.getElementById('nfNumero').value.trim();
@@ -2576,14 +2912,18 @@
         return;
       }
 
-      const itens = [];
+      itensParaConfirmar = [];
+      itensConfirmados = new Set();
       let hasError = false;
+      let temItemNovo = false;
 
       itemDivs.forEach((div, index) => {
         const nome = div.querySelector('.nf-item-nome').value.trim().toUpperCase();
         const preco = parseFloat(div.querySelector('.nf-item-preco').value) || 0;
         const lote = div.querySelector('.nf-item-lote').value.trim();
         const entrada = parseFloat(div.querySelector('.nf-item-entrada').value) || 0;
+        const grupoSelect = div.querySelector('.nf-item-grupo');
+        const grupoSelecionado = grupoSelect ? grupoSelect.value : '';
 
         if (!nome) {
           showMessage('nfMessage', `Item ${index + 1}: Nome do item é obrigatório`, 'error');
@@ -2601,25 +2941,143 @@
           return;
         }
 
+        // Verifica se é item novo
+        const isNovoItem = !itemExisteNaBase(nome);
+
+        // Se for item novo, exige grupo
+        if (isNovoItem && !grupoSelecionado) {
+          showMessage('nfMessage', `Item ${index + 1} (${nome}): Item NOVO precisa de um Grupo selecionado`, 'error');
+          hasError = true;
+          return;
+        }
+
+        if (isNovoItem) {
+          temItemNovo = true;
+        }
+
         // Concatena NF + Pedido + Lote
         let nfConcatenado = nfNumero;
         if (nfPedido) nfConcatenado += ' ' + nfPedido;
         if (lote) nfConcatenado += ' ' + lote;
 
-        itens.push({
+        itensParaConfirmar.push({
+          index: index + 1,
           item: nome,
           unidade: nfUnidade,
           nf: nfConcatenado,
           obs: nfObs,
           entrada: entrada,
           saida: 0,
-          valorUnitario: preco
+          valorUnitario: preco,
+          lote: lote,
+          grupo: grupoSelecionado,
+          isNovo: isNovoItem
         });
       });
 
       if (hasError) return;
 
-      showMessage('nfMessage', 'Inserindo ' + itens.length + ' itens...', 'info');
+      // Abre modal de confirmação
+      abrirModalConfirmacao(nfNumero, nfPedido, nfUnidade, nfObs, temItemNovo);
+    }
+
+    // Abre o modal de confirmação com os itens
+    function abrirModalConfirmacao(nfNumero, nfPedido, nfUnidade, nfObs, temItemNovo) {
+      // Mostra/esconde aviso de itens novos
+      document.getElementById('avisoItensNovos').style.display = temItemNovo ? 'block' : 'none';
+
+      // Info da NF
+      let infoHtml = `<strong>NF:</strong> ${nfNumero}`;
+      if (nfPedido) infoHtml += ` | <strong>Pedido:</strong> ${nfPedido}`;
+      infoHtml += ` | <strong>Unidade:</strong> ${nfUnidade}`;
+      if (nfObs) infoHtml += ` | <strong>Obs:</strong> ${nfObs}`;
+      document.getElementById('infoNFModal').innerHTML = infoHtml;
+
+      // Lista de itens
+      const listaContainer = document.getElementById('listaItensConfirmacao');
+      let listaHtml = '';
+
+      itensParaConfirmar.forEach((item, idx) => {
+        const classeNovo = item.isNovo ? 'item-novo' : '';
+        const badgeNovo = item.isNovo ? '<span class="item-novo-badge">NOVO</span>' : '';
+        const grupoDisplay = item.isNovo ? item.grupo : '(existente)';
+
+        listaHtml += `
+          <div class="confirm-item-row ${classeNovo}" data-index="${idx}">
+            <span class="item-index">${item.index}</span>
+            <span class="item-nome">${item.item}${badgeNovo}</span>
+            <span>${grupoDisplay}</span>
+            <span>R$ ${item.valorUnitario.toFixed(2)}</span>
+            <span>${item.lote || '-'}</span>
+            <span>${item.entrada}</span>
+            <button type="button" class="btn-ok-item" onclick="confirmarItem(${idx})" id="btnOkItem-${idx}">OK</button>
+          </div>
+        `;
+      });
+
+      listaContainer.innerHTML = listaHtml;
+
+      // Atualiza contador
+      document.getElementById('totalConfirmados').textContent = '0';
+      document.getElementById('totalItensNF').textContent = itensParaConfirmar.length;
+      document.getElementById('btnConfirmarInsercaoFinal').disabled = true;
+
+      // Mostra modal
+      document.getElementById('modalConfirmacaoNF').classList.add('show');
+    }
+
+    // Confirma um item individual
+    function confirmarItem(idx) {
+      const btn = document.getElementById('btnOkItem-' + idx);
+      btn.classList.add('confirmed');
+      btn.disabled = true;
+      btn.textContent = 'OK';
+
+      itensConfirmados.add(idx);
+
+      // Atualiza contador
+      document.getElementById('totalConfirmados').textContent = itensConfirmados.size;
+
+      // Habilita botão final se todos confirmados
+      if (itensConfirmados.size === itensParaConfirmar.length) {
+        document.getElementById('btnConfirmarInsercaoFinal').disabled = false;
+      }
+    }
+
+    // Fecha modal de confirmação
+    function fecharModalConfirmacao() {
+      document.getElementById('modalConfirmacaoNF').classList.remove('show');
+    }
+
+    // Volta para edição do formulário
+    function voltarParaEdicao() {
+      fecharModalConfirmacao();
+      showMessage('nfMessage', 'Ajuste os dados e clique em Confirmar novamente', 'info');
+    }
+
+    // Confirma inserção final e envia para o servidor
+    function confirmarInsercaoFinal() {
+      if (itensConfirmados.size !== itensParaConfirmar.length) {
+        alert('Confirme todos os itens antes de prosseguir');
+        return;
+      }
+
+      const nfNumero = document.getElementById('nfNumero').value.trim();
+
+      // Prepara itens para envio
+      const itensParaEnviar = itensParaConfirmar.map(item => ({
+        item: item.item,
+        unidade: item.unidade,
+        nf: item.nf,
+        obs: item.obs,
+        entrada: item.entrada,
+        saida: item.saida,
+        valorUnitario: item.valorUnitario,
+        grupo: item.grupo || '' // Envia grupo para itens novos
+      }));
+
+      fecharModalConfirmacao();
+      showMessage('nfMessage', 'Inserindo ' + itensParaEnviar.length + ' itens...', 'info');
 
       // Envia para servidor
       google.script.run
@@ -2627,8 +3085,13 @@
           if (result.success) {
             document.getElementById('nfFormArea').style.display = 'none';
             document.getElementById('nfResultArea').style.display = 'block';
+
+            // Mostra mensagem e tabela de itens inseridos
             document.getElementById('nfResultMessage').innerHTML =
-              '<strong>' + itens.length + '</strong> item(ns) inserido(s) com sucesso na NF <strong>' + nfNumero + '</strong>';
+              '<strong>' + itensParaEnviar.length + '</strong> item(ns) inserido(s) com sucesso na NF <strong>' + nfNumero + '</strong>';
+
+            // Mostra tabela com os itens inseridos
+            mostrarTabelaItensInseridos(itensParaEnviar);
 
             // Atualiza cache e autocomplete
             clearClientCache();
@@ -2643,7 +3106,44 @@
         .withFailureHandler(function(error) {
           showMessage('nfMessage', 'Erro: ' + error.message, 'error');
         })
-        .processMultipleEstoqueItems(itens);
+        .processMultipleEstoqueItemsWithGroup(itensParaEnviar);
+    }
+
+    // Mostra tabela com os itens que foram inseridos
+    function mostrarTabelaItensInseridos(itens) {
+      const container = document.getElementById('nfResultTable');
+      let html = `
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Item</th>
+              <th>Grupo</th>
+              <th>Unidade</th>
+              <th>NF</th>
+              <th>Preço</th>
+              <th>Entrada</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      itens.forEach((item, idx) => {
+        html += `
+          <tr>
+            <td>${idx + 1}</td>
+            <td>${item.item}</td>
+            <td>${item.grupo || '-'}</td>
+            <td>${item.unidade}</td>
+            <td>${item.nf}</td>
+            <td>R$ ${item.valorUnitario.toFixed(2)}</td>
+            <td>${item.entrada}</td>
+          </tr>
+        `;
+      });
+
+      html += '</tbody></table>';
+      container.innerHTML = html;
     }
 
     // Handle Inserir Grupo
@@ -3457,5 +3957,106 @@
       container.innerHTML = html;
     }
   </script>
+
+  <!-- Modal de Resultado Inserir Estoque -->
+  <div id="modalResultadoEstoque" class="modal-overlay">
+    <div class="modal-content" style="max-width: 600px;">
+      <div class="modal-header" style="background: #28a745; color: white;">
+        <h3>✓ Lançamento Realizado!</h3>
+      </div>
+      <div class="modal-body">
+        <div id="avisoItemNovoModal" class="novo-item-warning" style="display: none;">
+          <strong>⚠️ ATENÇÃO:</strong> Este é um item <strong>NOVO</strong> que foi cadastrado agora!
+        </div>
+        <div style="background: #f5f5f5; padding: 15px; border-radius: 8px;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 8px; font-weight: bold; width: 40%;">Produto:</td>
+              <td style="padding: 8px;" id="resultProduto"></td>
+            </tr>
+            <tr style="background: #fff;">
+              <td style="padding: 8px; font-weight: bold;">Grupo:</td>
+              <td style="padding: 8px;" id="resultGrupo"></td>
+            </tr>
+            <tr>
+              <td style="padding: 8px; font-weight: bold;">Tipo:</td>
+              <td style="padding: 8px;" id="resultTipo"></td>
+            </tr>
+            <tr style="background: #fff;">
+              <td style="padding: 8px; font-weight: bold;">Quantidade:</td>
+              <td style="padding: 8px; font-size: 1.1rem; font-weight: bold;" id="resultQtd"></td>
+            </tr>
+            <tr>
+              <td style="padding: 8px; font-weight: bold;">NF:</td>
+              <td style="padding: 8px;" id="resultNF"></td>
+            </tr>
+            <tr style="background: #fff;">
+              <td style="padding: 8px; font-weight: bold;">Observação:</td>
+              <td style="padding: 8px;" id="resultObs"></td>
+            </tr>
+          </table>
+        </div>
+        <!-- Destaque para os saldos -->
+        <div style="margin-top: 15px; padding: 15px; background: linear-gradient(135deg, #e8f5e9, #c8e6c9); border-radius: 8px; border: 2px solid #4caf50;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 8px; font-weight: bold; width: 40%;">Saldo Anterior:</td>
+              <td style="padding: 8px; font-size: 1.2rem;" id="resultSaldoAnterior"></td>
+            </tr>
+            <tr>
+              <td style="padding: 8px; font-weight: bold; font-size: 1.1rem; color: #2e7d32;">NOVO SALDO:</td>
+              <td style="padding: 8px; font-size: 1.5rem; font-weight: bold; color: #2e7d32;" id="resultNovoSaldo"></td>
+            </tr>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-success" onclick="fecharModalResultado()" style="width: 100%;">
+          ✓ OK - Inserir Outro Item
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de Confirmação NF -->
+  <div id="modalConfirmacaoNF" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>📋 Confirme os Itens da NF</h3>
+        <button class="modal-close" onclick="fecharModalConfirmacao()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="avisoItensNovos" class="novo-item-warning" style="display: none;">
+          <strong>⚠️ ATENÇÃO:</strong> Existem itens <strong>NOVOS</strong> que não existem na base de dados!
+          <br>Verifique se digitou corretamente para evitar problemas futuros.
+          <br>Itens novos estão destacados em <span style="background: #fff3cd; padding: 2px 6px;">amarelo</span>.
+        </div>
+        <div id="infoNFModal" style="background: #e3f2fd; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
+          <!-- Info da NF será inserida aqui -->
+        </div>
+        <div class="confirm-header-row">
+          <span>#</span>
+          <span>Item</span>
+          <span>Grupo</span>
+          <span>Preço</span>
+          <span>Lote</span>
+          <span>Entrada</span>
+          <span>Ação</span>
+        </div>
+        <div id="listaItensConfirmacao">
+          <!-- Itens serão listados aqui -->
+        </div>
+        <div id="contadorConfirmacao" style="text-align: center; margin-top: 15px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
+          Confirmados: <strong><span id="totalConfirmados">0</span></strong> de <strong><span id="totalItensNF">0</span></strong>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-warning" onclick="voltarParaEdicao()">↩ Voltar e Ajustar</button>
+        <button type="button" id="btnConfirmarInsercaoFinal" class="btn btn-success" onclick="confirmarInsercaoFinal()" disabled>
+          ✓ Confirmar e Inserir
+        </button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
