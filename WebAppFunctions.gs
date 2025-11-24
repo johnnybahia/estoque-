@@ -8,14 +8,14 @@
 // ========================================
 
 /**
- * Constantes de cache - TTLs otimizados para melhor performance
- * TTLs maiores reduzem chamadas à planilha sem prejudicar limites do Google
+ * Constantes de cache - TTLs reduzidos para atualização mais rápida
+ * Valores menores = dados mais atualizados, mais chamadas à planilha
  */
 var CACHE_TTL_OPT = {
-  AUTOCOMPLETE: 600,    // 10 minutos para dados de autocomplete
-  DASHBOARD: 120,       // 2 minutos para dashboard
-  ITEM_INDEX: 300,      // 5 minutos para índice de itens
-  DEFAULT: 300          // 5 minutos padrão
+  AUTOCOMPLETE: 120,    // 2 minutos para dados de autocomplete
+  DASHBOARD: 60,        // 1 minuto para dashboard
+  ITEM_INDEX: 120,      // 2 minutos para índice de itens
+  DEFAULT: 120          // 2 minutos padrão
 };
 
 /**
@@ -443,7 +443,9 @@ function processEstoqueWebApp(formData) {
     return {
       success: true,
       message: warningMessage || "Estoque processado com sucesso!",
-      warning: warningMessage ? true : false
+      warning: warningMessage ? true : false,
+      saldoAnterior: previousSaldo,
+      novoSaldo: newSaldo
     };
   } catch (error) {
     PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
@@ -538,6 +540,102 @@ function processMultipleEstoqueItems(itens) {
   } catch (error) {
     PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
     Logger.log("Erro processMultipleEstoqueItems: " + error);
+    return { success: false, message: "Erro ao processar itens: " + error.message };
+  }
+}
+
+/**
+ * processMultipleEstoqueItemsWithGroup: Processa múltiplos itens de uma NF com grupo especificado
+ * Para itens novos, usa o grupo enviado pelo cliente ao invés de buscar na base
+ * @param {Array} itens - Array de objetos com {item, unidade, nf, obs, entrada, saida, valorUnitario, grupo}
+ */
+function processMultipleEstoqueItemsWithGroup(itens) {
+  try {
+    if (!itens || itens.length === 0) {
+      return { success: false, message: "Nenhum item para processar" };
+    }
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var now = new Date();
+    var user = getLoggedUser();
+    var processados = 0;
+    var erros = [];
+
+    PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
+
+    for (var i = 0; i < itens.length; i++) {
+      var itemData = itens[i];
+
+      try {
+        var nextRow = sheetEstoque.getLastRow() + 1;
+
+        // Se o cliente enviou grupo, usa esse; senão, busca na base
+        var grupoItem = '';
+        if (itemData.grupo && itemData.grupo.trim() !== '') {
+          grupoItem = itemData.grupo.trim();
+        } else {
+          grupoItem = getItemGroup(itemData.item) || '';
+        }
+
+        // Recupera último registro para cálculo de saldo
+        var lastReg = getLastRegistration(itemData.item, nextRow);
+        var previousSaldo = parseFloat(lastReg.lastStock) || 0;
+        var entrada = parseFloat(itemData.entrada) || 0;
+        var saida = parseFloat(itemData.saida) || 0;
+        var newSaldo = previousSaldo + entrada - saida;
+
+        var rowData = [
+          grupoItem,                    // A: Grupo
+          itemData.item,                // B: Item
+          itemData.unidade || '',       // C: Unidade de Medida
+          now,                          // D: Data
+          itemData.nf || '',            // E: NF (concatenado com Pedido e Lote)
+          itemData.obs || '',           // F: Obs
+          previousSaldo,                // G: Saldo Anterior
+          entrada,                      // H: Entrada
+          saida,                        // I: Saída
+          newSaldo,                     // J: Saldo
+          parseFloat(itemData.valorUnitario) || 0,  // K: Valor Unitário
+          now,                          // L: Alterado Em
+          user                          // M: Alterado Por
+        ];
+
+        sheetEstoque.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
+
+        // Marca linha com amarelo para indicar entrada
+        if (entrada > 0) {
+          var lastColumn = sheetEstoque.getLastColumn();
+          sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("yellow");
+        }
+
+        processados++;
+      } catch (itemError) {
+        erros.push("Item " + (i + 1) + " (" + itemData.item + "): " + itemError.message);
+      }
+    }
+
+    PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
+
+    // Invalida caches
+    invalidateCache();
+    invalidateCacheOpt();
+    backupEstoqueData();
+
+    if (erros.length > 0) {
+      return {
+        success: processados > 0,
+        message: "Processados: " + processados + "/" + itens.length + ". Erros: " + erros.join("; ")
+      };
+    }
+
+    return {
+      success: true,
+      message: processados + " item(ns) inserido(s) com sucesso!"
+    };
+  } catch (error) {
+    PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
+    Logger.log("Erro processMultipleEstoqueItemsWithGroup: " + error);
     return { success: false, message: "Erro ao processar itens: " + error.message };
   }
 }
@@ -646,10 +744,14 @@ function gerarRelatorioEstoqueWebApp(dataInicio, dataFim) {
     var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
     var results = [];
 
-    var inicio = new Date(dataInicio);
-    var fim = new Date(dataFim);
-    inicio.setHours(0, 0, 0, 0);
-    fim.setHours(23, 59, 59, 999);
+    // Corrige problema de timezone: input type="date" vem como YYYY-MM-DD (ISO)
+    // new Date("YYYY-MM-DD") interpreta como UTC, causando erro de 1 dia
+    // Solução: extrair ano, mês, dia e criar data local
+    var partesInicio = dataInicio.split('-');
+    var partesFim = dataFim.split('-');
+
+    var inicio = new Date(parseInt(partesInicio[0]), parseInt(partesInicio[1]) - 1, parseInt(partesInicio[2]), 0, 0, 0, 0);
+    var fim = new Date(parseInt(partesFim[0]), parseInt(partesFim[1]) - 1, parseInt(partesFim[2]), 23, 59, 59, 999);
 
     for (var i = 0; i < data.length; i++) {
       var dataMovimento = parseDateBR(data[i][3]); // Coluna D (índice 3) - usa parseDateBR para formato brasileiro
