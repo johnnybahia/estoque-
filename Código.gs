@@ -834,116 +834,108 @@ function normalize(text) {
 }
 
 /* ================================
-   FUNÇÕES DE CACHE E OTIMIZAÇÃO
+   FUNÇÕES DE CACHE E AUTOCOMPLETE
    ================================ */
 
 /**
  * getCachedData: Busca dados no cache ou executa função e armazena no cache.
- * @param {string} key - Chave do cache
- * @param {function} fetchFunction - Função que busca os dados
- * @param {number} ttl - Tempo de vida em segundos (padrão: 10 segundos)
  */
 function getCachedData(key, fetchFunction, ttl) {
-  ttl = ttl || 10; // Cache mínimo de 10 segundos
+  ttl = ttl || 300;
   var cache = CacheService.getScriptCache();
   var cached = cache.get(key);
 
   if (cached) {
-    Logger.log("Cache HIT para: " + key);
-    return JSON.parse(cached);
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      Logger.log("Cache parse error: " + key);
+    }
   }
 
-  Logger.log("Cache MISS para: " + key);
   var data = fetchFunction();
-  cache.put(key, JSON.stringify(data), ttl);
+  try {
+    var jsonData = JSON.stringify(data);
+    if (jsonData.length < 100000) {
+      cache.put(key, jsonData, ttl);
+    }
+  } catch (e) {
+    Logger.log("Cache save error: " + e.message);
+  }
+
   return data;
 }
 
 /**
- * invalidateCache: Invalida um ou mais itens do cache.
- * @param {string|Array} keys - Chave(s) para invalidar
+ * invalidateCache: Invalida caches.
  */
 function invalidateCache(keys) {
   var cache = CacheService.getScriptCache();
-  if (typeof keys === 'string') {
-    cache.remove(keys);
-    Logger.log("Cache invalidado: " + keys);
-  } else if (Array.isArray(keys)) {
-    keys.forEach(function(key) {
-      cache.remove(key);
-    });
-    Logger.log("Cache invalidado: " + keys.join(", "));
-  }
+  var keysToInvalidate = typeof keys === 'string' ? [keys] : (keys || []);
+  keysToInvalidate.forEach(function(key) { cache.remove(key); });
+  cache.remove("autocompleteData");
 }
 
 /**
  * invalidateAllAutocompleteCache: Invalida todos os caches de autocomplete.
- * NOTA: autocompleteData não usa cache (dados muito grandes para cache do Google)
  */
 function invalidateAllAutocompleteCache() {
-  invalidateCache([
-    "itemList",
-    "groupList",
-    "nfList",
-    "obsList"
-  ]);
+  invalidateCache(["itemList", "groupList", "nfList", "obsList", "autocompleteData"]);
 }
 
 /**
  * getAllAutocompleteData: Busca todos os dados de autocomplete em uma única operação.
- * OTIMIZADO: Itens vêm da coluna B do ESTOQUE (produtos realmente usados, sem duplicatas)
+ * OTIMIZADO: Usa cache de 10 minutos
  */
 function getAllAutocompleteData() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  return getCachedData("autocompleteData", function() {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  // 1ª Leitura: DADOS (apenas grupos)
-  var sheetDados = ss.getSheetByName("DADOS");
-  var groups = [];
-  if (sheetDados) {
-    var lastRowDados = sheetDados.getLastRow();
-    if (lastRowDados >= 1) {
-      var dadosData = sheetDados.getRange(1, 4, lastRowDados, 1).getDisplayValues();
-      for (var i = 0; i < dadosData.length; i++) {
-        if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
-          groups.push(dadosData[i][0].toString().trim());
+    // 1ª Leitura: DADOS (apenas grupos)
+    var sheetDados = ss.getSheetByName("DADOS");
+    var groups = [];
+    if (sheetDados) {
+      var lastRowDados = sheetDados.getLastRow();
+      if (lastRowDados >= 1) {
+        var dadosData = sheetDados.getRange(1, 4, lastRowDados, 1).getDisplayValues();
+        for (var i = 0; i < dadosData.length; i++) {
+          if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
+            groups.push(dadosData[i][0].toString().trim());
+          }
         }
       }
     }
-  }
 
-  // 2ª Leitura: ESTOQUE (itens da coluna B, NFs e Obs)
-  var sheetEstoque = ss.getSheetByName("ESTOQUE");
-  var items = [], nfs = [], obs = [];
-  if (sheetEstoque) {
-    var lastRowEstoque = sheetEstoque.getLastRow();
-    if (lastRowEstoque >= 2) {
-      // Lê colunas B (Item), D (NF), E (Obs) - usa getDisplayValues para forçar TEXTO
-      var estoqueData = sheetEstoque.getRange(2, 2, lastRowEstoque - 1, 4).getDisplayValues();
-      for (var j = 0; j < estoqueData.length; j++) {
-        // Coluna B (Item) - índice 0
-        if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
-          items.push(estoqueData[j][0].toString().trim());
-        }
-        // Coluna D (NF) - índice 2
-        if (estoqueData[j][2] && estoqueData[j][2].toString().trim() !== "") {
-          nfs.push(estoqueData[j][2]);
-        }
-        // Coluna E (Obs) - índice 3
-        if (estoqueData[j][3] && estoqueData[j][3].toString().trim() !== "") {
-          obs.push(estoqueData[j][3]);
+    // 2ª Leitura: ESTOQUE (itens da coluna B, NFs e Obs)
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var items = [], nfs = [], obs = [];
+    if (sheetEstoque) {
+      var lastRowEstoque = sheetEstoque.getLastRow();
+      if (lastRowEstoque >= 2) {
+        var estoqueData = sheetEstoque.getRange(2, 2, lastRowEstoque - 1, 4).getDisplayValues();
+        for (var j = 0; j < estoqueData.length; j++) {
+          if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
+            items.push(estoqueData[j][0].toString().trim());
+          }
+          if (estoqueData[j][2] && estoqueData[j][2].toString().trim() !== "") {
+            nfs.push(estoqueData[j][2]);
+          }
+          if (estoqueData[j][3] && estoqueData[j][3].toString().trim() !== "") {
+            obs.push(estoqueData[j][3]);
+          }
         }
       }
     }
-  }
 
-  return {
-    items: Array.from(new Set(items)),        // Remove duplicatas
-    groups: Array.from(new Set(groups)),      // Remove duplicatas
-    nfs: Array.from(new Set(nfs)),            // Remove duplicatas
-    obs: Array.from(new Set(obs)),            // Remove duplicatas
-    medidas: getMedidasList(),                // Lista de unidades de medida
-    observacoes: getObservacoesList()         // Lista de observações pré-definidas
-  };
+    return {
+      items: Array.from(new Set(items)),
+      groups: Array.from(new Set(groups)),
+      nfs: Array.from(new Set(nfs)),
+      obs: Array.from(new Set(obs)),
+      medidas: getMedidasList(),
+      observacoes: getObservacoesList()
+    };
+  }, 600);
 }
 
 /**
@@ -2312,116 +2304,108 @@ function normalize(text) {
 }
 
 /* ================================
-   FUNÇÕES DE CACHE E OTIMIZAÇÃO
+   FUNÇÕES DE CACHE E AUTOCOMPLETE
    ================================ */
 
 /**
  * getCachedData: Busca dados no cache ou executa função e armazena no cache.
- * @param {string} key - Chave do cache
- * @param {function} fetchFunction - Função que busca os dados
- * @param {number} ttl - Tempo de vida em segundos (padrão: 10 segundos)
  */
 function getCachedData(key, fetchFunction, ttl) {
-  ttl = ttl || 10; // Cache mínimo de 10 segundos
+  ttl = ttl || 300;
   var cache = CacheService.getScriptCache();
   var cached = cache.get(key);
 
   if (cached) {
-    Logger.log("Cache HIT para: " + key);
-    return JSON.parse(cached);
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      Logger.log("Cache parse error: " + key);
+    }
   }
 
-  Logger.log("Cache MISS para: " + key);
   var data = fetchFunction();
-  cache.put(key, JSON.stringify(data), ttl);
+  try {
+    var jsonData = JSON.stringify(data);
+    if (jsonData.length < 100000) {
+      cache.put(key, jsonData, ttl);
+    }
+  } catch (e) {
+    Logger.log("Cache save error: " + e.message);
+  }
+
   return data;
 }
 
 /**
- * invalidateCache: Invalida um ou mais itens do cache.
- * @param {string|Array} keys - Chave(s) para invalidar
+ * invalidateCache: Invalida caches.
  */
 function invalidateCache(keys) {
   var cache = CacheService.getScriptCache();
-  if (typeof keys === 'string') {
-    cache.remove(keys);
-    Logger.log("Cache invalidado: " + keys);
-  } else if (Array.isArray(keys)) {
-    keys.forEach(function(key) {
-      cache.remove(key);
-    });
-    Logger.log("Cache invalidado: " + keys.join(", "));
-  }
+  var keysToInvalidate = typeof keys === 'string' ? [keys] : (keys || []);
+  keysToInvalidate.forEach(function(key) { cache.remove(key); });
+  cache.remove("autocompleteData");
 }
 
 /**
  * invalidateAllAutocompleteCache: Invalida todos os caches de autocomplete.
- * NOTA: autocompleteData não usa cache (dados muito grandes para cache do Google)
  */
 function invalidateAllAutocompleteCache() {
-  invalidateCache([
-    "itemList",
-    "groupList",
-    "nfList",
-    "obsList"
-  ]);
+  invalidateCache(["itemList", "groupList", "nfList", "obsList", "autocompleteData"]);
 }
 
 /**
  * getAllAutocompleteData: Busca todos os dados de autocomplete em uma única operação.
- * OTIMIZADO: Itens vêm da coluna B do ESTOQUE (produtos realmente usados, sem duplicatas)
+ * OTIMIZADO: Usa cache de 10 minutos
  */
 function getAllAutocompleteData() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  return getCachedData("autocompleteData", function() {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  // 1ª Leitura: DADOS (apenas grupos)
-  var sheetDados = ss.getSheetByName("DADOS");
-  var groups = [];
-  if (sheetDados) {
-    var lastRowDados = sheetDados.getLastRow();
-    if (lastRowDados >= 1) {
-      var dadosData = sheetDados.getRange(1, 4, lastRowDados, 1).getDisplayValues();
-      for (var i = 0; i < dadosData.length; i++) {
-        if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
-          groups.push(dadosData[i][0].toString().trim());
+    // 1ª Leitura: DADOS (apenas grupos)
+    var sheetDados = ss.getSheetByName("DADOS");
+    var groups = [];
+    if (sheetDados) {
+      var lastRowDados = sheetDados.getLastRow();
+      if (lastRowDados >= 1) {
+        var dadosData = sheetDados.getRange(1, 4, lastRowDados, 1).getDisplayValues();
+        for (var i = 0; i < dadosData.length; i++) {
+          if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
+            groups.push(dadosData[i][0].toString().trim());
+          }
         }
       }
     }
-  }
 
-  // 2ª Leitura: ESTOQUE (itens da coluna B, NFs e Obs)
-  var sheetEstoque = ss.getSheetByName("ESTOQUE");
-  var items = [], nfs = [], obs = [];
-  if (sheetEstoque) {
-    var lastRowEstoque = sheetEstoque.getLastRow();
-    if (lastRowEstoque >= 2) {
-      // Lê colunas B (Item), D (NF), E (Obs) - usa getDisplayValues para forçar TEXTO
-      var estoqueData = sheetEstoque.getRange(2, 2, lastRowEstoque - 1, 4).getDisplayValues();
-      for (var j = 0; j < estoqueData.length; j++) {
-        // Coluna B (Item) - índice 0
-        if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
-          items.push(estoqueData[j][0].toString().trim());
-        }
-        // Coluna D (NF) - índice 2
-        if (estoqueData[j][2] && estoqueData[j][2].toString().trim() !== "") {
-          nfs.push(estoqueData[j][2]);
-        }
-        // Coluna E (Obs) - índice 3
-        if (estoqueData[j][3] && estoqueData[j][3].toString().trim() !== "") {
-          obs.push(estoqueData[j][3]);
+    // 2ª Leitura: ESTOQUE (itens da coluna B, NFs e Obs)
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var items = [], nfs = [], obs = [];
+    if (sheetEstoque) {
+      var lastRowEstoque = sheetEstoque.getLastRow();
+      if (lastRowEstoque >= 2) {
+        var estoqueData = sheetEstoque.getRange(2, 2, lastRowEstoque - 1, 4).getDisplayValues();
+        for (var j = 0; j < estoqueData.length; j++) {
+          if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
+            items.push(estoqueData[j][0].toString().trim());
+          }
+          if (estoqueData[j][2] && estoqueData[j][2].toString().trim() !== "") {
+            nfs.push(estoqueData[j][2]);
+          }
+          if (estoqueData[j][3] && estoqueData[j][3].toString().trim() !== "") {
+            obs.push(estoqueData[j][3]);
+          }
         }
       }
     }
-  }
 
-  return {
-    items: Array.from(new Set(items)),        // Remove duplicatas
-    groups: Array.from(new Set(groups)),      // Remove duplicatas
-    nfs: Array.from(new Set(nfs)),            // Remove duplicatas
-    obs: Array.from(new Set(obs)),            // Remove duplicatas
-    medidas: getMedidasList(),                // Lista de unidades de medida
-    observacoes: getObservacoesList()         // Lista de observações pré-definidas
-  };
+    return {
+      items: Array.from(new Set(items)),
+      groups: Array.from(new Set(groups)),
+      nfs: Array.from(new Set(nfs)),
+      obs: Array.from(new Set(obs)),
+      medidas: getMedidasList(),
+      observacoes: getObservacoesList()
+    };
+  }, 600);
 }
 
 /**
