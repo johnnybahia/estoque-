@@ -766,62 +766,80 @@ function getObsList() {
 }
 
 /**
- * getMedidasList: Retorna a lista de unidades de medida da aba DADOS, coluna MEDIDAS.
+ * getMedidasList: Retorna a lista de unidades de medida.
+ * Combina opções da aba DADOS (coluna MEDIDAS) com opções já usadas na aba ESTOQUE (coluna C).
  */
 function getMedidasList() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("DADOS");
-  if (!sheet) return [];
+  var medidasSet = new Set();
 
-  // Encontra a coluna MEDIDAS
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var medidasCol = -1;
-  for (var i = 0; i < headers.length; i++) {
-    if (headers[i].toString().toUpperCase() === "MEDIDAS") {
-      medidasCol = i + 1;
-      break;
+  // 1. Busca na aba DADOS (coluna MEDIDAS)
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (sheetDados) {
+    var headers = sheetDados.getRange(1, 1, 1, sheetDados.getLastColumn()).getValues()[0];
+    var medidasCol = -1;
+    for (var i = 0; i < headers.length; i++) {
+      var headerUpper = headers[i].toString().toUpperCase().trim();
+      if (headerUpper === "MEDIDAS" || headerUpper === "MEDIDA" || headerUpper === "UNIDADE" || headerUpper === "UNIDADES") {
+        medidasCol = i + 1;
+        break;
+      }
+    }
+
+    if (medidasCol !== -1) {
+      var lastRow = sheetDados.getLastRow();
+      if (lastRow >= 2) {
+        var values = sheetDados.getRange(2, medidasCol, lastRow - 1, 1).getValues().flat();
+        values.forEach(function(v) {
+          var val = v.toString().trim();
+          if (val !== "") medidasSet.add(val);
+        });
+      }
     }
   }
 
-  if (medidasCol === -1) return [];
+  // 2. Busca na aba ESTOQUE (coluna C - Unidade) para incluir opções já usadas
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (sheetEstoque) {
+    var lastRowEstoque = sheetEstoque.getLastRow();
+    if (lastRowEstoque >= 2) {
+      var valuesEstoque = sheetEstoque.getRange(2, 3, lastRowEstoque - 1, 1).getValues().flat();
+      valuesEstoque.forEach(function(v) {
+        var val = v.toString().trim();
+        if (val !== "") medidasSet.add(val);
+      });
+    }
+  }
 
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-
-  var values = sheet.getRange(2, medidasCol, lastRow - 1, 1).getValues().flat();
-  var medidasList = values.filter(function(v) {
-    return v.toString().trim() !== "";
-  });
+  // Converte Set para Array e ordena
+  var medidasList = Array.from(medidasSet).sort();
   return medidasList;
 }
 
 /**
- * getObservacoesList: Retorna a lista de observações pré-definidas da aba DADOS, coluna OBSERVAÇÃO.
+ * getObservacoesList: Retorna a lista de observações.
+ * Busca da aba DADOS, coluna F (OBSERVAÇÃO).
  */
 function getObservacoesList() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("DADOS");
-  if (!sheet) return [];
+  var obsSet = new Set();
 
-  // Encontra a coluna OBSERVAÇÃO
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var obsCol = -1;
-  for (var i = 0; i < headers.length; i++) {
-    if (headers[i].toString().toUpperCase() === "OBSERVAÇÃO" || headers[i].toString().toUpperCase() === "OBSERVACAO") {
-      obsCol = i + 1;
-      break;
+  // Busca na aba DADOS, coluna F (índice 6)
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (sheetDados) {
+    var lastRow = sheetDados.getLastRow();
+    if (lastRow >= 2) {
+      // Coluna F = índice 6
+      var values = sheetDados.getRange(2, 6, lastRow - 1, 1).getDisplayValues().flat();
+      values.forEach(function(v) {
+        var val = v.toString().trim();
+        if (val !== "") obsSet.add(val);
+      });
     }
   }
 
-  if (obsCol === -1) return [];
-
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-
-  var values = sheet.getRange(2, obsCol, lastRow - 1, 1).getValues().flat();
-  var obsList = values.filter(function(v) {
-    return v.toString().trim() !== "";
-  });
+  // Converte Set para Array e ordena
+  var obsList = Array.from(obsSet).sort();
   return obsList;
 }
 
@@ -841,7 +859,7 @@ function normalize(text) {
  * getCachedData: Busca dados no cache ou executa função e armazena no cache.
  */
 function getCachedData(key, fetchFunction, ttl) {
-  ttl = ttl || 300;
+  ttl = ttl || 120; // 2 minutos padrão
   var cache = CacheService.getScriptCache();
   var cached = cache.get(key);
 
@@ -906,22 +924,23 @@ function getAllAutocompleteData() {
       }
     }
 
-    // 2ª Leitura: ESTOQUE (itens da coluna B, NFs e Obs)
+    // 2ª Leitura: ESTOQUE (itens da coluna B e NFs da coluna E)
+    // Estrutura: A=Grupo, B=Item, C=Unidade, D=Data, E=NF, F=Obs
     var sheetEstoque = ss.getSheetByName("ESTOQUE");
-    var items = [], nfs = [], obs = [];
+    var items = [], nfs = [];
     if (sheetEstoque) {
       var lastRowEstoque = sheetEstoque.getLastRow();
       if (lastRowEstoque >= 2) {
+        // Lê colunas B até E (4 colunas: B, C, D, E)
         var estoqueData = sheetEstoque.getRange(2, 2, lastRowEstoque - 1, 4).getDisplayValues();
         for (var j = 0; j < estoqueData.length; j++) {
+          // Coluna B (índice 0) = Item
           if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
             items.push(estoqueData[j][0].toString().trim());
           }
-          if (estoqueData[j][2] && estoqueData[j][2].toString().trim() !== "") {
-            nfs.push(estoqueData[j][2]);
-          }
+          // Coluna E (índice 3) = NF (já em formato texto com getDisplayValues)
           if (estoqueData[j][3] && estoqueData[j][3].toString().trim() !== "") {
-            obs.push(estoqueData[j][3]);
+            nfs.push(estoqueData[j][3].toString().trim());
           }
         }
       }
@@ -931,11 +950,10 @@ function getAllAutocompleteData() {
       items: Array.from(new Set(items)),
       groups: Array.from(new Set(groups)),
       nfs: Array.from(new Set(nfs)),
-      obs: Array.from(new Set(obs)),
       medidas: getMedidasList(),
       observacoes: getObservacoesList()
     };
-  }, 600);
+  }, 120); // 2 minutos
 }
 
 /**
@@ -967,7 +985,8 @@ function getLastRegistration(item, currentRow) {
   Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow + " (" + numRows + " linhas)");
 
   // USA getDisplayValues() para forçar conversão para texto
-  var data = sheetEstoque.getRange(startRow, 1, numRows, 9).getDisplayValues();
+  // Lê 10 colunas (A-J) para incluir o Saldo que está na coluna J
+  var data = sheetEstoque.getRange(startRow, 1, numRows, 10).getDisplayValues();
   Logger.log("Usando getDisplayValues() para forçar formato de TEXTO");
 
   var result = { lastDate: null, lastStock: 0, lastGroup: null };
@@ -986,8 +1005,8 @@ function getLastRegistration(item, currentRow) {
       if (currentItemNormalized === itemNormalized) {
         encontrados++;
         result.lastGroup = data[i][0];  // Coluna A (Grupo)
-        result.lastDate = data[i][2];   // Coluna C (Data) - como texto
-        result.lastStock = data[i][8];  // Coluna I (Novo Saldo) - como texto
+        result.lastDate = data[i][3];   // Coluna D (Data) - como texto
+        result.lastStock = data[i][9];  // Coluna J (Saldo) - como texto
         Logger.log("✓ ENCONTRADO na linha " + rowNum);
         Logger.log("  Grupo: '" + result.lastGroup + "'");
         Logger.log("  Data: " + result.lastDate);
@@ -2236,62 +2255,80 @@ function getObsList() {
 }
 
 /**
- * getMedidasList: Retorna a lista de unidades de medida da aba DADOS, coluna MEDIDAS.
+ * getMedidasList: Retorna a lista de unidades de medida.
+ * Combina opções da aba DADOS (coluna MEDIDAS) com opções já usadas na aba ESTOQUE (coluna C).
  */
 function getMedidasList() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("DADOS");
-  if (!sheet) return [];
+  var medidasSet = new Set();
 
-  // Encontra a coluna MEDIDAS
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var medidasCol = -1;
-  for (var i = 0; i < headers.length; i++) {
-    if (headers[i].toString().toUpperCase() === "MEDIDAS") {
-      medidasCol = i + 1;
-      break;
+  // 1. Busca na aba DADOS (coluna MEDIDAS)
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (sheetDados) {
+    var headers = sheetDados.getRange(1, 1, 1, sheetDados.getLastColumn()).getValues()[0];
+    var medidasCol = -1;
+    for (var i = 0; i < headers.length; i++) {
+      var headerUpper = headers[i].toString().toUpperCase().trim();
+      if (headerUpper === "MEDIDAS" || headerUpper === "MEDIDA" || headerUpper === "UNIDADE" || headerUpper === "UNIDADES") {
+        medidasCol = i + 1;
+        break;
+      }
+    }
+
+    if (medidasCol !== -1) {
+      var lastRow = sheetDados.getLastRow();
+      if (lastRow >= 2) {
+        var values = sheetDados.getRange(2, medidasCol, lastRow - 1, 1).getValues().flat();
+        values.forEach(function(v) {
+          var val = v.toString().trim();
+          if (val !== "") medidasSet.add(val);
+        });
+      }
     }
   }
 
-  if (medidasCol === -1) return [];
+  // 2. Busca na aba ESTOQUE (coluna C - Unidade) para incluir opções já usadas
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (sheetEstoque) {
+    var lastRowEstoque = sheetEstoque.getLastRow();
+    if (lastRowEstoque >= 2) {
+      var valuesEstoque = sheetEstoque.getRange(2, 3, lastRowEstoque - 1, 1).getValues().flat();
+      valuesEstoque.forEach(function(v) {
+        var val = v.toString().trim();
+        if (val !== "") medidasSet.add(val);
+      });
+    }
+  }
 
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-
-  var values = sheet.getRange(2, medidasCol, lastRow - 1, 1).getValues().flat();
-  var medidasList = values.filter(function(v) {
-    return v.toString().trim() !== "";
-  });
+  // Converte Set para Array e ordena
+  var medidasList = Array.from(medidasSet).sort();
   return medidasList;
 }
 
 /**
- * getObservacoesList: Retorna a lista de observações pré-definidas da aba DADOS, coluna OBSERVAÇÃO.
+ * getObservacoesList: Retorna a lista de observações.
+ * Busca da aba DADOS, coluna F (OBSERVAÇÃO).
  */
 function getObservacoesList() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("DADOS");
-  if (!sheet) return [];
+  var obsSet = new Set();
 
-  // Encontra a coluna OBSERVAÇÃO
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var obsCol = -1;
-  for (var i = 0; i < headers.length; i++) {
-    if (headers[i].toString().toUpperCase() === "OBSERVAÇÃO" || headers[i].toString().toUpperCase() === "OBSERVACAO") {
-      obsCol = i + 1;
-      break;
+  // Busca na aba DADOS, coluna F (índice 6)
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (sheetDados) {
+    var lastRow = sheetDados.getLastRow();
+    if (lastRow >= 2) {
+      // Coluna F = índice 6
+      var values = sheetDados.getRange(2, 6, lastRow - 1, 1).getDisplayValues().flat();
+      values.forEach(function(v) {
+        var val = v.toString().trim();
+        if (val !== "") obsSet.add(val);
+      });
     }
   }
 
-  if (obsCol === -1) return [];
-
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-
-  var values = sheet.getRange(2, obsCol, lastRow - 1, 1).getValues().flat();
-  var obsList = values.filter(function(v) {
-    return v.toString().trim() !== "";
-  });
+  // Converte Set para Array e ordena
+  var obsList = Array.from(obsSet).sort();
   return obsList;
 }
 
@@ -2311,7 +2348,7 @@ function normalize(text) {
  * getCachedData: Busca dados no cache ou executa função e armazena no cache.
  */
 function getCachedData(key, fetchFunction, ttl) {
-  ttl = ttl || 300;
+  ttl = ttl || 120; // 2 minutos padrão
   var cache = CacheService.getScriptCache();
   var cached = cache.get(key);
 
@@ -2376,22 +2413,23 @@ function getAllAutocompleteData() {
       }
     }
 
-    // 2ª Leitura: ESTOQUE (itens da coluna B, NFs e Obs)
+    // 2ª Leitura: ESTOQUE (itens da coluna B e NFs da coluna E)
+    // Estrutura: A=Grupo, B=Item, C=Unidade, D=Data, E=NF, F=Obs
     var sheetEstoque = ss.getSheetByName("ESTOQUE");
-    var items = [], nfs = [], obs = [];
+    var items = [], nfs = [];
     if (sheetEstoque) {
       var lastRowEstoque = sheetEstoque.getLastRow();
       if (lastRowEstoque >= 2) {
+        // Lê colunas B até E (4 colunas: B, C, D, E)
         var estoqueData = sheetEstoque.getRange(2, 2, lastRowEstoque - 1, 4).getDisplayValues();
         for (var j = 0; j < estoqueData.length; j++) {
+          // Coluna B (índice 0) = Item
           if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
             items.push(estoqueData[j][0].toString().trim());
           }
-          if (estoqueData[j][2] && estoqueData[j][2].toString().trim() !== "") {
-            nfs.push(estoqueData[j][2]);
-          }
+          // Coluna E (índice 3) = NF (já em formato texto com getDisplayValues)
           if (estoqueData[j][3] && estoqueData[j][3].toString().trim() !== "") {
-            obs.push(estoqueData[j][3]);
+            nfs.push(estoqueData[j][3].toString().trim());
           }
         }
       }
@@ -2401,11 +2439,10 @@ function getAllAutocompleteData() {
       items: Array.from(new Set(items)),
       groups: Array.from(new Set(groups)),
       nfs: Array.from(new Set(nfs)),
-      obs: Array.from(new Set(obs)),
       medidas: getMedidasList(),
       observacoes: getObservacoesList()
     };
-  }, 600);
+  }, 120); // 2 minutos
 }
 
 /**
@@ -2437,7 +2474,8 @@ function getLastRegistration(item, currentRow) {
   Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow + " (" + numRows + " linhas)");
 
   // USA getDisplayValues() para forçar conversão para texto
-  var data = sheetEstoque.getRange(startRow, 1, numRows, 9).getDisplayValues();
+  // Lê 10 colunas (A-J) para incluir o Saldo que está na coluna J
+  var data = sheetEstoque.getRange(startRow, 1, numRows, 10).getDisplayValues();
   Logger.log("Usando getDisplayValues() para forçar formato de TEXTO");
 
   var result = { lastDate: null, lastStock: 0, lastGroup: null };
@@ -2456,8 +2494,8 @@ function getLastRegistration(item, currentRow) {
       if (currentItemNormalized === itemNormalized) {
         encontrados++;
         result.lastGroup = data[i][0];  // Coluna A (Grupo)
-        result.lastDate = data[i][2];   // Coluna C (Data) - como texto
-        result.lastStock = data[i][8];  // Coluna I (Novo Saldo) - como texto
+        result.lastDate = data[i][3];   // Coluna D (Data) - como texto
+        result.lastStock = data[i][9];  // Coluna J (Saldo) - como texto
         Logger.log("✓ ENCONTRADO na linha " + rowNum);
         Logger.log("  Grupo: '" + result.lastGroup + "'");
         Logger.log("  Data: " + result.lastDate);
