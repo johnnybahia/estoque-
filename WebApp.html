@@ -587,12 +587,49 @@
       color: #7f8c8d;
       font-size: 0.9rem;
     }
+
+    /* Autocomplete customizado (busca do início) */
+    .autocomplete-wrapper {
+      position: relative;
+    }
+    .autocomplete-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      max-height: 200px;
+      overflow-y: auto;
+      background: white;
+      border: 1px solid var(--border-color);
+      border-top: none;
+      border-radius: 0 0 4px 4px;
+      z-index: 1000;
+      display: none;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .autocomplete-dropdown.show {
+      display: block;
+    }
+    .autocomplete-option {
+      padding: 8px 12px;
+      cursor: pointer;
+      border-bottom: 1px solid #eee;
+    }
+    .autocomplete-option:hover,
+    .autocomplete-option.selected {
+      background: var(--secondary-color);
+      color: white;
+    }
+    .autocomplete-option:last-child {
+      border-bottom: none;
+    }
   </style>
 </head>
 <body>
   <!-- Login Screen -->
   <div id="loginScreen" class="login-container">
     <div class="login-card">
+      <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="Logo Marfim" style="width: 120px; height: auto; margin-bottom: 15px; border-radius: 8px;">
       <h2>🔐 Login</h2>
       <div id="loginMessage" class="message"></div>
       <form id="loginForm" onsubmit="return handleLogin(event)">
@@ -617,7 +654,10 @@
   <div id="mainApp" style="display: none;">
     <!-- Header -->
     <header class="header">
-      <h1>📦 Sistema de Gestão de Estoque</h1>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="Logo Marfim" style="height: 45px; width: auto; border-radius: 6px;">
+        <h1 style="margin: 0;">Sistema de Gestão de Estoque</h1>
+      </div>
       <div class="user-info">
         <span id="userName">Usuário</span>
         <button class="logout-btn" onclick="handleLogout()">Sair</button>
@@ -634,12 +674,14 @@
         <nav>
           <ul>
             <li class="section-title">Principal</li>
-            <li><a href="#" onclick="showModule('dashboard')" data-module="dashboard" class="active">📊 Dashboard</a></li>
+            <li><a href="#" onclick="showModule('dashboard')" data-module="dashboard" class="active">🏠 Início</a></li>
 
             <li class="separator"></li>
             <li class="section-title">Operações</li>
             <li><a href="#" onclick="showModule('inserir-estoque')" data-module="inserir-estoque">📦 Inserir Estoque</a></li>
+            <li><a href="#" onclick="showModule('inserir-nf')" data-module="inserir-nf">📄 Inserir NF</a></li>
             <li><a href="#" onclick="showModule('inserir-grupo')" data-module="inserir-grupo">📁 Inserir Grupo</a></li>
+            <li><a href="#" onclick="showModule('apagar-linha')" data-module="apagar-linha">🗑️ Apagar Última Linha</a></li>
 
             <li class="separator"></li>
             <li class="section-title">Consultas</li>
@@ -649,49 +691,28 @@
             <li class="separator"></li>
             <li class="section-title">Relatórios</li>
             <li><a href="#" onclick="showModule('relatorio-estoque')" data-module="relatorio-estoque">📊 Gerar Relatório</a></li>
-            <li><a href="#" onclick="showModule('relatorio-grupo')" data-module="relatorio-grupo">📈 Relatório por Grupo</a></li>
-            <li><a href="#" onclick="showModule('estoque-periodo')" data-module="estoque-periodo">📅 Estoque por Período</a></li>
-            <li><a href="#" onclick="showModule('estoque-3-meses')" data-module="estoque-3-meses">📦 Estoque 3 Meses</a></li>
+            <li><a href="#" onclick="showModule('estoque-3-meses')" data-module="estoque-3-meses">📦 Consumo em 3 Meses</a></li>
 
             <li class="separator"></li>
             <li class="section-title">Cores</li>
             <li><a href="#" onclick="showModule('cores-desatualizadas')" data-module="cores-desatualizadas">🎨 Cores Desatualizadas</a></li>
-
-            <li class="separator"></li>
-            <li class="section-title">Administração</li>
-            <li><a href="#" onclick="showModule('atualizar-fio')" data-module="atualizar-fio">🔄 Atualizar Compra de Fio</a></li>
-            <li><a href="#" onclick="showModule('atualizar-embarcado')" data-module="atualizar-embarcado">🚢 Atualizar Total Embarcado</a></li>
-            <li><a href="#" onclick="showModule('apagar-linha')" data-module="apagar-linha">🗑️ Apagar Última Linha</a></li>
-            <li><a href="#" onclick="showModule('limpar-filtro')" data-module="limpar-filtro">🔄 Limpar Filtro</a></li>
           </ul>
         </nav>
       </aside>
 
       <!-- Main Content -->
       <main class="main-content" id="mainContent">
-        <!-- Dashboard Module -->
+        <!-- Página Inicial Module -->
         <div id="module-dashboard" class="module-container active">
-          <div class="content-card">
-            <h2>Dashboard</h2>
-            <div class="dashboard-stats">
-              <div class="stat-card">
-                <h3 id="totalItems">-</h3>
-                <p>Total de Itens</p>
-              </div>
-              <div class="stat-card">
-                <h3 id="totalGroups">-</h3>
-                <p>Grupos Cadastrados</p>
-              </div>
-              <div class="stat-card">
-                <h3 id="recentEntries">-</h3>
-                <p>Entradas (Hoje)</p>
-              </div>
-              <div class="stat-card">
-                <h3 id="recentExits">-</h3>
-                <p>Saídas (Hoje)</p>
-              </div>
+          <div class="content-card" style="text-align: center; padding: 40px 20px;">
+            <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="Logo Marfim" style="width: 180px; height: auto; border-radius: 12px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <h2 style="font-size: 1.8rem; color: #2c3e50; margin-bottom: 10px;">Sistema de Gestão de Estoque Inteligente</h2>
+            <h3 style="font-size: 1.4rem; color: #3498db; margin-bottom: 30px; font-weight: 500;">Marfim</h3>
+            <p style="color: #7f8c8d; margin-bottom: 30px;">Use o menu lateral para navegar pelas funcionalidades.</p>
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+              <p style="font-size: 0.85rem; color: #95a5a6; margin: 0;">Autor: Johnny</p>
+              <p style="font-size: 0.85rem; color: #95a5a6; margin: 5px 0 0 0;">Versão: 2.9.7</p>
             </div>
-            <p>Bem-vindo ao Sistema de Gestão de Estoque. Use o menu lateral para navegar pelas funcionalidades.</p>
           </div>
         </div>
 
@@ -728,7 +749,7 @@
                   </div>
                   <div class="form-group" style="margin-bottom: 8px;">
                     <label for="estoqueObs" style="font-size: 0.85rem;">Observação</label>
-                    <select id="estoqueObs" style="padding: 6px;">
+                    <select id="estoqueObs" style="padding: 6px;" onchange="toggleValorUnitario()">
                       <option value="">Selecione...</option>
                     </select>
                   </div>
@@ -740,9 +761,9 @@
                     <label for="estoqueSaida" style="font-size: 0.85rem;">Saída</label>
                     <input type="number" id="estoqueSaida" step="0.01" value="0" onchange="toggleValorUnitario()" style="padding: 6px;">
                   </div>
-                  <div class="form-group" id="valorUnitarioGroup" style="margin-bottom: 8px; display: none;">
+                  <div class="form-group" id="valorUnitarioGroup" style="margin-bottom: 8px;">
                     <label for="estoqueValorUnitario" style="font-size: 0.85rem;">Valor Unit. (R$) *</label>
-                    <input type="number" id="estoqueValorUnitario" step="0.01" min="0" style="padding: 6px;">
+                    <input type="number" id="estoqueValorUnitario" step="0.01" min="0" required style="padding: 6px;">
                   </div>
                 </div>
                 <div class="btn-group" style="margin-top: 10px;">
@@ -773,6 +794,70 @@
           </div>
         </div>
 
+        <!-- Inserir NF Module (múltiplos itens) -->
+        <div id="module-inserir-nf" class="module-container">
+          <div class="content-card">
+            <div id="nfFormArea">
+              <h2>📄 Inserir NF (Múltiplos Itens)</h2>
+              <p style="font-size: 0.85rem; color: #666; margin-bottom: 15px;">Insira NF, Pedido, Unidade e Observação uma vez. Depois adicione os itens com seus respectivos preços, lotes e quantidades.</p>
+              <div id="nfMessage" class="message"></div>
+
+              <!-- Campos Globais -->
+              <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                <h4 style="margin: 0 0 10px 0; color: #1976d2;">Dados Gerais</h4>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label style="font-size: 0.85rem;">NF *</label>
+                    <input type="text" id="nfNumero" required style="padding: 6px;" placeholder="Número da NF">
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label style="font-size: 0.85rem;">Pedido</label>
+                    <input type="text" id="nfPedido" style="padding: 6px;" placeholder="Número do Pedido">
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label style="font-size: 0.85rem;">Unidade *</label>
+                    <select id="nfUnidade" required style="padding: 6px;">
+                      <option value="">Selecione...</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label style="font-size: 0.85rem;">Observação</label>
+                    <select id="nfObs" style="padding: 6px;">
+                      <option value="">Selecione...</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Lista de Itens -->
+              <div style="background: #fff8e1; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                <h4 style="margin: 0 0 10px 0; color: #f57c00;">Itens da NF</h4>
+                <div id="nfItensContainer">
+                  <!-- Itens serão adicionados aqui -->
+                </div>
+                <button type="button" class="btn btn-primary" onclick="adicionarItemNF()" style="margin-top: 10px;">
+                  + Adicionar Item
+                </button>
+              </div>
+
+              <div class="btn-group">
+                <button type="button" class="btn btn-success" onclick="handleInserirNF()">✓ Confirmar Inserção</button>
+                <button type="button" class="btn btn-warning" onclick="limparFormNF()">↻ Limpar</button>
+              </div>
+            </div>
+
+            <!-- Área de Resultados -->
+            <div id="nfResultArea" style="display: none;">
+              <h2>✅ Itens Inseridos com Sucesso!</h2>
+              <div id="nfResultMessage" style="background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 15px;"></div>
+              <div id="nfResultTable" class="table-container" style="max-height: 400px; overflow-y: auto;"></div>
+              <div class="btn-group" style="margin-top: 15px;">
+                <button type="button" class="btn btn-primary" onclick="voltarParaNF()">✓ OK - Inserir Nova NF</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Inserir Grupo Module -->
         <div id="module-inserir-grupo" class="module-container">
           <div class="content-card">
@@ -781,12 +866,23 @@
             <form id="grupoForm" onsubmit="return handleInserirGrupo(event)">
               <div class="form-group">
                 <label for="grupoNome">Nome do Grupo *</label>
-                <input type="text" id="grupoNome" required>
+                <input type="text" id="grupoNome" required style="text-transform: uppercase;"
+                       oninput="this.value = this.value.toUpperCase(); validarGrupoDuplicado();"
+                       placeholder="Digite o nome do grupo">
+                <small id="grupoValidation" style="display:none; color: #e74c3c; margin-top: 5px;"></small>
               </div>
               <div class="btn-group">
-                <button type="submit" class="btn btn-success">✓ Adicionar Grupo</button>
+                <button type="submit" id="btnAdicionarGrupo" class="btn btn-success">✓ Adicionar Grupo</button>
               </div>
             </form>
+
+            <!-- Lista de grupos existentes -->
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd;">
+              <h3 style="font-size: 1rem; color: #666; margin-bottom: 10px;">📋 Grupos Existentes (<span id="totalGrupos">0</span>)</h3>
+              <div id="listaGruposExistentes" style="max-height: 300px; overflow-y: auto; background: #f9f9f9; padding: 10px; border-radius: 4px;">
+                <p style="color: #999;">Carregando grupos...</p>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -795,16 +891,21 @@
           <div class="content-card">
             <h2>🔍 Localizar Produto</h2>
             <div id="localizarMessage" class="message"></div>
-            <form id="localizarForm" onsubmit="return handleLocalizarProduto(event)">
+            <form id="localizarForm" onsubmit="return handleBuscaRapida(event)">
               <div class="form-group">
                 <label for="localizarItem">Nome do Produto *</label>
                 <input type="text" id="localizarItem" list="localizarItemList" required>
                 <datalist id="localizarItemList"></datalist>
               </div>
-              <div class="btn-group">
-                <button type="submit" class="btn btn-primary">🔍 Buscar</button>
+              <div class="btn-group" style="flex-wrap: wrap;">
+                <button type="submit" class="btn btn-primary">⚡ Busca Rápida (últimos 20)</button>
+                <button type="button" class="btn btn-success" onclick="handleHistoricoCompleto()">📜 Histórico Completo</button>
                 <button type="button" class="btn btn-warning" onclick="showAllProducts()">📋 Mostrar Todos</button>
               </div>
+              <small style="color: #666; margin-top: 8px; display: block;">
+                <strong>Busca Rápida:</strong> Instantânea, últimos 20 registros (cache) |
+                <strong>Histórico Completo:</strong> Todos os registros do item (servidor)
+              </small>
             </form>
             <div id="localizarResults" class="table-container" style="display: none;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 1rem;">
@@ -828,23 +929,45 @@
           <div class="content-card">
             <h2>📋 Listagem de Estoque</h2>
             <div id="listagemMessage" class="message"></div>
-            <form id="listagemForm" onsubmit="return handleListagemEstoque(event)">
-              <div class="form-group">
-                <label for="listagemGroup">Grupo</label>
-                <input type="text" id="listagemGroup" list="listagemGroupList">
-                <datalist id="listagemGroupList"></datalist>
+
+            <!-- Opção 1: Busca por Grupo -->
+            <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+              <h3 style="margin: 0 0 10px 0; font-size: 1rem; color: #1565c0;">📁 Buscar por Grupo</h3>
+              <p style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">Mostra o último lançamento de cada item do grupo selecionado</p>
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label for="listagemGroup">Selecione o Grupo</label>
+                <select id="listagemGroup" style="width: 100%; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
+                  <option value="">-- Selecione um grupo --</option>
+                </select>
               </div>
-              <div class="form-group">
-                <label for="listagemItem">Item</label>
-                <input type="text" id="listagemItem" list="listagemItemList">
-                <datalist id="listagemItemList"></datalist>
+              <button type="button" class="btn btn-primary" onclick="handleBuscaPorGrupo()">📊 Buscar Itens do Grupo</button>
+            </div>
+
+            <!-- Opção 2: Busca por Lista de Itens -->
+            <div style="background: #e8f5e9; padding: 15px; border-radius: 8px;">
+              <h3 style="margin: 0 0 10px 0; font-size: 1rem; color: #2e7d32;">📝 Buscar Lista de Itens</h3>
+              <p style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">Selecione os itens que deseja buscar (use autocomplete)</p>
+
+              <div id="listagemItensContainer">
+                <!-- Primeiro item (sempre visível) -->
+                <div class="listagem-item-row" style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center;">
+                  <input type="text" class="listagem-item-input" list="listagemItemDatalist" placeholder="Digite o nome do item..." style="flex: 1; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
+                  <button type="button" class="btn-remove-item" onclick="removerItemListagem(this)" style="background: #f44336; color: white; border: none; border-radius: 4px; width: 36px; height: 36px; cursor: pointer; font-size: 1.2rem;" title="Remover item">×</button>
+                </div>
               </div>
-              <div class="btn-group">
-                <button type="submit" class="btn btn-primary">📊 Gerar Listagem</button>
+              <datalist id="listagemItemDatalist"></datalist>
+
+              <div style="display: flex; gap: 10px; margin-top: 10px;">
+                <button type="button" class="btn btn-secondary" onclick="adicionarItemListagem()" style="background: #607d8b; flex: 1;">➕ Adicionar Mais Item</button>
+                <button type="button" class="btn btn-success" onclick="handleBuscaPorListaItens()" style="flex: 1;">🔍 Buscar Itens</button>
               </div>
-            </form>
-            <div id="listagemResults" class="table-container" style="display: none;">
-              <h3>Listagem de Estoque</h3>
+            </div>
+
+            <div id="listagemResults" class="table-container" style="display: none; margin-top: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0;">Resultado (<span id="listagemTotal">0</span> itens)</h3>
+                <button class="btn btn-primary" onclick="printListagem()" style="padding: 0.5rem 1rem;">🖨️ Imprimir</button>
+              </div>
               <div id="listagemTableContainer"></div>
             </div>
           </div>
@@ -869,70 +992,43 @@
               </div>
             </form>
             <div id="relatorioResults" class="table-container" style="display: none;">
-              <h3>Relatório de Estoque</h3>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0;">Relatório de Estoque - <span id="relatorioTotal">0</span> lançamentos</h3>
+                <button class="btn btn-primary" onclick="printRelatorio()" style="padding: 0.5rem 1rem;">🖨️ Imprimir</button>
+              </div>
               <div id="relatorioTableContainer"></div>
             </div>
           </div>
         </div>
 
-        <!-- Relatório por Grupo Module -->
-        <div id="module-relatorio-grupo" class="module-container">
-          <div class="content-card">
-            <h2>📈 Relatório por Grupo</h2>
-            <div id="relatorioGrupoMessage" class="message"></div>
-            <form id="relatorioGrupoForm" onsubmit="return handleRelatorioPorGrupo(event)">
-              <div class="form-group">
-                <label for="relatorioGrupoSelect">Grupo *</label>
-                <select id="relatorioGrupoSelect" required>
-                  <option value="">Selecione um grupo...</option>
-                </select>
-              </div>
-              <div class="btn-group">
-                <button type="submit" class="btn btn-primary">📊 Gerar Relatório</button>
-              </div>
-            </form>
-            <div id="relatorioGrupoResults" class="table-container" style="display: none;">
-              <h3>Relatório por Grupo</h3>
-              <div id="relatorioGrupoTableContainer"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Estoque por Período Module -->
-        <div id="module-estoque-periodo" class="module-container">
-          <div class="content-card">
-            <h2>📅 Estoque por Período</h2>
-            <div id="estoquePeriodoMessage" class="message"></div>
-            <form id="estoquePeriodoForm" onsubmit="return handleEstoquePorPeriodo(event)">
-              <div class="form-group">
-                <label for="periodoDataInicio">Data Início *</label>
-                <input type="date" id="periodoDataInicio" required>
-              </div>
-              <div class="form-group">
-                <label for="periodoDataFim">Data Fim *</label>
-                <input type="date" id="periodoDataFim" required>
-              </div>
-              <div class="btn-group">
-                <button type="submit" class="btn btn-primary">📊 Filtrar</button>
-              </div>
-            </form>
-            <div id="estoquePeriodoResults" class="table-container" style="display: none;">
-              <h3>Estoque no Período</h3>
-              <div id="estoquePeriodoTableContainer"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Estoque 3 Meses Module -->
+        <!-- Consumo em 3 Meses Module -->
         <div id="module-estoque-3-meses" class="module-container">
           <div class="content-card">
-            <h2>📦 Estoque 3 Meses</h2>
+            <h2>📦 Consumo em 3 Meses</h2>
+            <p style="font-size: 0.9rem; color: #666; margin-bottom: 15px;">Calcula o total de saídas de cada item nos últimos 3 meses</p>
             <div id="estoque3MesesMessage" class="message"></div>
-            <div class="btn-group">
-              <button class="btn btn-primary" onclick="handleEstoque3Meses()">📊 Gerar Relatório (Últimos 3 Meses)</button>
+
+            <div style="background: #fff3e0; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+              <h3 style="margin: 0 0 10px 0; font-size: 1rem; color: #e65100;">📝 Selecione os Itens</h3>
+              <div id="estoque3MesesItensContainer">
+                <div class="estoque3m-item-row" style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center;">
+                  <input type="text" class="estoque3m-item-input" list="estoque3MesesItemDatalist" placeholder="Digite o nome do item..." style="flex: 1; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
+                  <button type="button" onclick="removerItemEstoque3M(this)" style="background: #f44336; color: white; border: none; border-radius: 4px; width: 36px; height: 36px; cursor: pointer; font-size: 1.2rem;" title="Remover item">×</button>
+                </div>
+              </div>
+              <datalist id="estoque3MesesItemDatalist"></datalist>
+
+              <div style="display: flex; gap: 10px; margin-top: 10px;">
+                <button type="button" class="btn btn-secondary" onclick="adicionarItemEstoque3M()" style="background: #607d8b; flex: 1;">➕ Adicionar Mais Item</button>
+                <button type="button" class="btn btn-primary" onclick="handleEstoque3Meses()" style="flex: 1;">📊 Calcular Saídas</button>
+              </div>
             </div>
+
             <div id="estoque3MesesResults" class="table-container" style="display: none;">
-              <h3>Estoque dos Últimos 3 Meses</h3>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0;">Total de Saídas (Últimos 3 Meses) - <span id="estoque3MesesTotal">0</span> itens</h3>
+                <button class="btn btn-primary" onclick="printEstoque3Meses()" style="padding: 0.5rem 1rem;">🖨️ Imprimir</button>
+              </div>
               <div id="estoque3MesesTableContainer"></div>
             </div>
           </div>
@@ -942,47 +1038,17 @@
         <div id="module-cores-desatualizadas" class="module-container">
           <div class="content-card">
             <h2>🎨 Cores Desatualizadas</h2>
+            <p style="font-size: 0.9rem; color: #666; margin-bottom: 15px;">Lista itens sem lançamento há mais de 15 dias e sem "ATUALIZAÇÃO" na observação</p>
             <div id="coresMessage" class="message"></div>
-            <form id="coresForm" onsubmit="return handleCoresDesatualizadas(event)">
-              <div class="form-group">
-                <label for="coresMesesAtras">Meses Atrás</label>
-                <input type="number" id="coresMesesAtras" value="3" min="1" max="12">
-              </div>
-              <div class="form-group">
-                <label for="coresObservacao">Observação</label>
-                <input type="text" id="coresObservacao" placeholder="Ex: TINTURA, TECELAGEM, etc.">
-              </div>
-              <div class="btn-group">
-                <button type="submit" class="btn btn-primary">🔍 Buscar Cores</button>
-              </div>
-            </form>
+            <div class="btn-group">
+              <button class="btn btn-primary" onclick="handleCoresDesatualizadas()">🔍 Buscar Cores Desatualizadas</button>
+            </div>
             <div id="coresResults" class="table-container" style="display: none;">
-              <h3>Cores Desatualizadas</h3>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0;">Cores Desatualizadas - <span id="coresTotal">0</span> itens</h3>
+                <button class="btn btn-primary" onclick="printCores()" style="padding: 0.5rem 1rem;">🖨️ Imprimir</button>
+              </div>
               <div id="coresTableContainer"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Atualizar Compra de Fio Module -->
-        <div id="module-atualizar-fio" class="module-container">
-          <div class="content-card">
-            <h2>🔄 Atualizar Compra de Fio e Histórico</h2>
-            <div id="atualizarFioMessage" class="message"></div>
-            <p>Esta função atualiza as informações de compra de fio e histórico na planilha.</p>
-            <div class="btn-group">
-              <button class="btn btn-warning" onclick="handleAtualizarFio()">🔄 Atualizar Agora</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Atualizar Total Embarcado Module -->
-        <div id="module-atualizar-embarcado" class="module-container">
-          <div class="content-card">
-            <h2>🚢 Atualizar Total Embarcado</h2>
-            <div id="atualizarEmbarcadoMessage" class="message"></div>
-            <p>Esta função atualiza o total embarcado na planilha.</p>
-            <div class="btn-group">
-              <button class="btn btn-warning" onclick="handleAtualizarEmbarcado()">🚢 Atualizar Agora</button>
             </div>
           </div>
         </div>
@@ -991,22 +1057,22 @@
         <div id="module-apagar-linha" class="module-container">
           <div class="content-card">
             <h2>🗑️ Apagar Última Linha</h2>
+            <p style="font-size: 0.9rem; color: #666; margin-bottom: 15px;">Visualize as últimas entradas e corrija lançamentos errados</p>
             <div id="apagarLinhaMessage" class="message"></div>
-            <p style="color: var(--danger-color); font-weight: bold;">⚠️ Atenção: Esta ação não pode ser desfeita!</p>
-            <div class="btn-group">
-              <button class="btn btn-danger" onclick="handleApagarLinha()">🗑️ Apagar Última Linha</button>
-            </div>
-          </div>
-        </div>
 
-        <!-- Limpar Filtro Module -->
-        <div id="module-limpar-filtro" class="module-container">
-          <div class="content-card">
-            <h2>🔄 Limpar Filtro</h2>
-            <div id="limparFiltroMessage" class="message"></div>
-            <p>Remove todos os filtros aplicados na aba ESTOQUE.</p>
-            <div class="btn-group">
-              <button class="btn btn-warning" onclick="handleLimparFiltro()">🔄 Limpar Filtro</button>
+            <div class="btn-group" style="margin-bottom: 15px;">
+              <button class="btn btn-primary" onclick="carregarUltimasEntradas()">🔄 Carregar Últimas 20 Entradas</button>
+            </div>
+
+            <div id="ultimasEntradasArea" style="display: none;">
+              <div style="background: #ffebee; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                <p style="color: #c62828; font-weight: bold; margin: 0 0 10px 0;">⚠️ A última entrada será apagada. Esta ação não pode ser desfeita!</p>
+                <div id="ultimaEntradaInfo" style="background: white; padding: 10px; border-radius: 4px; margin-bottom: 10px; font-size: 0.9rem;"></div>
+                <button class="btn btn-danger" onclick="confirmarApagarLinha()" style="width: 100%;">🗑️ CONFIRMAR EXCLUSÃO DA ÚLTIMA ENTRADA</button>
+              </div>
+
+              <h3>Últimas 20 Entradas</h3>
+              <div id="ultimasEntradasTableContainer"></div>
             </div>
           </div>
         </div>
@@ -1021,6 +1087,661 @@
     let autocompleteData = null;
     let allEstoqueData = null; // Armazena TODOS os dados do estoque para filtros instantâneos
     let estoqueHeaders = null;
+
+    // ========================================
+    // INDEXEDDB - Banco de dados local para acesso instantâneo
+    // ========================================
+    const DB_CONFIG = {
+      name: 'EstoqueDB',
+      version: 1,
+      storeName: 'registros',
+      syncInterval: 10000, // 10 segundos
+      metaStore: 'meta'
+    };
+
+    let db = null;
+    let syncTimer = null;
+
+    /**
+     * Inicializa o IndexedDB
+     */
+    function initIndexedDB() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_CONFIG.name, DB_CONFIG.version);
+
+        request.onerror = () => {
+          console.error('Erro ao abrir IndexedDB:', request.error);
+          reject(request.error);
+        };
+
+        request.onsuccess = () => {
+          db = request.result;
+          console.log('IndexedDB inicializado');
+          resolve(db);
+        };
+
+        request.onupgradeneeded = (event) => {
+          const database = event.target.result;
+
+          // Store principal: registros de estoque
+          if (!database.objectStoreNames.contains(DB_CONFIG.storeName)) {
+            const store = database.createObjectStore(DB_CONFIG.storeName, { keyPath: 'id', autoIncrement: true });
+            store.createIndex('item', 'item', { unique: false });
+            store.createIndex('date', 'date', { unique: false });
+            store.createIndex('itemDate', ['item', 'date'], { unique: false });
+          }
+
+          // Store de metadados (última sincronização, etc)
+          if (!database.objectStoreNames.contains(DB_CONFIG.metaStore)) {
+            database.createObjectStore(DB_CONFIG.metaStore, { keyPath: 'key' });
+          }
+
+          console.log('IndexedDB estrutura criada');
+        };
+      });
+    }
+
+    /**
+     * Salva registros no IndexedDB
+     */
+    async function saveToIndexedDB(records) {
+      if (!db) return;
+
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([DB_CONFIG.storeName], 'readwrite');
+        const store = transaction.objectStore(DB_CONFIG.storeName);
+
+        records.forEach(record => {
+          store.put(record);
+        });
+
+        transaction.oncomplete = () => {
+          console.log('IndexedDB: ' + records.length + ' registros salvos');
+          resolve();
+        };
+
+        transaction.onerror = () => {
+          console.error('Erro ao salvar no IndexedDB:', transaction.error);
+          reject(transaction.error);
+        };
+      });
+    }
+
+    /**
+     * Limpa e recarrega todos os dados no IndexedDB
+     */
+    async function reloadIndexedDB(serverData) {
+      if (!db) return;
+
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([DB_CONFIG.storeName, DB_CONFIG.metaStore], 'readwrite');
+        const store = transaction.objectStore(DB_CONFIG.storeName);
+        const metaStore = transaction.objectStore(DB_CONFIG.metaStore);
+
+        // Limpa dados antigos
+        store.clear();
+
+        // Adiciona novos dados
+        serverData.forEach((record, index) => {
+          store.put({
+            id: index + 1,
+            row: record.row,
+            item: record.row[1] ? record.row[1].toString().trim().toLowerCase() : '',
+            date: record.date,
+            background: record.background
+          });
+        });
+
+        // Salva timestamp da última sincronização
+        metaStore.put({ key: 'lastSync', value: Date.now() });
+        metaStore.put({ key: 'recordCount', value: serverData.length });
+
+        transaction.oncomplete = () => {
+          console.log('IndexedDB recarregado: ' + serverData.length + ' registros');
+          resolve();
+        };
+
+        transaction.onerror = () => reject(transaction.error);
+      });
+    }
+
+    /**
+     * Busca registros de um item no IndexedDB (INSTANTÂNEO!)
+     */
+    async function getFromIndexedDB(itemName, limit) {
+      if (!db) return null;
+
+      limit = limit || 20;
+      const itemKey = itemName ? itemName.toString().trim().toLowerCase() : '';
+
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([DB_CONFIG.storeName], 'readonly');
+        const store = transaction.objectStore(DB_CONFIG.storeName);
+        const index = store.index('item');
+        const results = [];
+
+        const request = index.openCursor(IDBKeyRange.only(itemKey));
+
+        request.onsuccess = (event) => {
+          const cursor = event.target.result;
+          if (cursor) {
+            results.push(cursor.value);
+            cursor.continue();
+          } else {
+            // Ordena por data (mais novo primeiro) e limita
+            results.sort((a, b) => b.date - a.date);
+            resolve(results.slice(0, limit));
+          }
+        };
+
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    /**
+     * Busca todos os registros do IndexedDB
+     */
+    async function getAllFromIndexedDB() {
+      if (!db) return [];
+
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([DB_CONFIG.storeName], 'readonly');
+        const store = transaction.objectStore(DB_CONFIG.storeName);
+        const request = store.getAll();
+
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    /**
+     * Obtém timestamp da última sincronização
+     */
+    async function getLastSyncTime() {
+      if (!db) return 0;
+
+      return new Promise((resolve) => {
+        const transaction = db.transaction([DB_CONFIG.metaStore], 'readonly');
+        const store = transaction.objectStore(DB_CONFIG.metaStore);
+        const request = store.get('lastSync');
+
+        request.onsuccess = () => resolve(request.result ? request.result.value : 0);
+        request.onerror = () => resolve(0);
+      });
+    }
+
+    /**
+     * Sincronização inicial - carrega TODOS os dados do servidor (PAGINADO)
+     * Carrega 2000 registros por vez até completar todos os dados
+     */
+    async function initialSync() {
+      console.log('Sincronização inicial (paginada)...');
+
+      let totalRecords = 0;
+      let currentPage = 0;
+      let totalPages = 1;
+      let totalRows = 0;
+
+      // Limpa IndexedDB antes de carregar tudo
+      if (db) {
+        try {
+          const transaction = db.transaction([DB_CONFIG.storeName], 'readwrite');
+          transaction.objectStore(DB_CONFIG.storeName).clear();
+        } catch (e) {
+          console.log('Erro ao limpar IndexedDB:', e);
+        }
+      }
+
+      // Carrega página por página
+      while (currentPage < totalPages) {
+        showSyncStatus('Carregando ' + (currentPage + 1) + '/' + totalPages + '...', 'info');
+
+        try {
+          const result = await loadSyncPage(currentPage);
+
+          if (result && result.success) {
+            totalPages = result.totalPages || 1;
+            totalRows = result.totalRows || 0;
+
+            if (result.data && result.data.length > 0) {
+              // Salva esta página no IndexedDB
+              await savePageToIndexedDB(result.data, currentPage);
+              totalRecords += result.data.length;
+              console.log('Página ' + (currentPage + 1) + '/' + totalPages + ': ' + result.data.length + ' registros (total: ' + totalRecords + ')');
+            }
+
+            if (result.done) {
+              break;
+            }
+
+            currentPage++;
+          } else {
+            console.error('Erro na página ' + currentPage + ':', result);
+            break;
+          }
+        } catch (e) {
+          console.error('Erro ao carregar página ' + currentPage + ':', e);
+          break;
+        }
+      }
+
+      // Salva timestamp da sincronização
+      if (db) {
+        try {
+          const metaTransaction = db.transaction([DB_CONFIG.metaStore], 'readwrite');
+          const metaStore = metaTransaction.objectStore(DB_CONFIG.metaStore);
+          metaStore.put({ key: 'lastSync', value: Date.now() });
+          metaStore.put({ key: 'recordCount', value: totalRecords });
+        } catch (e) {
+          console.log('Erro ao salvar meta:', e);
+        }
+      }
+
+      // Constrói índice em memória
+      await buildMemoryIndexFromIDB();
+
+      showSyncStatus('Sincronizado! (' + totalRecords + '/' + totalRows + ')', 'success');
+      setTimeout(() => hideSyncStatus(), 3000);
+
+      console.log('Sincronização completa: ' + totalRecords + ' registros carregados');
+    }
+
+    /**
+     * Carrega uma página de dados do servidor
+     */
+    function loadSyncPage(page) {
+      return new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)
+          .getAllDataForSync(page);
+      });
+    }
+
+    /**
+     * Salva uma página de dados no IndexedDB
+     * Formato compacto do servidor: [[row, timestamp], ...]
+     */
+    async function savePageToIndexedDB(records, pageNum) {
+      if (!db || !records || records.length === 0) return;
+
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([DB_CONFIG.storeName], 'readwrite');
+        const store = transaction.objectStore(DB_CONFIG.storeName);
+
+        records.forEach((record, idx) => {
+          // Suporta formato compacto [row, timestamp] e formato antigo {row, date}
+          const row = Array.isArray(record) ? record[0] : record.row;
+          const date = Array.isArray(record) ? record[1] : record.date;
+
+          const id = (pageNum * 10000) + idx + 1;
+          store.put({
+            id: id,
+            row: row,
+            item: row[1] ? row[1].toString().trim().toLowerCase() : '',
+            date: date,
+            background: null
+          });
+        });
+
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      });
+    }
+
+    /**
+     * Sincronização incremental - busca apenas novos registros (a cada 10 segundos)
+     */
+    async function incrementalSync() {
+      if (!db) return;
+
+      const lastSync = await getLastSyncTime();
+      console.log('Sync incremental desde:', new Date(lastSync).toLocaleString());
+
+      google.script.run
+        .withSuccessHandler(async function(result) {
+          if (result && result.success && result.newRecords && result.newRecords.length > 0) {
+            console.log('Novos registros encontrados:', result.newRecords.length);
+
+            // Adiciona novos registros ao IndexedDB
+            const records = result.newRecords.map((record, idx) => ({
+              id: Date.now() + idx, // ID único
+              row: record.row,
+              item: record.row[1] ? record.row[1].toString().trim().toLowerCase() : '',
+              date: record.date,
+              background: record.background
+            }));
+
+            await saveToIndexedDB(records);
+
+            // Atualiza timestamp
+            const transaction = db.transaction([DB_CONFIG.metaStore], 'readwrite');
+            transaction.objectStore(DB_CONFIG.metaStore).put({ key: 'lastSync', value: Date.now() });
+
+            // Atualiza índice em memória
+            buildMemoryIndexFromIDB();
+
+            // Mostra indicador discreto
+            showSyncStatus('+' + result.newRecords.length + ' novos', 'success');
+            setTimeout(() => hideSyncStatus(), 1500);
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.log('Erro sync incremental:', error.message);
+        })
+        .getNewRecordsSince(lastSync);
+    }
+
+    /**
+     * Inicia sincronização automática a cada 10 segundos
+     */
+    function startAutoSync() {
+      if (syncTimer) clearInterval(syncTimer);
+
+      syncTimer = setInterval(() => {
+        incrementalSync();
+      }, DB_CONFIG.syncInterval);
+
+      console.log('Auto-sync iniciado: a cada ' + (DB_CONFIG.syncInterval/1000) + ' segundos');
+    }
+
+    /**
+     * Para sincronização automática
+     */
+    function stopAutoSync() {
+      if (syncTimer) {
+        clearInterval(syncTimer);
+        syncTimer = null;
+      }
+    }
+
+    /**
+     * Constrói índice em memória a partir do IndexedDB
+     */
+    async function buildMemoryIndexFromIDB() {
+      const allRecords = await getAllFromIndexedDB();
+      const index = {};
+
+      allRecords.forEach(record => {
+        const itemKey = record.item;
+        if (!itemKey) return;
+
+        if (!index[itemKey]) {
+          index[itemKey] = {
+            info: {
+              item: record.row[1],
+              group: record.row[0],
+              lastDate: record.row[3],
+              lastStock: record.row[9],
+              unidade: record.row[2]
+            },
+            history: []
+          };
+        }
+
+        index[itemKey].history.push({
+          row: record.row,
+          date: record.date,
+          background: record.background
+        });
+
+        // Atualiza info se mais recente
+        if (record.date > new Date(index[itemKey].info.lastDate).getTime()) {
+          index[itemKey].info.lastDate = record.row[3];
+          index[itemKey].info.lastStock = record.row[9];
+          index[itemKey].info.group = record.row[0];
+        }
+      });
+
+      // Ordena histórico de cada item
+      for (const key in index) {
+        index[key].history.sort((a, b) => b.date - a.date);
+        index[key].history = index[key].history.slice(0, 20); // Mantém últimos 20
+      }
+
+      itemHistoryIndex = index;
+      console.log('Índice em memória atualizado: ' + Object.keys(index).length + ' itens');
+    }
+
+    /**
+     * Mostra status de sincronização
+     */
+    function showSyncStatus(message, type) {
+      let statusEl = document.getElementById('syncStatus');
+      if (!statusEl) {
+        statusEl = document.createElement('div');
+        statusEl.id = 'syncStatus';
+        statusEl.style.cssText = 'position:fixed;bottom:20px;right:20px;padding:8px 16px;border-radius:4px;font-size:12px;z-index:9999;transition:opacity 0.3s;';
+        document.body.appendChild(statusEl);
+      }
+
+      statusEl.textContent = message;
+      statusEl.style.opacity = '1';
+
+      if (type === 'success') {
+        statusEl.style.background = '#4CAF50';
+        statusEl.style.color = 'white';
+      } else if (type === 'error') {
+        statusEl.style.background = '#f44336';
+        statusEl.style.color = 'white';
+      } else {
+        statusEl.style.background = '#2196F3';
+        statusEl.style.color = 'white';
+      }
+    }
+
+    function hideSyncStatus() {
+      const statusEl = document.getElementById('syncStatus');
+      if (statusEl) {
+        statusEl.style.opacity = '0';
+      }
+    }
+
+    // ========================================
+    // CACHE NO CLIENTE - localStorage
+    // ========================================
+    const CLIENT_CACHE = {
+      AUTOCOMPLETE_KEY: 'estoque_autocomplete',
+      HISTORY_INDEX_KEY: 'estoque_history_index',
+      AUTOCOMPLETE_TTL: 600000, // 10 minutos em ms
+      HISTORY_INDEX_TTL: 300000, // 5 minutos em ms
+      TIMESTAMP_KEY: 'estoque_cache_timestamp'
+    };
+
+    // Índice de histórico em memória (cache RAM para acesso instantâneo)
+    let itemHistoryIndex = null;
+
+    function getClientCache(key) {
+      try {
+        const timestamp = localStorage.getItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + key);
+        const data = localStorage.getItem(key);
+
+        if (timestamp && data) {
+          const age = Date.now() - parseInt(timestamp);
+          if (age < CLIENT_CACHE.AUTOCOMPLETE_TTL) {
+            console.log('Cache HIT (cliente): ' + key + ' (idade: ' + Math.round(age/1000) + 's)');
+            return JSON.parse(data);
+          }
+        }
+      } catch (e) {
+        console.log('Erro ao ler cache cliente:', e);
+      }
+      return null;
+    }
+
+    function setClientCache(key, data) {
+      try {
+        localStorage.setItem(key, JSON.stringify(data));
+        localStorage.setItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + key, Date.now().toString());
+        console.log('Cache salvo (cliente): ' + key);
+      } catch (e) {
+        console.log('Erro ao salvar cache cliente:', e);
+      }
+    }
+
+    function clearClientCache() {
+      try {
+        localStorage.removeItem(CLIENT_CACHE.AUTOCOMPLETE_KEY);
+        localStorage.removeItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + CLIENT_CACHE.AUTOCOMPLETE_KEY);
+        localStorage.removeItem(CLIENT_CACHE.HISTORY_INDEX_KEY);
+        localStorage.removeItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + CLIENT_CACHE.HISTORY_INDEX_KEY);
+        itemHistoryIndex = null; // Limpa cache em memória também
+        console.log('Cache cliente limpo');
+      } catch (e) {
+        console.log('Erro ao limpar cache:', e);
+      }
+    }
+
+    // ========================================
+    // ÍNDICE DE HISTÓRICO - Últimos 20 registros por item
+    // ========================================
+
+    /**
+     * Carrega o índice de histórico (cache localStorage -> cache memória -> servidor)
+     * Este índice contém os últimos 20 registros de cada item para acesso INSTANTÂNEO
+     */
+    function loadItemHistoryIndex() {
+      // 1. Tenta cache em memória (mais rápido)
+      if (itemHistoryIndex && Object.keys(itemHistoryIndex).length > 0) {
+        console.log('Índice histórico: usando cache em memória');
+        return;
+      }
+
+      // 2. Tenta localStorage
+      try {
+        const timestamp = localStorage.getItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + CLIENT_CACHE.HISTORY_INDEX_KEY);
+        const data = localStorage.getItem(CLIENT_CACHE.HISTORY_INDEX_KEY);
+
+        if (timestamp && data) {
+          const age = Date.now() - parseInt(timestamp);
+          if (age < CLIENT_CACHE.HISTORY_INDEX_TTL) {
+            itemHistoryIndex = JSON.parse(data);
+            console.log('Índice histórico: carregado do localStorage (' + Object.keys(itemHistoryIndex).length + ' itens)');
+
+            // Atualiza em background
+            refreshHistoryIndexInBackground();
+            return;
+          }
+        }
+      } catch (e) {
+        console.log('Erro ao ler índice do localStorage:', e);
+      }
+
+      // 3. Busca do servidor
+      console.log('Índice histórico: buscando do servidor...');
+      fetchHistoryIndexFromServer();
+    }
+
+    /**
+     * Busca o índice de histórico do servidor
+     */
+    function fetchHistoryIndexFromServer() {
+      google.script.run
+        .withSuccessHandler(function(index) {
+          if (index && Object.keys(index).length > 0) {
+            itemHistoryIndex = index;
+            saveHistoryIndexToLocalStorage(index);
+            console.log('Índice histórico carregado do servidor: ' + Object.keys(index).length + ' itens');
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.error('Erro ao carregar índice de histórico:', error);
+        })
+        .getItemHistoryIndex();
+    }
+
+    /**
+     * Atualiza o índice em background (não bloqueia a UI)
+     */
+    function refreshHistoryIndexInBackground() {
+      google.script.run
+        .withSuccessHandler(function(index) {
+          if (index && Object.keys(index).length > 0) {
+            itemHistoryIndex = index;
+            saveHistoryIndexToLocalStorage(index);
+            console.log('Índice histórico atualizado em background');
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.log('Falha ao atualizar índice em background:', error);
+        })
+        .getItemHistoryIndex();
+    }
+
+    /**
+     * Salva o índice no localStorage
+     */
+    function saveHistoryIndexToLocalStorage(index) {
+      try {
+        const jsonData = JSON.stringify(index);
+        // localStorage tem limite de ~5MB, verificamos se cabe
+        if (jsonData.length < 4000000) { // 4MB limite seguro
+          localStorage.setItem(CLIENT_CACHE.HISTORY_INDEX_KEY, jsonData);
+          localStorage.setItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + CLIENT_CACHE.HISTORY_INDEX_KEY, Date.now().toString());
+          console.log('Índice histórico salvo no localStorage (' + Math.round(jsonData.length/1024) + 'KB)');
+        } else {
+          console.log('Índice muito grande para localStorage, usando apenas memória');
+        }
+      } catch (e) {
+        console.log('Erro ao salvar índice no localStorage:', e);
+      }
+    }
+
+    /**
+     * Busca histórico de um item no índice local (INSTANTÂNEO!)
+     * @param {string} item - Nome do item
+     * @returns {object|null} - Dados do histórico ou null se não encontrado
+     */
+    function getItemHistoryFromIndex(item) {
+      if (!item || !itemHistoryIndex) return null;
+
+      const itemKey = item.toString().trim().toLowerCase();
+
+      // Busca exata primeiro
+      if (itemHistoryIndex[itemKey]) {
+        return itemHistoryIndex[itemKey];
+      }
+
+      // Busca parcial (para autocomplete)
+      for (const key in itemHistoryIndex) {
+        if (key.indexOf(itemKey) >= 0 || itemKey.indexOf(key) >= 0) {
+          return itemHistoryIndex[key];
+        }
+      }
+
+      return null;
+    }
+
+    /**
+     * Formata dados do índice para exibição na tabela
+     * Garante ordenação do mais novo para o mais antigo
+     */
+    function formatHistoryForDisplay(historyData, maxRecords) {
+      if (!historyData || !historyData.history) return null;
+
+      maxRecords = maxRecords || 10;
+
+      // Cria cópia e ordena por data (mais novo primeiro)
+      const sortedHistory = historyData.history.slice().sort(function(a, b) {
+        return b.date - a.date;
+      });
+
+      const limitedHistory = sortedHistory.slice(0, maxRecords);
+
+      const rows = [];
+      const colors = [];
+
+      for (let i = 0; i < limitedHistory.length; i++) {
+        rows.push(limitedHistory[i].row);
+        colors.push(limitedHistory[i].background);
+      }
+
+      return {
+        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
+        rows: rows,
+        colors: colors
+      };
+    }
 
     // Initialize app
     window.onload = function() {
@@ -1037,16 +1758,21 @@
       showLoading(true);
 
       google.script.run
-        .withSuccessHandler(function(result) {
+        .withSuccessHandler(async function(result) {
           showLoading(false);
           if (result.success) {
             currentUser = result.user;
             document.getElementById('userName').textContent = currentUser;
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('mainApp').style.display = 'block';
+
+            // Carrega dados básicos
             loadDashboardData();
             loadAutocompleteData();
-            // loadAllEstoqueData(); // REMOVIDO - agora busca direto da planilha sempre
+
+            // Carrega índice de histórico (últimos 20 registros por item)
+            // O índice usa cache do servidor (5 min) + cache localStorage
+            loadItemHistoryIndex();
           } else {
             showMessage('loginMessage', result.message || 'Login falhou', 'error');
           }
@@ -1063,6 +1789,7 @@
     // Logout handler
     function handleLogout() {
       if (confirm('Deseja realmente sair?')) {
+        stopAutoSync(); // Para sincronização automática
         google.script.run
           .withSuccessHandler(function() {
             location.reload();
@@ -1122,15 +1849,20 @@
       });
       document.querySelector('[data-module="' + moduleName + '"]').classList.add('active');
 
-      // Hide sidebar on mobile or when needed
-      if (window.innerWidth <= 768) {
-        const sidebar = document.getElementById('sidebar');
-        const mainContent = document.getElementById('mainContent');
-        const toggleBtn = document.querySelector('.sidebar-toggle');
+      // Ações específicas por módulo
+      if (moduleName === 'inserir-grupo') {
+        atualizarListaGrupos();
+      }
 
-        sidebar.classList.add('hidden');
-        mainContent.classList.add('expanded');
-        toggleBtn.innerHTML = '☰ Mostrar Menu';
+      // Fecha o sidebar automaticamente após selecionar um módulo
+      const sidebar = document.getElementById('sidebar');
+      const mainContent = document.getElementById('mainContent');
+      const toggleBtn = document.querySelector('.sidebar-toggle');
+
+      sidebar.classList.add('hidden');
+      mainContent.classList.add('expanded');
+      if (toggleBtn) {
+        toggleBtn.innerHTML = '☰ Menu';
       }
     }
 
@@ -1149,22 +1881,43 @@
         .getDashboardData();
     }
 
-    // Load autocomplete data
+    // Load autocomplete data - OTIMIZADO com cache cliente
     function loadAutocompleteData() {
+      // Tenta usar cache do cliente primeiro (resposta instantânea)
+      const cachedData = getClientCache(CLIENT_CACHE.AUTOCOMPLETE_KEY);
+
+      if (cachedData && cachedData.items && cachedData.items.length > 0) {
+        console.log('Usando autocomplete do cache cliente (' + cachedData.items.length + ' itens)');
+        applyAutocompleteData(cachedData);
+
+        // Atualiza em background para próxima vez
+        google.script.run
+          .withSuccessHandler(function(data) {
+            if (data && data.items) {
+              setClientCache(CLIENT_CACHE.AUTOCOMPLETE_KEY, data);
+              // Também atualiza na tela para manter sincronizado
+              applyAutocompleteData(data);
+            }
+          })
+          .withFailureHandler(function(error) {
+            console.error('Erro ao atualizar autocomplete em background:', error);
+          })
+          .getAllAutocompleteData();
+        return;
+      }
+
+      // Sem cache válido - busca do servidor
+      console.log('Buscando autocomplete do servidor...');
       google.script.run
         .withSuccessHandler(function(data) {
-          autocompleteData = data;
-          populateAutocomplete('itemList', data.items);
-          populateAutocomplete('groupList', data.groups);
-          populateAutocomplete('nfList', data.nfs);
-          populateAutocomplete('localizarItemList', data.items);
-          populateAutocomplete('listagemGroupList', data.groups);
-          populateAutocomplete('listagemItemList', data.items);
-          populateSelect('relatorioGrupoSelect', data.groups);
-
-          // Popula selects de Unidade de Medida e Observação
-          populateSelect('estoqueUnidade', data.medidas || []);
-          populateSelect('estoqueObs', data.observacoes || []);
+          if (data && data.items) {
+            autocompleteData = data;
+            applyAutocompleteData(data);
+            setClientCache(CLIENT_CACHE.AUTOCOMPLETE_KEY, data);
+            console.log('Autocomplete carregado: ' + data.items.length + ' itens');
+          } else {
+            console.error('Dados de autocomplete inválidos:', data);
+          }
         })
         .withFailureHandler(function(error) {
           console.error('Erro ao carregar autocomplete:', error);
@@ -1172,16 +1925,45 @@
         .getAllAutocompleteData();
     }
 
+    // Aplica dados de autocomplete nos campos
+    function applyAutocompleteData(data) {
+      if (!data) {
+        console.error('applyAutocompleteData: dados vazios');
+        return;
+      }
+
+      autocompleteData = data;
+      populateAutocomplete('itemList', data.items || []);
+      populateAutocomplete('groupList', data.groups || []);
+      populateAutocomplete('nfList', data.nfs || []);
+      populateAutocomplete('localizarItemList', data.items || []);
+      populateAutocomplete('listagemGroupList', data.groups || []);
+      populateAutocomplete('listagemItemList', data.items || []);
+      populateAutocomplete('listagemItemDatalist', data.items || []);
+      populateAutocomplete('estoque3MesesItemDatalist', data.items || []);
+      populateSelect('listagemGroup', data.groups || []);
+      populateSelect('estoqueUnidade', data.medidas || []);
+      populateSelect('estoqueObs', data.observacoes || []);
+      populateSelect('nfUnidade', data.medidas || []);
+      populateSelect('nfObs', data.observacoes || []);
+
+      // Inicializa autocompletes customizados (apenas uma vez)
+      if (!window.customAutocompletesInitialized) {
+        initCustomAutocompletes();
+        window.customAutocompletesInitialized = true;
+      }
+
+      console.log('Autocomplete aplicado - itens:', (data.items || []).length, ', grupos:', (data.groups || []).length);
+    }
+
     // Toggle valor unitário visibility based on rules
     function toggleValorUnitario() {
-      const entrada = parseFloat(document.getElementById('estoqueEntrada').value) || 0;
-      const saida = parseFloat(document.getElementById('estoqueSaida').value) || 0;
       const obs = document.getElementById('estoqueObs').value.toUpperCase();
       const valorGroup = document.getElementById('valorUnitarioGroup');
       const valorInput = document.getElementById('estoqueValorUnitario');
 
-      // Regra: Valor unitário obrigatório SE entrada > 0 E obs ≠ "ATUALIZAÇÃO"
-      if (entrada > 0 && obs !== 'ATUALIZAÇÃO') {
+      // Regra: Valor unitário obrigatório SE obs ≠ "ATUALIZAÇÃO"
+      if (obs !== 'ATUALIZAÇÃO') {
         valorGroup.style.display = 'block';
         valorInput.required = true;
       } else {
@@ -1191,7 +1973,7 @@
       }
     }
 
-    // Show product history when item is typed (busca no servidor)
+    // Show product history when item is typed (OTIMIZADO: índice local primeiro, servidor como fallback)
     let historyTimeout;
     function showProductHistory(item) {
       if (!item || item.trim() === '') {
@@ -1199,10 +1981,31 @@
         return;
       }
 
-      // Debounce - aguarda 800ms após usuário parar de digitar
+      // Debounce reduzido para 300ms (antes era 800ms) - agora é mais rápido!
       clearTimeout(historyTimeout);
       historyTimeout = setTimeout(function() {
-        // Busca histórico do produto no servidor
+        // 1. TENTA ÍNDICE LOCAL PRIMEIRO (INSTANTÂNEO!)
+        const localHistory = getItemHistoryFromIndex(item);
+        if (localHistory) {
+          const displayData = formatHistoryForDisplay(localHistory, 10);
+          if (displayData && displayData.rows.length > 0) {
+            // Adiciona info do item acima da tabela
+            const infoHtml = '<div style="margin-bottom:8px;font-size:0.8rem;color:#333;">' +
+              '<strong>Saldo Atual:</strong> ' + (localHistory.info.lastStock || '0') +
+              ' | <strong>Última Atualização:</strong> ' + (localHistory.info.lastDate || '-') +
+              ' | <strong>Grupo:</strong> ' + (localHistory.info.group || '-') +
+              '</div>';
+
+            document.getElementById('estoqueHistoricoContent').innerHTML = infoHtml;
+            displayTable('estoqueHistoricoContent', displayData);
+            document.getElementById('estoqueHistorico').style.display = 'block';
+            console.log('Histórico carregado do índice local (instantâneo)');
+            return;
+          }
+        }
+
+        // 2. FALLBACK: Busca no servidor (para itens novos ou não encontrados)
+        console.log('Histórico: buscando no servidor...');
         google.script.run
           .withSuccessHandler(function(result) {
             if (result.success && result.data && result.data.rows.length > 0) {
@@ -1226,7 +2029,7 @@
             document.getElementById('estoqueHistorico').style.display = 'none';
           })
           .buscarProduto(item, null, null);
-      }, 800);
+      }, 300); // Reduzido de 800ms para 300ms
     }
 
     // Load all estoque data for instant client-side filtering
@@ -1367,12 +2170,125 @@
     // Populate autocomplete datalist
     function populateAutocomplete(datalistId, items) {
       const datalist = document.getElementById(datalistId);
+      if (!datalist) {
+        console.error('Datalist não encontrado:', datalistId);
+        return;
+      }
+      if (!items || !Array.isArray(items)) {
+        console.error('Items inválidos para:', datalistId, items);
+        return;
+      }
+
       datalist.innerHTML = '';
       items.forEach(item => {
-        const option = document.createElement('option');
-        option.value = item;
-        datalist.appendChild(option);
+        if (item) {
+          const option = document.createElement('option');
+          option.value = item;
+          datalist.appendChild(option);
+        }
       });
+    }
+
+    // Autocomplete customizado que filtra do início (esquerda para direita)
+    function setupCustomAutocomplete(inputId, getDataFn) {
+      const input = document.getElementById(inputId);
+      if (!input) return;
+
+      // Remove datalist attribute se existir
+      input.removeAttribute('list');
+
+      // Cria wrapper e dropdown
+      const wrapper = document.createElement('div');
+      wrapper.className = 'autocomplete-wrapper';
+      input.parentNode.insertBefore(wrapper, input);
+      wrapper.appendChild(input);
+
+      const dropdown = document.createElement('div');
+      dropdown.className = 'autocomplete-dropdown';
+      dropdown.id = inputId + '-dropdown';
+      wrapper.appendChild(dropdown);
+
+      let selectedIndex = -1;
+
+      // Filtra e mostra opções
+      function showOptions() {
+        const value = input.value.toUpperCase().trim();
+        const data = getDataFn();
+        if (!data || data.length === 0) {
+          dropdown.classList.remove('show');
+          return;
+        }
+
+        // Filtra itens que COMEÇAM com o texto digitado
+        const filtered = data.filter(item =>
+          item && item.toUpperCase().startsWith(value)
+        ).slice(0, 15); // Limita a 15 resultados
+
+        if (filtered.length === 0 || value === '') {
+          dropdown.classList.remove('show');
+          return;
+        }
+
+        dropdown.innerHTML = filtered.map((item, idx) =>
+          `<div class="autocomplete-option" data-index="${idx}" data-value="${item}">${item}</div>`
+        ).join('');
+        dropdown.classList.add('show');
+        selectedIndex = -1;
+      }
+
+      // Seleciona opção
+      function selectOption(value) {
+        input.value = value;
+        dropdown.classList.remove('show');
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+
+      // Eventos
+      input.addEventListener('input', showOptions);
+      input.addEventListener('focus', showOptions);
+
+      input.addEventListener('keydown', function(e) {
+        const options = dropdown.querySelectorAll('.autocomplete-option');
+        if (!dropdown.classList.contains('show') || options.length === 0) return;
+
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          selectedIndex = Math.min(selectedIndex + 1, options.length - 1);
+          options.forEach((opt, i) => opt.classList.toggle('selected', i === selectedIndex));
+          if (options[selectedIndex]) options[selectedIndex].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          selectedIndex = Math.max(selectedIndex - 1, 0);
+          options.forEach((opt, i) => opt.classList.toggle('selected', i === selectedIndex));
+          if (options[selectedIndex]) options[selectedIndex].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'Enter' && selectedIndex >= 0) {
+          e.preventDefault();
+          selectOption(options[selectedIndex].dataset.value);
+        } else if (e.key === 'Escape') {
+          dropdown.classList.remove('show');
+        }
+      });
+
+      dropdown.addEventListener('click', function(e) {
+        if (e.target.classList.contains('autocomplete-option')) {
+          selectOption(e.target.dataset.value);
+        }
+      });
+
+      // Fecha ao clicar fora
+      document.addEventListener('click', function(e) {
+        if (!wrapper.contains(e.target)) {
+          dropdown.classList.remove('show');
+        }
+      });
+    }
+
+    // Inicializa autocompletes customizados após carregar dados
+    function initCustomAutocompletes() {
+      setupCustomAutocomplete('estoqueItem', () => autocompleteData?.items || []);
+      setupCustomAutocomplete('estoqueGroup', () => autocompleteData?.groups || []);
+      setupCustomAutocomplete('estoqueNF', () => autocompleteData?.nfs || []);
+      setupCustomAutocomplete('localizarItem', () => autocompleteData?.items || []);
     }
 
     // Populate select
@@ -1461,10 +2377,10 @@
         return false;
       }
 
-      // Validação de valor unitário (regra: obrigatório se entrada > 0 E obs ≠ "ATUALIZAÇÃO")
+      // Validação de valor unitário (regra: obrigatório se obs ≠ "ATUALIZAÇÃO")
       const valorUnitario = parseFloat(formData.valorUnitario) || 0;
-      if (entrada > 0 && formData.obs.toUpperCase() !== 'ATUALIZAÇÃO' && valorUnitario <= 0) {
-        showMessage('estoqueMessage', 'Valor unitário é obrigatório para entradas (exceto quando Obs = ATUALIZAÇÃO).', 'error');
+      if (formData.obs.toUpperCase() !== 'ATUALIZAÇÃO' && valorUnitario <= 0) {
+        showMessage('estoqueMessage', 'Valor unitário é obrigatório (exceto quando Obs = ATUALIZAÇÃO).', 'error');
         return false;
       }
 
@@ -1475,50 +2391,71 @@
         }
       }
 
-      showLoading(true);
-
-      // Guarda o item para buscar histórico depois
+      // Guarda o item para uso posterior
       const itemInserido = formData.item;
       const entradaValor = entrada;
       const saidaValor = saida;
 
+      // ========================================
+      // OTIMIZAÇÃO: Mostra resultado INSTANTÂNEO (antes de enviar ao servidor)
+      // ========================================
+
+      // 1. Mostra mensagem de sucesso imediatamente
+      const tipoMov = entradaValor > 0 ? 'ENTRADA' : 'SAÍDA';
+      const qtdMov = entradaValor > 0 ? entradaValor : saidaValor;
+      document.getElementById('estoqueResultMessage').innerHTML =
+        '<strong>' + tipoMov + '</strong> de <strong>' + qtdMov + '</strong> unidade(s) do item <strong>' + itemInserido + '</strong> registrada com sucesso!';
+
+      // 2. Mostra histórico do índice local INSTANTANEAMENTE
+      const localHistory = getItemHistoryFromIndex(itemInserido);
+      if (localHistory) {
+        const displayData = formatHistoryForDisplay(localHistory, 20);
+        if (displayData && displayData.rows.length > 0) {
+          displayTable('estoqueResultTable', displayData);
+        } else {
+          document.getElementById('estoqueResultTable').innerHTML = '<p style="text-align:center;padding:10px;">Salvando...</p>';
+        }
+      } else {
+        document.getElementById('estoqueResultTable').innerHTML = '<p style="text-align:center;padding:10px;">Salvando...</p>';
+      }
+
+      // 3. Esconde formulário e mostra resultados IMEDIATAMENTE
+      document.getElementById('estoqueFormArea').style.display = 'none';
+      document.getElementById('estoqueResultArea').style.display = 'block';
+      document.querySelector('#estoqueResultArea .btn-group').style.display = 'flex'; // Mostra botão imediatamente
+      resetEstoqueForm();
+
+      // 4. Envia para servidor EM BACKGROUND
+      showSyncStatus('Sincronizando...', 'info');
+
       google.script.run
-        .withSuccessHandler(function(result) {
-          showLoading(false);
+        .withSuccessHandler(async function(result) {
           if (result.success) {
+            clearClientCache();
             loadDashboardData();
             loadAutocompleteData();
 
-            // Mostra mensagem de sucesso na área de resultados
-            const tipoMov = entradaValor > 0 ? 'ENTRADA' : 'SAÍDA';
-            const qtdMov = entradaValor > 0 ? entradaValor : saidaValor;
-            document.getElementById('estoqueResultMessage').innerHTML =
-              '<strong>' + tipoMov + '</strong> de <strong>' + qtdMov + '</strong> unidade(s) do item <strong>' + itemInserido + '</strong> registrada com sucesso!';
+            // Força sincronização para pegar o novo registro
+            await incrementalSync();
 
-            // Busca histórico atualizado do item no servidor
+            // Atualiza a tabela com dados reais do servidor
             google.script.run
               .withSuccessHandler(function(histResult) {
-                if (histResult.success && histResult.data) {
+                if (histResult.success && histResult.data && histResult.data.rows.length > 0) {
                   displayTable('estoqueResultTable', histResult.data);
-                } else {
-                  document.getElementById('estoqueResultTable').innerHTML = '<p>Nenhum histórico encontrado.</p>';
                 }
               })
-              .withFailureHandler(function(err) {
-                document.getElementById('estoqueResultTable').innerHTML = '<p>Erro ao carregar histórico.</p>';
-              })
-              .buscarProduto(itemInserido, null, null);
+              .getItemHistory(itemInserido);
 
-            // Esconde formulário e mostra resultados
-            document.getElementById('estoqueFormArea').style.display = 'none';
-            document.getElementById('estoqueResultArea').style.display = 'block';
-            resetEstoqueForm();
+            showSyncStatus('Salvo!', 'success');
+            setTimeout(() => hideSyncStatus(), 1500);
           } else {
+            showSyncStatus('Erro ao salvar', 'error');
             showMessage('estoqueMessage', result.message || 'Erro ao inserir estoque', 'error');
           }
         })
         .withFailureHandler(function(error) {
-          showLoading(false);
+          showSyncStatus('Erro: ' + error.message, 'error');
           showMessage('estoqueMessage', 'Erro: ' + error.message, 'error');
         })
         .processEstoqueWebApp(formData);
@@ -1544,11 +2481,188 @@
       document.getElementById('estoqueItem').focus();
     }
 
+    // ========== FUNÇÕES INSERIR NF (MÚLTIPLOS ITENS) ==========
+    let nfItemCounter = 0;
+
+    // Adicionar item na lista de NF
+    function adicionarItemNF() {
+      nfItemCounter++;
+      const container = document.getElementById('nfItensContainer');
+      const itemDiv = document.createElement('div');
+      itemDiv.id = 'nfItem-' + nfItemCounter;
+      itemDiv.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 8px; margin-bottom: 10px; padding: 10px; background: white; border-radius: 4px; align-items: end;';
+      itemDiv.innerHTML = `
+        <div class="form-group" style="margin-bottom: 0;">
+          <label style="font-size: 0.75rem;">Item *</label>
+          <input type="text" class="nf-item-nome" list="nfItemDatalist-${nfItemCounter}" required style="padding: 6px;" placeholder="Nome do item">
+          <datalist id="nfItemDatalist-${nfItemCounter}"></datalist>
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label style="font-size: 0.75rem;">Preço *</label>
+          <input type="number" class="nf-item-preco" step="0.01" min="0" required style="padding: 6px;" placeholder="0.00">
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label style="font-size: 0.75rem;">Lote</label>
+          <input type="text" class="nf-item-lote" style="padding: 6px;" placeholder="Lote">
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label style="font-size: 0.75rem;">Entrada *</label>
+          <input type="number" class="nf-item-entrada" step="0.01" min="0.01" required style="padding: 6px;" placeholder="Qtd">
+        </div>
+        <button type="button" class="btn btn-danger" onclick="removerItemNF(${nfItemCounter})" style="padding: 6px 10px; height: fit-content;">✕</button>
+      `;
+      container.appendChild(itemDiv);
+
+      // Popula datalist do item
+      const datalist = document.getElementById('nfItemDatalist-' + nfItemCounter);
+      if (autocompleteData && autocompleteData.items) {
+        autocompleteData.items.forEach(item => {
+          const option = document.createElement('option');
+          option.value = item;
+          datalist.appendChild(option);
+        });
+      }
+    }
+
+    // Remover item da lista de NF
+    function removerItemNF(id) {
+      const itemDiv = document.getElementById('nfItem-' + id);
+      if (itemDiv) {
+        itemDiv.remove();
+      }
+    }
+
+    // Limpar formulário NF
+    function limparFormNF() {
+      document.getElementById('nfNumero').value = '';
+      document.getElementById('nfPedido').value = '';
+      document.getElementById('nfUnidade').selectedIndex = 0;
+      document.getElementById('nfObs').selectedIndex = 0;
+      document.getElementById('nfItensContainer').innerHTML = '';
+      nfItemCounter = 0;
+      showMessage('nfMessage', '', '');
+    }
+
+    // Voltar para formulário NF após inserção
+    function voltarParaNF() {
+      document.getElementById('nfResultArea').style.display = 'none';
+      document.getElementById('nfFormArea').style.display = 'block';
+      limparFormNF();
+    }
+
+    // Processar inserção de NF com múltiplos itens
+    function handleInserirNF() {
+      // Validar campos globais
+      const nfNumero = document.getElementById('nfNumero').value.trim();
+      const nfPedido = document.getElementById('nfPedido').value.trim();
+      const nfUnidade = document.getElementById('nfUnidade').value;
+      const nfObs = document.getElementById('nfObs').value;
+
+      if (!nfNumero) {
+        showMessage('nfMessage', 'Informe o número da NF', 'error');
+        return;
+      }
+      if (!nfUnidade) {
+        showMessage('nfMessage', 'Selecione a unidade', 'error');
+        return;
+      }
+
+      // Coletar itens
+      const container = document.getElementById('nfItensContainer');
+      const itemDivs = container.querySelectorAll('[id^="nfItem-"]');
+
+      if (itemDivs.length === 0) {
+        showMessage('nfMessage', 'Adicione pelo menos um item', 'error');
+        return;
+      }
+
+      const itens = [];
+      let hasError = false;
+
+      itemDivs.forEach((div, index) => {
+        const nome = div.querySelector('.nf-item-nome').value.trim().toUpperCase();
+        const preco = parseFloat(div.querySelector('.nf-item-preco').value) || 0;
+        const lote = div.querySelector('.nf-item-lote').value.trim();
+        const entrada = parseFloat(div.querySelector('.nf-item-entrada').value) || 0;
+
+        if (!nome) {
+          showMessage('nfMessage', `Item ${index + 1}: Nome do item é obrigatório`, 'error');
+          hasError = true;
+          return;
+        }
+        if (preco <= 0) {
+          showMessage('nfMessage', `Item ${index + 1} (${nome}): Preço é obrigatório`, 'error');
+          hasError = true;
+          return;
+        }
+        if (entrada <= 0) {
+          showMessage('nfMessage', `Item ${index + 1} (${nome}): Entrada é obrigatória`, 'error');
+          hasError = true;
+          return;
+        }
+
+        // Concatena NF + Pedido + Lote
+        let nfConcatenado = nfNumero;
+        if (nfPedido) nfConcatenado += ' ' + nfPedido;
+        if (lote) nfConcatenado += ' ' + lote;
+
+        itens.push({
+          item: nome,
+          unidade: nfUnidade,
+          nf: nfConcatenado,
+          obs: nfObs,
+          entrada: entrada,
+          saida: 0,
+          valorUnitario: preco
+        });
+      });
+
+      if (hasError) return;
+
+      showMessage('nfMessage', 'Inserindo ' + itens.length + ' itens...', 'info');
+
+      // Envia para servidor
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            document.getElementById('nfFormArea').style.display = 'none';
+            document.getElementById('nfResultArea').style.display = 'block';
+            document.getElementById('nfResultMessage').innerHTML =
+              '<strong>' + itens.length + '</strong> item(ns) inserido(s) com sucesso na NF <strong>' + nfNumero + '</strong>';
+
+            // Atualiza cache e autocomplete
+            clearClientCache();
+            loadDashboardData();
+            loadAutocompleteData();
+
+            showMessage('nfMessage', '', '');
+          } else {
+            showMessage('nfMessage', result.message || 'Erro ao inserir itens', 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('nfMessage', 'Erro: ' + error.message, 'error');
+        })
+        .processMultipleEstoqueItems(itens);
+    }
+
     // Handle Inserir Grupo
     function handleInserirGrupo(event) {
       event.preventDefault();
 
-      const grupo = document.getElementById('grupoNome').value;
+      // Converte para maiúscula
+      const grupo = document.getElementById('grupoNome').value.toUpperCase().trim();
+
+      if (!grupo) {
+        showMessage('grupoMessage', 'Digite o nome do grupo', 'error');
+        return false;
+      }
+
+      // Verifica se grupo já existe
+      if (grupoJaExiste(grupo)) {
+        showMessage('grupoMessage', 'Este grupo já existe! Escolha outro nome.', 'error');
+        return false;
+      }
 
       showLoading(true);
 
@@ -1556,9 +2670,10 @@
         .withSuccessHandler(function(result) {
           showLoading(false);
           if (result.success) {
-            showMessage('grupoMessage', 'Grupo inserido com sucesso!', 'success');
+            showMessage('grupoMessage', 'Grupo "' + grupo + '" inserido com sucesso!', 'success');
             document.getElementById('grupoForm').reset();
             loadAutocompleteData();
+            atualizarListaGrupos(); // Atualiza a lista
           } else {
             showMessage('grupoMessage', result.message || 'Erro ao inserir grupo', 'error');
           }
@@ -1572,8 +2687,72 @@
       return false;
     }
 
-    // Handle Localizar Produto (SERVER-SIDE - dados completos direto da planilha)
-    function handleLocalizarProduto(event) {
+    // Verifica se grupo já existe na lista de autocomplete
+    function grupoJaExiste(grupo) {
+      if (!autocompleteData || !autocompleteData.groups) return false;
+      const grupoUpper = grupo.toUpperCase().trim();
+      return autocompleteData.groups.some(g => g.toUpperCase().trim() === grupoUpper);
+    }
+
+    // Valida em tempo real se grupo já existe
+    function validarGrupoDuplicado() {
+      const input = document.getElementById('grupoNome');
+      const validation = document.getElementById('grupoValidation');
+      const btn = document.getElementById('btnAdicionarGrupo');
+      const grupo = input.value.toUpperCase().trim();
+
+      if (!grupo) {
+        validation.style.display = 'none';
+        btn.disabled = false;
+        return;
+      }
+
+      if (grupoJaExiste(grupo)) {
+        validation.textContent = '⚠️ Este grupo já existe!';
+        validation.style.display = 'block';
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+      } else {
+        validation.style.display = 'none';
+        btn.disabled = false;
+        btn.style.opacity = '1';
+      }
+    }
+
+    // Atualiza a lista de grupos existentes na tela
+    function atualizarListaGrupos() {
+      const container = document.getElementById('listaGruposExistentes');
+      const contador = document.getElementById('totalGrupos');
+
+      if (!autocompleteData || !autocompleteData.groups || autocompleteData.groups.length === 0) {
+        container.innerHTML = '<p style="color: #999;">Nenhum grupo cadastrado.</p>';
+        contador.textContent = '0';
+        return;
+      }
+
+      // Ordena alfabeticamente
+      const gruposOrdenados = [...autocompleteData.groups].sort();
+
+      contador.textContent = gruposOrdenados.length;
+
+      let html = '<div style="display: flex; flex-wrap: wrap; gap: 8px;">';
+      gruposOrdenados.forEach(grupo => {
+        html += '<span style="background: #e3f2fd; color: #1565c0; padding: 4px 10px; border-radius: 4px; font-size: 0.85rem;">' + grupo + '</span>';
+      });
+      html += '</div>';
+
+      container.innerHTML = html;
+    }
+
+    // ========================================
+    // FUNÇÕES DE BUSCA - Localizar Produto
+    // ========================================
+
+    /**
+     * Busca Rápida - Usa índice em memória (INSTANTÂNEO)
+     * Mostra últimos 20 registros do item
+     */
+    function handleBuscaRapida(event) {
       event.preventDefault();
 
       const item = document.getElementById('localizarItem').value;
@@ -1583,19 +2762,77 @@
         return false;
       }
 
-      showMessage('localizarMessage', '🔍 Buscando...', 'info');
+      // Primeiro atualiza o índice do servidor (em background)
+      refreshHistoryIndexInBackground();
+
+      // Busca no índice local (instantâneo)
+      const localHistory = getItemHistoryFromIndex(item);
+
+      if (localHistory) {
+        const displayData = formatHistoryForDisplay(localHistory, 20);
+        if (displayData && displayData.rows.length > 0) {
+          // Mostra resumo do item
+          const infoHtml = '<div style="margin-bottom:10px;padding:10px;background:#e3f2fd;border-radius:4px;">' +
+            '<strong>📊 Resumo:</strong> ' +
+            'Saldo Atual: <strong>' + (localHistory.info.lastStock || '0') + '</strong> | ' +
+            'Última Atualização: <strong>' + (localHistory.info.lastDate || '-') + '</strong> | ' +
+            'Grupo: <strong>' + (localHistory.info.group || '-') + '</strong>' +
+            '<br><small style="color:#666;">⚡ Busca Rápida - Últimos ' + displayData.rows.length + ' registros (cache)</small>' +
+            '</div>';
+
+          document.getElementById('localizarTableContainer').innerHTML = infoHtml;
+          displayTable('localizarTableContainer', displayData);
+          document.getElementById('localizarResults').style.display = 'block';
+          document.getElementById('totalResults').textContent = displayData.rows.length + ' (últimos)';
+          showMessage('localizarMessage', '⚡ ' + displayData.rows.length + ' registros encontrados (instantâneo)', 'success');
+          return false;
+        }
+      }
+
+      // Se não encontrou no índice local, busca no servidor
+      showMessage('localizarMessage', '🔍 Item não encontrado no cache, buscando no servidor...', 'info');
+      buscarHistoricoCompleto(item);
+
+      return false;
+    }
+
+    /**
+     * Histórico Completo - Busca TODOS os registros do servidor
+     */
+    function handleHistoricoCompleto() {
+      const item = document.getElementById('localizarItem').value;
+
+      if (!item || item.trim() === '') {
+        showMessage('localizarMessage', 'Por favor, informe um item para buscar', 'warning');
+        return;
+      }
+
+      buscarHistoricoCompleto(item);
+    }
+
+    /**
+     * Busca histórico completo no servidor (todos os registros)
+     */
+    function buscarHistoricoCompleto(item) {
+      showMessage('localizarMessage', '📜 Buscando histórico completo no servidor...', 'info');
       document.getElementById('localizarResults').style.display = 'none';
 
-      // Busca completa no servidor (todos os registros da planilha)
       google.script.run
         .withSuccessHandler(function(result) {
-          if (result.success && result.data) {
+          if (result.success && result.data && result.data.rows.length > 0) {
+            // Mostra resumo
+            const infoHtml = '<div style="margin-bottom:10px;padding:10px;background:#e8f5e9;border-radius:4px;">' +
+              '<strong>📜 Histórico Completo:</strong> ' + result.data.rows.length + ' registros encontrados' +
+              '<br><small style="color:#666;">Dados carregados diretamente da planilha</small>' +
+              '</div>';
+
+            document.getElementById('localizarTableContainer').innerHTML = infoHtml;
             displayTable('localizarTableContainer', result.data);
             document.getElementById('localizarResults').style.display = 'block';
             document.getElementById('totalResults').textContent = result.data.rows.length;
-            showMessage('localizarMessage', '✅ ' + result.data.rows.length + ' registros encontrados', 'success');
+            showMessage('localizarMessage', '✅ ' + result.data.rows.length + ' registros encontrados (histórico completo)', 'success');
           } else {
-            showMessage('localizarMessage', result.message || 'Nenhum resultado encontrado', 'warning');
+            showMessage('localizarMessage', result.message || 'Nenhum registro encontrado para este item', 'warning');
             document.getElementById('localizarResults').style.display = 'none';
           }
         })
@@ -1603,8 +2840,6 @@
           showMessage('localizarMessage', 'Erro ao buscar: ' + error.message, 'error');
         })
         .buscarProduto(item, null, null);
-
-      return false;
     }
 
     // Show all products (CLIENT-SIDE - INSTANT!)
@@ -1650,13 +2885,13 @@
       }
     }
 
-    // Handle Listagem Estoque
+    // Handle Listagem Estoque (legado - não mais usado)
     function handleListagemEstoque(event) {
       event.preventDefault();
 
       const formData = {
         group: document.getElementById('listagemGroup').value,
-        item: document.getElementById('listagemItem').value
+        item: document.getElementById('listagemItem') ? document.getElementById('listagemItem').value : ''
       };
 
       google.script.run
@@ -1676,6 +2911,168 @@
       return false;
     }
 
+    // Handle Busca por Grupo - Retorna último lançamento de cada item do grupo
+    function handleBuscaPorGrupo() {
+      const grupo = document.getElementById('listagemGroup').value;
+
+      if (!grupo) {
+        showMessage('listagemMessage', 'Selecione um grupo para buscar', 'warning');
+        return;
+      }
+
+      // Mostra loading
+      showMessage('listagemMessage', 'Buscando itens do grupo...', 'info');
+      document.getElementById('listagemResults').style.display = 'none';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success && result.data) {
+            displayTable('listagemTableContainer', result.data);
+            document.getElementById('listagemTotal').textContent = result.totalItens || result.data.rows.length;
+            document.getElementById('listagemResults').style.display = 'block';
+            showMessage('listagemMessage', 'Encontrados ' + (result.totalItens || result.data.rows.length) + ' itens no grupo "' + grupo + '"', 'success');
+          } else {
+            showMessage('listagemMessage', result.message || 'Nenhum resultado encontrado', 'warning');
+            document.getElementById('listagemResults').style.display = 'none';
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('listagemMessage', 'Erro: ' + error.message, 'error');
+          document.getElementById('listagemResults').style.display = 'none';
+        })
+        .buscarUltimoLancamentoPorGrupo(grupo);
+    }
+
+    // Adicionar novo campo de item na Listagem de Estoque
+    function adicionarItemListagem() {
+      const container = document.getElementById('listagemItensContainer');
+      const newRow = document.createElement('div');
+      newRow.className = 'listagem-item-row';
+      newRow.style.cssText = 'display: flex; gap: 8px; margin-bottom: 8px; align-items: center;';
+      newRow.innerHTML = `
+        <input type="text" class="listagem-item-input" list="listagemItemDatalist" placeholder="Digite o nome do item..." style="flex: 1; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
+        <button type="button" class="btn-remove-item" onclick="removerItemListagem(this)" style="background: #f44336; color: white; border: none; border-radius: 4px; width: 36px; height: 36px; cursor: pointer; font-size: 1.2rem;" title="Remover item">×</button>
+      `;
+      container.appendChild(newRow);
+
+      // Foca no novo input
+      newRow.querySelector('input').focus();
+    }
+
+    // Remover campo de item da Listagem de Estoque
+    function removerItemListagem(button) {
+      const container = document.getElementById('listagemItensContainer');
+      const rows = container.querySelectorAll('.listagem-item-row');
+
+      // Mantém pelo menos um campo
+      if (rows.length <= 1) {
+        // Apenas limpa o campo em vez de remover
+        rows[0].querySelector('input').value = '';
+        return;
+      }
+
+      // Remove a linha do botão clicado
+      button.closest('.listagem-item-row').remove();
+    }
+
+    // Handle Busca por Lista de Itens - Retorna último lançamento de cada item da lista
+    function handleBuscaPorListaItens() {
+      // Coleta todos os valores dos inputs dinâmicos
+      const inputs = document.querySelectorAll('#listagemItensContainer .listagem-item-input');
+      const itens = [];
+
+      inputs.forEach(input => {
+        const valor = input.value.trim();
+        if (valor) {
+          itens.push(valor);
+        }
+      });
+
+      if (itens.length === 0) {
+        showMessage('listagemMessage', 'Selecione pelo menos um item para buscar', 'warning');
+        return;
+      }
+
+      // Junta os itens em uma string separada por vírgula
+      const listaItens = itens.join(',');
+
+      // Mostra loading
+      showMessage('listagemMessage', 'Buscando ' + itens.length + ' item(ns)...', 'info');
+      document.getElementById('listagemResults').style.display = 'none';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success && result.data) {
+            displayTable('listagemTableContainer', result.data);
+            document.getElementById('listagemTotal').textContent = result.totalItens || result.data.rows.length;
+            document.getElementById('listagemResults').style.display = 'block';
+
+            let msg = 'Encontrados ' + (result.totalItens || result.data.rows.length) + ' itens';
+
+            // Mostra itens não encontrados, se houver
+            if (result.itensNaoEncontrados && result.itensNaoEncontrados.length > 0) {
+              msg += '. Não encontrados: ' + result.itensNaoEncontrados.join(', ');
+              showMessage('listagemMessage', msg, 'warning');
+            } else {
+              showMessage('listagemMessage', msg, 'success');
+            }
+          } else {
+            showMessage('listagemMessage', result.message || 'Nenhum resultado encontrado', 'warning');
+            document.getElementById('listagemResults').style.display = 'none';
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('listagemMessage', 'Erro: ' + error.message, 'error');
+          document.getElementById('listagemResults').style.display = 'none';
+        })
+        .buscarUltimoLancamentoPorItens(listaItens);
+    }
+
+    // Imprimir Listagem de Estoque
+    function printListagem() {
+      const resultsDiv = document.getElementById('listagemResults');
+      if (!resultsDiv || resultsDiv.style.display === 'none') {
+        alert('Nenhum resultado para imprimir');
+        return;
+      }
+
+      const printWindow = window.open('', '_blank');
+      const tableHTML = document.getElementById('listagemTableContainer').innerHTML;
+
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Listagem de Estoque</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; }
+            h1 { text-align: center; margin-bottom: 20px; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            th, td { border: 1px solid #333; padding: 5px 8px; text-align: left; }
+            th { background-color: #4a6da7; color: white; }
+            tr:nth-child(even) { background-color: #f2f2f2; }
+            .row-red { background-color: #ffcccc !important; }
+            .row-yellow { background-color: #ffffcc !important; }
+            .info { text-align: center; margin-bottom: 10px; color: #666; }
+            @media print {
+              body { padding: 0; }
+              table { font-size: 9px; }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>Listagem de Estoque</h1>
+          <p class="info">Total: ${document.getElementById('listagemTotal').textContent} itens - Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+          ${tableHTML}
+        </body>
+        </html>
+      `);
+
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => printWindow.print(), 500);
+    }
+
     // Handle Relatório Estoque
     function handleRelatorioEstoque(event) {
       event.preventDefault();
@@ -1683,11 +3080,16 @@
       const dataInicio = document.getElementById('relatorioDataInicio').value;
       const dataFim = document.getElementById('relatorioDataFim').value;
 
+      showMessage('relatorioMessage', 'Buscando lançamentos...', 'info');
+      document.getElementById('relatorioResults').style.display = 'none';
+
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success && result.data) {
             displayTable('relatorioTableContainer', result.data);
+            document.getElementById('relatorioTotal').textContent = result.data.rows.length;
             document.getElementById('relatorioResults').style.display = 'block';
+            showMessage('relatorioMessage', 'Encontrados ' + result.data.rows.length + ' lançamentos no período', 'success');
           } else {
             showMessage('relatorioMessage', result.message || 'Nenhum resultado encontrado', 'warning');
           }
@@ -1700,7 +3102,47 @@
       return false;
     }
 
-    // Handle Relatório por Grupo
+    // Imprimir Relatório de Estoque
+    function printRelatorio() {
+      const resultsDiv = document.getElementById('relatorioResults');
+      if (!resultsDiv || resultsDiv.style.display === 'none') {
+        alert('Nenhum resultado para imprimir');
+        return;
+      }
+      const dataInicio = document.getElementById('relatorioDataInicio').value;
+      const dataFim = document.getElementById('relatorioDataFim').value;
+      const printWindow = window.open('', '_blank');
+      const tableHTML = document.getElementById('relatorioTableContainer').innerHTML;
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Relatório de Estoque</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; }
+            h1 { text-align: center; margin-bottom: 20px; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            th, td { border: 1px solid #333; padding: 5px 8px; text-align: left; }
+            th { background-color: #4a6da7; color: white; }
+            tr:nth-child(even) { background-color: #f2f2f2; }
+            .row-red { background-color: #ffcccc !important; }
+            .row-yellow { background-color: #ffffcc !important; }
+            .info { text-align: center; margin-bottom: 10px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <h1>Relatório de Estoque</h1>
+          <p class="info">Período: ${dataInicio} a ${dataFim} | Total: ${document.getElementById('relatorioTotal').textContent} lançamentos | Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+          ${tableHTML}
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => printWindow.print(), 500);
+    }
+
+    // Handle Relatório por Grupo (mantido para compatibilidade)
     function handleRelatorioPorGrupo(event) {
       event.preventDefault();
 
@@ -1746,13 +3188,66 @@
       return false;
     }
 
-    // Handle Estoque 3 Meses
+    // ========================================
+    // ESTOQUE 3 MESES - Funções
+    // ========================================
+
+    // Adicionar campo de item no Estoque 3 Meses
+    function adicionarItemEstoque3M() {
+      const container = document.getElementById('estoque3MesesItensContainer');
+      const newRow = document.createElement('div');
+      newRow.className = 'estoque3m-item-row';
+      newRow.style.cssText = 'display: flex; gap: 8px; margin-bottom: 8px; align-items: center;';
+      newRow.innerHTML = `
+        <input type="text" class="estoque3m-item-input" list="estoque3MesesItemDatalist" placeholder="Digite o nome do item..." style="flex: 1; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
+        <button type="button" onclick="removerItemEstoque3M(this)" style="background: #f44336; color: white; border: none; border-radius: 4px; width: 36px; height: 36px; cursor: pointer; font-size: 1.2rem;" title="Remover item">×</button>
+      `;
+      container.appendChild(newRow);
+      newRow.querySelector('input').focus();
+    }
+
+    // Remover campo de item do Estoque 3 Meses
+    function removerItemEstoque3M(button) {
+      const container = document.getElementById('estoque3MesesItensContainer');
+      const rows = container.querySelectorAll('.estoque3m-item-row');
+      if (rows.length <= 1) {
+        rows[0].querySelector('input').value = '';
+        return;
+      }
+      button.closest('.estoque3m-item-row').remove();
+    }
+
+    // Handle Estoque 3 Meses - Calcula total de saídas por item
     function handleEstoque3Meses() {
+      const inputs = document.querySelectorAll('#estoque3MesesItensContainer .estoque3m-item-input');
+      const itens = [];
+      inputs.forEach(input => {
+        const valor = input.value.trim();
+        if (valor) itens.push(valor);
+      });
+
+      if (itens.length === 0) {
+        showMessage('estoque3MesesMessage', 'Selecione pelo menos um item', 'warning');
+        return;
+      }
+
+      showMessage('estoque3MesesMessage', 'Calculando saídas dos últimos 3 meses...', 'info');
+      document.getElementById('estoque3MesesResults').style.display = 'none';
+
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success && result.data) {
             displayTable('estoque3MesesTableContainer', result.data);
+            document.getElementById('estoque3MesesTotal').textContent = result.totalItens || result.data.rows.length;
             document.getElementById('estoque3MesesResults').style.display = 'block';
+
+            let msg = 'Calculado para ' + (result.totalItens || result.data.rows.length) + ' itens';
+            if (result.itensNaoEncontrados && result.itensNaoEncontrados.length > 0) {
+              msg += '. Não encontrados: ' + result.itensNaoEncontrados.join(', ');
+              showMessage('estoque3MesesMessage', msg, 'warning');
+            } else {
+              showMessage('estoque3MesesMessage', msg, 'success');
+            }
           } else {
             showMessage('estoque3MesesMessage', result.message || 'Nenhum resultado encontrado', 'warning');
           }
@@ -1760,106 +3255,168 @@
         .withFailureHandler(function(error) {
           showMessage('estoque3MesesMessage', 'Erro: ' + error.message, 'error');
         })
-        .getEstoque3Meses();
+        .calcularEstoque3Meses(itens.join(','));
     }
 
-    // Handle Cores Desatualizadas
-    function handleCoresDesatualizadas(event) {
-      event.preventDefault();
+    // Imprimir Estoque 3 Meses
+    function printEstoque3Meses() {
+      const resultsDiv = document.getElementById('estoque3MesesResults');
+      if (!resultsDiv || resultsDiv.style.display === 'none') {
+        alert('Nenhum resultado para imprimir');
+        return;
+      }
+      const printWindow = window.open('', '_blank');
+      const tableHTML = document.getElementById('estoque3MesesTableContainer').innerHTML;
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Consumo em 3 Meses - Saídas</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; }
+            h1 { text-align: center; margin-bottom: 20px; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            th, td { border: 1px solid #333; padding: 5px 8px; text-align: left; }
+            th { background-color: #e65100; color: white; }
+            tr:nth-child(even) { background-color: #f2f2f2; }
+            .info { text-align: center; margin-bottom: 10px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <h1>Total de Saídas - Últimos 3 Meses</h1>
+          <p class="info">Total: ${document.getElementById('estoque3MesesTotal').textContent} itens - Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+          ${tableHTML}
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => printWindow.print(), 500);
+    }
 
-      const formData = {
-        mesesAtras: document.getElementById('coresMesesAtras').value,
-        observacao: document.getElementById('coresObservacao').value
-      };
+    // ========================================
+    // CORES DESATUALIZADAS - Funções
+    // ========================================
+
+    // Handle Cores Desatualizadas - 15 dias sem ATUALIZAÇÃO
+    function handleCoresDesatualizadas() {
+      showMessage('coresMessage', 'Buscando cores desatualizadas...', 'info');
+      document.getElementById('coresResults').style.display = 'none';
 
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success && result.data) {
             displayTable('coresTableContainer', result.data);
+            document.getElementById('coresTotal').textContent = result.totalItens || result.data.rows.length;
             document.getElementById('coresResults').style.display = 'block';
+            showMessage('coresMessage', 'Encontrados ' + (result.totalItens || result.data.rows.length) + ' itens desatualizados', 'success');
           } else {
-            showMessage('coresMessage', result.message || 'Nenhum resultado encontrado', 'warning');
+            showMessage('coresMessage', result.message || 'Nenhum item desatualizado encontrado', 'success');
           }
         })
         .withFailureHandler(function(error) {
           showMessage('coresMessage', 'Erro: ' + error.message, 'error');
         })
-        .gerarListagemCoresDesatualizadasWebApp(formData);
-
-      return false;
+        .buscarCoresDesatualizadas();
     }
 
-    // Handle Atualizar Fio
-    function handleAtualizarFio() {
-      if (!confirm('Deseja realmente atualizar a compra de fio e histórico?')) return;
+    // Imprimir Cores Desatualizadas
+    function printCores() {
+      const resultsDiv = document.getElementById('coresResults');
+      if (!resultsDiv || resultsDiv.style.display === 'none') {
+        alert('Nenhum resultado para imprimir');
+        return;
+      }
+      const printWindow = window.open('', '_blank');
+      const tableHTML = document.getElementById('coresTableContainer').innerHTML;
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Cores Desatualizadas</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; }
+            h1 { text-align: center; margin-bottom: 20px; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            th, td { border: 1px solid #333; padding: 5px 8px; text-align: left; }
+            th { background-color: #7b1fa2; color: white; }
+            tr:nth-child(even) { background-color: #f2f2f2; }
+            .info { text-align: center; margin-bottom: 10px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <h1>Cores Desatualizadas (Mais de 15 dias)</h1>
+          <p class="info">Total: ${document.getElementById('coresTotal').textContent} itens - Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+          ${tableHTML}
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => printWindow.print(), 500);
+    }
+
+    // ========================================
+    // APAGAR ÚLTIMA LINHA - Funções
+    // ========================================
+
+    // Carregar últimas 20 entradas
+    function carregarUltimasEntradas() {
+      showMessage('apagarLinhaMessage', 'Carregando últimas entradas...', 'info');
+      document.getElementById('ultimasEntradasArea').style.display = 'none';
 
       google.script.run
         .withSuccessHandler(function(result) {
-          if (result.success) {
-            showMessage('atualizarFioMessage', 'Compra de fio atualizada com sucesso!', 'success');
+          if (result.success && result.data) {
+            // Exibe informação da última entrada
+            const ultimaRow = result.data.rows[0];
+            if (ultimaRow) {
+              document.getElementById('ultimaEntradaInfo').innerHTML = `
+                <strong>Última entrada:</strong><br>
+                <strong>Item:</strong> ${ultimaRow[1] || '-'} |
+                <strong>Grupo:</strong> ${ultimaRow[0] || '-'} |
+                <strong>Data:</strong> ${ultimaRow[3] || '-'} |
+                <strong>Entrada:</strong> ${ultimaRow[7] || '0'} |
+                <strong>Saída:</strong> ${ultimaRow[8] || '0'} |
+                <strong>Saldo:</strong> ${ultimaRow[9] || '-'}
+              `;
+            }
+            displayTable('ultimasEntradasTableContainer', result.data);
+            document.getElementById('ultimasEntradasArea').style.display = 'block';
+            showMessage('apagarLinhaMessage', '', '');
           } else {
-            showMessage('atualizarFioMessage', result.message || 'Erro ao atualizar', 'error');
+            showMessage('apagarLinhaMessage', result.message || 'Nenhuma entrada encontrada', 'warning');
           }
         })
         .withFailureHandler(function(error) {
-          showMessage('atualizarFioMessage', 'Erro: ' + error.message, 'error');
+          showMessage('apagarLinhaMessage', 'Erro: ' + error.message, 'error');
         })
-        .atualizarCompraDeFioEHistoricoWebApp();
+        .getUltimas20Entradas();
     }
 
-    // Handle Atualizar Embarcado
-    function handleAtualizarEmbarcado() {
-      if (!confirm('Deseja realmente atualizar o total embarcado?')) return;
+    // Confirmar exclusão da última linha
+    function confirmarApagarLinha() {
+      if (!confirm('⚠️ ATENÇÃO FINAL!\n\nVocê está prestes a APAGAR PERMANENTEMENTE a última entrada.\n\nEsta ação NÃO PODE SER DESFEITA!\n\nTem certeza que deseja continuar?')) return;
+
+      showMessage('apagarLinhaMessage', 'Apagando última entrada...', 'info');
 
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
-            showMessage('atualizarEmbarcadoMessage', 'Total embarcado atualizado com sucesso!', 'success');
-          } else {
-            showMessage('atualizarEmbarcadoMessage', result.message || 'Erro ao atualizar', 'error');
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('atualizarEmbarcadoMessage', 'Erro: ' + error.message, 'error');
-        })
-        .atualizarTotalEmbarcadoWebApp();
-    }
-
-    // Handle Apagar Linha
-    function handleApagarLinha() {
-      if (!confirm('⚠️ ATENÇÃO!\n\nEsta ação irá apagar a última linha da planilha ESTOQUE.\n\nEsta ação NÃO PODE SER DESFEITA!\n\nDeseja continuar?')) return;
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success) {
-            showMessage('apagarLinhaMessage', 'Última linha apagada com sucesso!', 'success');
+            showMessage('apagarLinhaMessage', 'Última entrada apagada com sucesso!', 'success');
+            document.getElementById('ultimasEntradasArea').style.display = 'none';
             loadDashboardData();
-            // loadAllEstoqueData(true); // REMOVIDO - busca direto da planilha
-            loadAutocompleteData(); // Atualiza autocomplete
+            loadAutocompleteData();
+            // Recarrega a lista após 1 segundo
+            setTimeout(carregarUltimasEntradas, 1000);
           } else {
-            showMessage('apagarLinhaMessage', result.message || 'Erro ao apagar linha', 'error');
+            showMessage('apagarLinhaMessage', result.message || 'Erro ao apagar', 'error');
           }
         })
         .withFailureHandler(function(error) {
           showMessage('apagarLinhaMessage', 'Erro: ' + error.message, 'error');
         })
         .apagarUltimaLinhaWebApp();
-    }
-
-    // Handle Limpar Filtro
-    function handleLimparFiltro() {
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success) {
-            showMessage('limparFiltroMessage', 'Filtro removido com sucesso!', 'success');
-          } else {
-            showMessage('limparFiltroMessage', result.message || 'Erro ao remover filtro', 'error');
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('limparFiltroMessage', 'Erro: ' + error.message, 'error');
-        })
-        .limparFiltroEstoqueWebApp();
     }
 
     // Display table from data with row colors
