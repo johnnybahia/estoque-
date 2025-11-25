@@ -641,6 +641,197 @@ function processMultipleEstoqueItemsWithGroup(itens) {
 }
 
 /**
+ * processMultipleEstoqueItemsWithSaldos: Processa múltiplos itens e retorna os saldos
+ * Similar ao processMultipleEstoqueItemsWithGroup, mas retorna os saldos anteriores e novos
+ * @param {Array} itens - Array de objetos com {item, unidade, nf, obs, entrada, saida, valorUnitario, grupo}
+ * @returns {Object} - {success, message, itensProcessados: [{item, grupo, entrada, saida, saldoAnterior, novoSaldo}]}
+ */
+function processMultipleEstoqueItemsWithSaldos(itens) {
+  try {
+    if (!itens || itens.length === 0) {
+      return { success: false, message: "Nenhum item para processar" };
+    }
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var now = new Date();
+    var user = getLoggedUser();
+    var processados = 0;
+    var erros = [];
+    var itensProcessados = [];
+
+    PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
+
+    for (var i = 0; i < itens.length; i++) {
+      var itemData = itens[i];
+
+      try {
+        var nextRow = sheetEstoque.getLastRow() + 1;
+
+        // Se o cliente enviou grupo, usa esse; senão, busca na base
+        var grupoItem = '';
+        if (itemData.grupo && itemData.grupo.trim() !== '') {
+          grupoItem = itemData.grupo.trim();
+        } else {
+          grupoItem = getItemGroup(itemData.item) || '';
+        }
+
+        // Recupera último registro para cálculo de saldo
+        var lastReg = getLastRegistration(itemData.item, nextRow);
+        var previousSaldo = parseFloat(lastReg.lastStock) || 0;
+        var entrada = parseFloat(itemData.entrada) || 0;
+        var saida = parseFloat(itemData.saida) || 0;
+        var newSaldo = previousSaldo + entrada - saida;
+
+        var rowData = [
+          grupoItem,                    // A: Grupo
+          itemData.item,                // B: Item
+          itemData.unidade || '',       // C: Unidade de Medida
+          now,                          // D: Data
+          itemData.nf || '',            // E: NF
+          itemData.obs || '',           // F: Obs
+          previousSaldo,                // G: Saldo Anterior
+          entrada,                      // H: Entrada
+          saida,                        // I: Saída
+          newSaldo,                     // J: Saldo
+          parseFloat(itemData.valorUnitario) || 0,  // K: Valor Unitário
+          now,                          // L: Alterado Em
+          user                          // M: Alterado Por
+        ];
+
+        sheetEstoque.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
+
+        var lastColumn = sheetEstoque.getLastColumn();
+        var itemWarning = null;
+
+        // Verifica se passou mais de 20 dias desde a última data de registro
+        if (lastReg.lastDate) {
+          var lastDate = new Date(lastReg.lastDate);
+          var diffDays = (now.getTime() - lastDate.getTime()) / (1000 * 3600 * 24);
+          if (diffDays > 20) {
+            // Verifica obs por palavras-chave
+            var textoObs = itemData.obs ? itemData.obs.toString().toLowerCase() : "";
+            var temKeyword = /acerto|atualiza[cç][ãa]o/.test(textoObs);
+            // Se não conter 'acerto' ou 'atualização', pinta de vermelho
+            if (!temKeyword) {
+              sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("red");
+              itemWarning = "DESATUALIZADO (+20 dias)";
+            }
+          }
+        }
+
+        // Verifica se houve ENTRADA de estoque - marca amarelo (sobrescreve vermelho se for entrada)
+        if (entrada > 0) {
+          sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("yellow");
+          if (!itemWarning) itemWarning = "ENTRADA - Atualizar estoque";
+        }
+
+        // Adiciona ao array de itens processados com os saldos
+        itensProcessados.push({
+          item: itemData.item,
+          grupo: grupoItem,
+          unidade: itemData.unidade,
+          entrada: entrada,
+          saida: saida,
+          saldoAnterior: previousSaldo,
+          novoSaldo: newSaldo,
+          aviso: itemWarning
+        });
+
+        processados++;
+      } catch (itemError) {
+        erros.push("Item " + (i + 1) + " (" + itemData.item + "): " + itemError.message);
+      }
+    }
+
+    PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
+
+    // Invalida caches
+    invalidateCache();
+    invalidateCacheOpt();
+    backupEstoqueData();
+
+    if (erros.length > 0) {
+      return {
+        success: processados > 0,
+        message: "Processados: " + processados + "/" + itens.length + ". Erros: " + erros.join("; "),
+        itensProcessados: itensProcessados
+      };
+    }
+
+    return {
+      success: true,
+      message: processados + " item(ns) inserido(s) com sucesso!",
+      itensProcessados: itensProcessados
+    };
+  } catch (error) {
+    PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
+    Logger.log("Erro processMultipleEstoqueItemsWithSaldos: " + error);
+    return { success: false, message: "Erro ao processar itens: " + error.message };
+  }
+}
+
+/**
+ * getMultipleSaldos: Busca os saldos atuais de múltiplos itens de uma vez
+ * Usa a mesma lógica de getLastRegistration para garantir consistência
+ * @param {Array} itensNomes - Array com os nomes dos itens
+ * @returns {Object} - Objeto com { "ITEM1": saldo1, "ITEM2": saldo2, ... }
+ */
+function getMultipleSaldos(itensNomes) {
+  try {
+    if (!itensNomes || itensNomes.length === 0) {
+      return {};
+    }
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var lastRow = sheetEstoque.getLastRow();
+
+    // Inicializa resultado com saldos 0
+    var result = {};
+    itensNomes.forEach(function(item) {
+      result[item.toString().trim().toUpperCase()] = 0;
+    });
+
+    if (lastRow < 2) {
+      return result;
+    }
+
+    // USA getDisplayValues() para forçar conversão para texto (mesma lógica de getLastRegistration)
+    // Lê colunas B (Item) e J (Saldo) - posições 2 a 10
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 10).getDisplayValues();
+
+    // Cria mapa de itens para busca com correspondência EXATA
+    var itensParaBuscar = {};
+    itensNomes.forEach(function(item) {
+      var itemUpper = item.toString().trim().toUpperCase();
+      itensParaBuscar[itemUpper] = true;
+    });
+
+    // Percorre de trás para frente para pegar o último saldo de cada item
+    for (var i = data.length - 1; i >= 0; i--) {
+      var itemNome = data[i][1]; // Coluna B (Item)
+      if (!itemNome || itemNome.toString().trim() === '') continue;
+
+      var itemNomeUpper = itemNome.toString().trim().toUpperCase();
+
+      // CORRESPONDÊNCIA EXATA: verifica se o item em maiúsculas é exatamente igual
+      if (itensParaBuscar.hasOwnProperty(itemNomeUpper) && result[itemNomeUpper] === 0) {
+        // Coluna J (Saldo) está no índice 9
+        var saldoStr = data[i][9];
+        var saldo = parseFloat(saldoStr.toString().replace(',', '.')) || 0;
+        result[itemNomeUpper] = saldo;
+      }
+    }
+
+    return result;
+  } catch (e) {
+    Logger.log("Erro getMultipleSaldos: " + e);
+    return {};
+  }
+}
+
+/**
  * getItemGroup: Busca o grupo de um item existente
  */
 function getItemGroup(itemName) {
