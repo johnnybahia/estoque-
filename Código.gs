@@ -990,8 +990,8 @@ function getLastRegistration(item, currentRow) {
   Logger.log("Usando getDisplayValues() para forçar formato de TEXTO");
 
   var result = { lastDate: null, lastStock: 0, lastGroup: null };
-  var itemNormalized = normalize(item);
-  Logger.log("Item normalizado: '" + itemNormalized + "'");
+  var itemUpper = item.toString().trim().toUpperCase();
+  Logger.log("Item buscado (maiúsculas): '" + itemUpper + "'");
 
   var encontrados = 0;
   for (var i = data.length - 1; i >= 0; i--) {
@@ -1000,9 +1000,10 @@ function getLastRegistration(item, currentRow) {
 
     var currentItem = data[i][1]; // Coluna B (Item) - agora em formato TEXTO
     if (currentItem && currentItem.toString().trim() !== "") {
-      var currentItemNormalized = normalize(currentItem);
+      var currentItemUpper = currentItem.toString().trim().toUpperCase();
 
-      if (currentItemNormalized === itemNormalized) {
+      // CORRESPONDÊNCIA EXATA: compara strings em maiúsculas
+      if (currentItemUpper === itemUpper) {
         encontrados++;
         result.lastGroup = data[i][0];  // Coluna A (Grupo)
         result.lastDate = data[i][3];   // Coluna D (Data) - como texto
@@ -1012,6 +1013,7 @@ function getLastRegistration(item, currentRow) {
         Logger.log("  Data: " + result.lastDate);
         Logger.log("  Estoque: " + result.lastStock);
         Logger.log("  Item raw: '" + currentItem + "'");
+        Logger.log("  Correspondência EXATA com: '" + itemUpper + "'");
         break;
       }
     }
@@ -2479,8 +2481,8 @@ function getLastRegistration(item, currentRow) {
   Logger.log("Usando getDisplayValues() para forçar formato de TEXTO");
 
   var result = { lastDate: null, lastStock: 0, lastGroup: null };
-  var itemNormalized = normalize(item);
-  Logger.log("Item normalizado: '" + itemNormalized + "'");
+  var itemUpper = item.toString().trim().toUpperCase();
+  Logger.log("Item buscado (maiúsculas): '" + itemUpper + "'");
 
   var encontrados = 0;
   for (var i = data.length - 1; i >= 0; i--) {
@@ -2489,9 +2491,10 @@ function getLastRegistration(item, currentRow) {
 
     var currentItem = data[i][1]; // Coluna B (Item) - agora em formato TEXTO
     if (currentItem && currentItem.toString().trim() !== "") {
-      var currentItemNormalized = normalize(currentItem);
+      var currentItemUpper = currentItem.toString().trim().toUpperCase();
 
-      if (currentItemNormalized === itemNormalized) {
+      // CORRESPONDÊNCIA EXATA: compara strings em maiúsculas
+      if (currentItemUpper === itemUpper) {
         encontrados++;
         result.lastGroup = data[i][0];  // Coluna A (Grupo)
         result.lastDate = data[i][3];   // Coluna D (Data) - como texto
@@ -2501,6 +2504,7 @@ function getLastRegistration(item, currentRow) {
         Logger.log("  Data: " + result.lastDate);
         Logger.log("  Estoque: " + result.lastStock);
         Logger.log("  Item raw: '" + currentItem + "'");
+        Logger.log("  Correspondência EXATA com: '" + itemUpper + "'");
         break;
       }
     }
@@ -3962,12 +3966,12 @@ function buscarProduto(item, dataInicio, dataFim) {
     var dataValues = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getValues(); // Para pegar datas como Date
     var backgrounds = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getBackgrounds();
     var results = [];
-    var itemNormalized = normalize(item);
+    var itemUpper = item.toString().trim().toUpperCase();
 
-    // Filtra por item e data (se fornecida)
+    // Filtra por item e data (se fornecida) - CORRESPONDÊNCIA EXATA
     for (var i = 0; i < data.length; i++) {
-      var currentItem = normalize(data[i][1]);
-      if (currentItem.indexOf(itemNormalized) >= 0) {
+      var currentItemUpper = data[i][1].toString().trim().toUpperCase();
+      if (currentItemUpper === itemUpper) {
         // Pega a data como objeto Date (não string) - Coluna D (índice 3)
         var dataMovimento = dataValues[i][3];
 
