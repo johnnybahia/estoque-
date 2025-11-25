@@ -760,6 +760,71 @@
     .grupo-field-novo.show {
       display: block;
     }
+    /* Estilos do Modal de Confirmação Lote */
+    .confirm-header-row-lote {
+      display: grid;
+      grid-template-columns: 40px 2fr 80px 80px 100px 60px;
+      gap: 10px;
+      padding: 10px 12px;
+      background: var(--primary-color);
+      color: white;
+      font-weight: 600;
+      font-size: 0.85rem;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+    .confirm-item-row-lote {
+      display: grid;
+      grid-template-columns: 40px 2fr 80px 80px 100px 60px;
+      gap: 10px;
+      padding: 12px;
+      border-bottom: 1px solid #eee;
+      align-items: center;
+      background: #fafafa;
+      margin-bottom: 5px;
+      border-radius: 4px;
+    }
+    .confirm-item-row-lote.item-novo {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+    }
+    .confirm-item-row-lote .item-index {
+      font-weight: bold;
+      color: #666;
+      text-align: center;
+    }
+    .confirm-item-row-lote .item-nome {
+      font-weight: 600;
+    }
+    .confirm-item-row-lote .btn-ok-item {
+      background: #28a745;
+      color: white;
+      border: none;
+      padding: 8px 15px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .confirm-item-row-lote .btn-ok-item:hover {
+      background: #218838;
+    }
+    .confirm-item-row-lote .btn-ok-item.confirmed {
+      background: #6c757d;
+    }
+    .confirm-item-row-lote .btn-ok-item.confirmed::after {
+      content: ' ✓';
+    }
+    /* Item do Lote */
+    .lote-item-row {
+      display: grid;
+      grid-template-columns: 2fr 1fr auto;
+      gap: 8px;
+      margin-bottom: 10px;
+      padding: 10px;
+      background: white;
+      border-radius: 4px;
+      align-items: end;
+    }
   </style>
 </head>
 <body>
@@ -914,6 +979,7 @@
                 <div class="btn-group" style="margin-top: 10px;">
                   <button type="submit" class="btn btn-success">✓ Confirmar</button>
                   <button type="button" class="btn btn-warning" onclick="resetEstoqueForm()">↻ Limpar</button>
+                  <button type="button" class="btn btn-primary" onclick="abrirLancamentoLote()" title="Inserir múltiplos itens de uma vez">📦 Movimentação em Lote</button>
                 </div>
               </form>
 
@@ -934,6 +1000,87 @@
               </div>
               <div class="btn-group" style="margin-top: 15px;">
                 <button type="button" class="btn btn-primary" onclick="voltarParaFormulario()">✓ OK - Inserir Novo</button>
+              </div>
+            </div>
+
+            <!-- ÁREA DE MOVIMENTAÇÃO EM LOTE -->
+            <div id="estoqueLoteArea" style="display: none;">
+              <h2>📦 Movimentação do Estoque em Lote</h2>
+              <p style="font-size: 0.85rem; color: #666; margin-bottom: 15px;">
+                Insira múltiplos itens de uma vez. Escolha o tipo de operação, grupo, unidade e observação uma única vez. Depois adicione os itens com suas quantidades.
+              </p>
+              <div id="estoqueLoteMessage" class="message"></div>
+
+              <!-- Campos Globais do Lote -->
+              <div style="background: #e8f5e9; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                <h4 style="margin: 0 0 10px 0; color: #2e7d32;">⚙️ Configurações Gerais</h4>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label style="font-size: 0.85rem;">Tipo de Operação *</label>
+                    <div style="display: flex; gap: 15px; padding: 8px 0;">
+                      <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                        <input type="radio" name="loteOperacao" value="entrada" checked style="width: auto;">
+                        <span style="color: #28a745; font-weight: 600;">📥 Entrada</span>
+                      </label>
+                      <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                        <input type="radio" name="loteOperacao" value="saida" style="width: auto;">
+                        <span style="color: #dc3545; font-weight: 600;">📤 Saída</span>
+                      </label>
+                    </div>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label style="font-size: 0.85rem;">Grupo *</label>
+                    <select id="loteGrupo" required style="padding: 6px;">
+                      <option value="">Selecione...</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label style="font-size: 0.85rem;">Unidade *</label>
+                    <select id="loteUnidade" required style="padding: 6px;">
+                      <option value="">Selecione...</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label style="font-size: 0.85rem;">Observação</label>
+                    <select id="loteObs" style="padding: 6px;">
+                      <option value="">Selecione...</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label style="font-size: 0.85rem;">Pedido/OC</label>
+                    <input type="text" id="loteNF" list="loteNFList" style="padding: 6px;" placeholder="Número do Pedido/OC">
+                    <datalist id="loteNFList"></datalist>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Lista de Itens do Lote -->
+              <div style="background: #fff8e1; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                <h4 style="margin: 0 0 10px 0; color: #f57c00;">📋 Itens do Lote</h4>
+                <div id="loteItensContainer">
+                  <!-- Itens serão adicionados aqui -->
+                </div>
+                <button type="button" class="btn btn-primary" onclick="adicionarItemLote()" style="margin-top: 10px;">
+                  + Adicionar Item
+                </button>
+              </div>
+
+              <div class="btn-group">
+                <button type="button" class="btn btn-success" onclick="handleInserirLote()">✓ Confirmar Inserção</button>
+                <button type="button" class="btn btn-warning" onclick="limparFormLote()">↻ Limpar</button>
+                <button type="button" class="btn btn-secondary" onclick="voltarParaEstoqueSimples()">← Voltar</button>
+              </div>
+            </div>
+
+            <!-- ÁREA DE RESULTADOS DO LOTE -->
+            <div id="estoqueLoteResultArea" style="display: none;">
+              <h2>✅ Movimentação em Lote Concluída!</h2>
+              <div id="estoqueLoteResultMessage" style="background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 15px;"></div>
+              <h3 style="margin: 15px 0 10px 0; font-size: 0.9rem;">📊 Saldos Atualizados:</h3>
+              <div id="estoqueLoteResultTable" class="table-container" style="max-height: 400px; overflow-y: auto;"></div>
+              <div class="btn-group" style="margin-top: 15px;">
+                <button type="button" class="btn btn-primary" onclick="voltarParaLote()">📦 Nova Movimentação em Lote</button>
+                <button type="button" class="btn btn-secondary" onclick="voltarParaEstoqueSimples()">← Inserção Simples</button>
               </div>
             </div>
           </div>
@@ -2092,6 +2239,12 @@
       populateSelect('nfUnidade', data.medidas || []);
       populateSelect('nfObs', data.observacoes || []);
 
+      // Popula selects do Lançamento em Lote
+      populateSelect('loteGrupo', data.groups || []);
+      populateSelect('loteUnidade', data.medidas || []);
+      populateSelect('loteObs', data.observacoes || []);
+      populateAutocomplete('loteNFList', data.nfs || []);
+
       // Inicializa autocompletes customizados (apenas uma vez)
       if (!window.customAutocompletesInitialized) {
         initCustomAutocompletes();
@@ -2346,16 +2499,16 @@
         return { success: false, message: 'Dados ainda não carregados. Aguarde...' };
       }
 
-      const itemNormalized = normalizeString(itemFilter);
+      const itemUpper = itemFilter ? itemFilter.toString().trim().toUpperCase() : '';
       let results = [];
 
-      // Filtra por item e data
+      // Filtra por item e data - CORRESPONDÊNCIA EXATA
       for (let i = 0; i < allEstoqueData.length; i++) {
         const record = allEstoqueData[i];
-        const currentItem = normalizeString(record.row[1]); // Coluna Item
+        const currentItemUpper = record.row[1].toString().trim().toUpperCase(); // Coluna Item
 
-        // Verifica se o item corresponde (se filtro foi fornecido)
-        if (itemFilter && itemFilter.trim() !== '' && currentItem.indexOf(itemNormalized) < 0) {
+        // Verifica se o item corresponde EXATAMENTE (se filtro foi fornecido)
+        if (itemUpper !== '' && currentItemUpper !== itemUpper) {
           continue;
         }
 
@@ -3144,6 +3297,468 @@
 
       html += '</tbody></table>';
       container.innerHTML = html;
+    }
+
+    // ========== FUNÇÕES LANÇAMENTO EM LOTE ==========
+    let loteItemCounter = 0;
+    let itensParaConfirmarLote = [];
+    let itensConfirmadosLote = new Set();
+
+    // Abre a área de lançamento em lote
+    function abrirLancamentoLote() {
+      document.getElementById('estoqueFormArea').style.display = 'none';
+      document.getElementById('estoqueResultArea').style.display = 'none';
+      document.getElementById('estoqueLoteResultArea').style.display = 'none';
+      document.getElementById('estoqueLoteArea').style.display = 'block';
+
+      // Popula os selects do lote
+      populateLoteSelects();
+
+      // Adiciona o primeiro item automaticamente
+      if (document.getElementById('loteItensContainer').children.length === 0) {
+        adicionarItemLote();
+      }
+    }
+
+    // Popula os selects do formulário de lote
+    function populateLoteSelects() {
+      if (!autocompleteData) return;
+
+      // Grupo
+      const grupoSelect = document.getElementById('loteGrupo');
+      if (grupoSelect.options.length <= 1 && autocompleteData.groups) {
+        autocompleteData.groups.forEach(grupo => {
+          const option = document.createElement('option');
+          option.value = grupo;
+          option.textContent = grupo;
+          grupoSelect.appendChild(option);
+        });
+      }
+
+      // Unidade
+      const unidadeSelect = document.getElementById('loteUnidade');
+      if (unidadeSelect.options.length <= 1 && autocompleteData.medidas) {
+        autocompleteData.medidas.forEach(medida => {
+          const option = document.createElement('option');
+          option.value = medida;
+          option.textContent = medida;
+          unidadeSelect.appendChild(option);
+        });
+      }
+
+      // Observação
+      const obsSelect = document.getElementById('loteObs');
+      if (obsSelect.options.length <= 1 && autocompleteData.observacoes) {
+        autocompleteData.observacoes.forEach(obs => {
+          const option = document.createElement('option');
+          option.value = obs;
+          option.textContent = obs;
+          obsSelect.appendChild(option);
+        });
+      }
+    }
+
+    // Volta para o formulário de estoque simples
+    function voltarParaEstoqueSimples() {
+      document.getElementById('estoqueLoteArea').style.display = 'none';
+      document.getElementById('estoqueLoteResultArea').style.display = 'none';
+      document.getElementById('estoqueFormArea').style.display = 'block';
+      limparFormLote();
+    }
+
+    // Adiciona um item na lista do lote
+    function adicionarItemLote() {
+      loteItemCounter++;
+      const container = document.getElementById('loteItensContainer');
+      const operacao = document.querySelector('input[name="loteOperacao"]:checked').value;
+      const labelQtd = operacao === 'entrada' ? 'Entrada *' : 'Saída *';
+
+      const itemDiv = document.createElement('div');
+      itemDiv.id = 'loteItem-' + loteItemCounter;
+      itemDiv.className = 'lote-item-row';
+      itemDiv.innerHTML = `
+        <div class="form-group" style="margin-bottom: 0;">
+          <label style="font-size: 0.75rem;">Produto *</label>
+          <input type="text" class="lote-item-nome" list="loteItemDatalist-${loteItemCounter}" required style="padding: 6px;" placeholder="Nome do produto" onblur="verificarItemNovoLote(this, ${loteItemCounter})">
+          <datalist id="loteItemDatalist-${loteItemCounter}"></datalist>
+          <small class="lote-item-novo-aviso" style="display: none; color: #dc3545; font-size: 0.7rem;">⚠️ Item NOVO!</small>
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label style="font-size: 0.75rem;">${labelQtd}</label>
+          <input type="number" class="lote-item-qtd" step="0.01" min="0.01" required style="padding: 6px;" placeholder="Qtd">
+        </div>
+        <button type="button" class="btn btn-danger" onclick="removerItemLote(${loteItemCounter})" style="padding: 6px 10px; height: fit-content;">✕</button>
+      `;
+      container.appendChild(itemDiv);
+
+      // Popula datalist do item
+      const datalist = document.getElementById('loteItemDatalist-' + loteItemCounter);
+      if (autocompleteData && autocompleteData.items) {
+        autocompleteData.items.forEach(item => {
+          const option = document.createElement('option');
+          option.value = item;
+          datalist.appendChild(option);
+        });
+      }
+    }
+
+    // Timeout para verificação de item novo no lote
+    let verificarItemLoteTimeout = {};
+
+    // Verifica se o item é novo no lote
+    function verificarItemNovoLote(input, itemId) {
+      clearTimeout(verificarItemLoteTimeout[itemId]);
+
+      verificarItemLoteTimeout[itemId] = setTimeout(function() {
+        const nomeItem = input.value.trim().toUpperCase();
+        const avisoNovo = input.parentElement.querySelector('.lote-item-novo-aviso');
+
+        if (!nomeItem) {
+          avisoNovo.style.display = 'none';
+          return;
+        }
+
+        const itemExiste = autocompleteData && autocompleteData.items &&
+          autocompleteData.items.some(item => item.toUpperCase() === nomeItem);
+
+        if (!itemExiste) {
+          avisoNovo.style.display = 'block';
+        } else {
+          avisoNovo.style.display = 'none';
+        }
+      }, 400);
+    }
+
+    // Remove item do lote
+    function removerItemLote(id) {
+      const itemDiv = document.getElementById('loteItem-' + id);
+      if (itemDiv) {
+        itemDiv.remove();
+      }
+    }
+
+    // Limpa formulário do lote
+    function limparFormLote() {
+      document.querySelector('input[name="loteOperacao"][value="entrada"]').checked = true;
+      document.getElementById('loteGrupo').selectedIndex = 0;
+      document.getElementById('loteUnidade').selectedIndex = 0;
+      document.getElementById('loteObs').selectedIndex = 0;
+      document.getElementById('loteNF').value = '';
+      document.getElementById('loteItensContainer').innerHTML = '';
+      loteItemCounter = 0;
+      showMessage('estoqueLoteMessage', '', '');
+    }
+
+    // Processa inserção do lote - abre modal de confirmação
+    function handleInserirLote() {
+      // Validar campos globais
+      const operacao = document.querySelector('input[name="loteOperacao"]:checked').value;
+      const grupo = document.getElementById('loteGrupo').value;
+      const unidade = document.getElementById('loteUnidade').value;
+      const obs = document.getElementById('loteObs').value;
+      const nf = document.getElementById('loteNF').value.trim();
+
+      if (!grupo) {
+        showMessage('estoqueLoteMessage', 'Selecione o grupo', 'error');
+        return;
+      }
+      if (!unidade) {
+        showMessage('estoqueLoteMessage', 'Selecione a unidade', 'error');
+        return;
+      }
+
+      // Coletar itens
+      const container = document.getElementById('loteItensContainer');
+      const itemDivs = container.querySelectorAll('[id^="loteItem-"]');
+
+      if (itemDivs.length === 0) {
+        showMessage('estoqueLoteMessage', 'Adicione pelo menos um item', 'error');
+        return;
+      }
+
+      itensParaConfirmarLote = [];
+      itensConfirmadosLote = new Set();
+      let hasError = false;
+      let temItemNovo = false;
+
+      itemDivs.forEach((div, index) => {
+        const nome = div.querySelector('.lote-item-nome').value.trim().toUpperCase();
+        const qtd = parseFloat(div.querySelector('.lote-item-qtd').value) || 0;
+
+        if (!nome) {
+          showMessage('estoqueLoteMessage', `Item ${index + 1}: Nome do produto é obrigatório`, 'error');
+          hasError = true;
+          return;
+        }
+        if (qtd <= 0) {
+          showMessage('estoqueLoteMessage', `Item ${index + 1} (${nome}): Quantidade é obrigatória`, 'error');
+          hasError = true;
+          return;
+        }
+
+        const isNovoItem = !itemExisteNaBase(nome);
+        if (isNovoItem) {
+          temItemNovo = true;
+        }
+
+        itensParaConfirmarLote.push({
+          index: index + 1,
+          item: nome,
+          unidade: unidade,
+          nf: nf,
+          obs: obs,
+          entrada: operacao === 'entrada' ? qtd : 0,
+          saida: operacao === 'saida' ? qtd : 0,
+          valorUnitario: 0,
+          grupo: grupo,
+          isNovo: isNovoItem,
+          qtd: qtd
+        });
+      });
+
+      if (hasError) return;
+
+      // Abre modal de confirmação
+      abrirModalConfirmacaoLote(operacao, grupo, unidade, obs, nf, temItemNovo);
+    }
+
+    // Abre o modal de confirmação do lote
+    function abrirModalConfirmacaoLote(operacao, grupo, unidade, obs, nf, temItemNovo) {
+      // Mostra/esconde aviso de itens novos
+      document.getElementById('avisoItensNovosLote').style.display = temItemNovo ? 'block' : 'none';
+
+      // Info do Lote
+      const tipoOp = operacao === 'entrada' ? '📥 ENTRADA' : '📤 SAÍDA';
+      const corOp = operacao === 'entrada' ? '#28a745' : '#dc3545';
+      let infoHtml = `<strong style="color: ${corOp};">${tipoOp}</strong>`;
+      infoHtml += ` | <strong>Grupo:</strong> ${grupo}`;
+      infoHtml += ` | <strong>Unidade:</strong> ${unidade}`;
+      if (nf) infoHtml += ` | <strong>Pedido/OC:</strong> ${nf}`;
+      if (obs) infoHtml += ` | <strong>Obs:</strong> ${obs}`;
+      document.getElementById('infoLoteModal').innerHTML = infoHtml;
+
+      // Lista de itens com placeholders para saldo
+      const listaContainer = document.getElementById('listaItensConfirmacaoLote');
+      let listaHtml = '';
+
+      itensParaConfirmarLote.forEach((item, idx) => {
+        const classeNovo = item.isNovo ? 'item-novo' : '';
+        const badgeNovo = item.isNovo ? '<span class="item-novo-badge">NOVO</span>' : '';
+
+        listaHtml += `
+          <div class="confirm-item-row-lote ${classeNovo}" data-index="${idx}">
+            <span class="item-index">${item.index}</span>
+            <span class="item-nome">${item.item}${badgeNovo}</span>
+            <span>${item.qtd}</span>
+            <span id="saldoAtualLote-${idx}" style="color: #666;">...</span>
+            <span id="saldoFinalLote-${idx}" style="font-weight: bold; color: #28a745;">...</span>
+            <button type="button" class="btn-ok-item" onclick="confirmarItemLote(${idx})" id="btnOkItemLote-${idx}">OK</button>
+          </div>
+        `;
+      });
+
+      listaContainer.innerHTML = listaHtml;
+
+      // Atualiza contador
+      document.getElementById('totalConfirmadosLote').textContent = '0';
+      document.getElementById('totalItensLote').textContent = itensParaConfirmarLote.length;
+      document.getElementById('btnConfirmarInsercaoFinalLote').disabled = true;
+
+      // Mostra modal
+      document.getElementById('modalConfirmacaoLote').classList.add('show');
+
+      // Busca saldos de todos os itens
+      carregarSaldosLote(operacao);
+    }
+
+    // Carrega os saldos de todos os itens do lote
+    function carregarSaldosLote(operacao) {
+      const itensNomes = itensParaConfirmarLote.map(item => item.item);
+
+      // Busca saldos do servidor
+      google.script.run
+        .withSuccessHandler(function(saldos) {
+          // saldos é um objeto { "ITEM1": saldo1, "ITEM2": saldo2, ... }
+          itensParaConfirmarLote.forEach((item, idx) => {
+            const saldoAtual = saldos[item.item] || 0;
+            const saldoFinal = operacao === 'entrada'
+              ? saldoAtual + item.qtd
+              : saldoAtual - item.qtd;
+
+            // Atualiza item com saldos
+            item.saldoAtual = saldoAtual;
+            item.saldoFinal = saldoFinal;
+
+            // Atualiza display
+            const spanAtual = document.getElementById('saldoAtualLote-' + idx);
+            const spanFinal = document.getElementById('saldoFinalLote-' + idx);
+
+            if (spanAtual) spanAtual.textContent = saldoAtual.toFixed(2);
+            if (spanFinal) {
+              spanFinal.textContent = saldoFinal.toFixed(2);
+              // Cor vermelha se saldo final ficar negativo
+              if (saldoFinal < 0) {
+                spanFinal.style.color = '#dc3545';
+              }
+            }
+          });
+        })
+        .withFailureHandler(function(error) {
+          console.error('Erro ao carregar saldos:', error);
+          // Em caso de erro, mostra "?" nos campos
+          itensParaConfirmarLote.forEach((item, idx) => {
+            const spanAtual = document.getElementById('saldoAtualLote-' + idx);
+            const spanFinal = document.getElementById('saldoFinalLote-' + idx);
+            if (spanAtual) spanAtual.textContent = '?';
+            if (spanFinal) spanFinal.textContent = '?';
+          });
+        })
+        .getMultipleSaldos(itensNomes);
+    }
+
+    // Confirma um item individual do lote
+    function confirmarItemLote(idx) {
+      const btn = document.getElementById('btnOkItemLote-' + idx);
+      btn.classList.add('confirmed');
+      btn.disabled = true;
+      btn.textContent = 'OK';
+
+      itensConfirmadosLote.add(idx);
+
+      // Atualiza contador
+      document.getElementById('totalConfirmadosLote').textContent = itensConfirmadosLote.size;
+
+      // Habilita botão final se todos confirmados
+      if (itensConfirmadosLote.size === itensParaConfirmarLote.length) {
+        document.getElementById('btnConfirmarInsercaoFinalLote').disabled = false;
+      }
+    }
+
+    // Fecha modal de confirmação do lote
+    function fecharModalConfirmacaoLote() {
+      document.getElementById('modalConfirmacaoLote').classList.remove('show');
+    }
+
+    // Volta para edição do formulário do lote
+    function voltarParaEdicaoLote() {
+      fecharModalConfirmacaoLote();
+      showMessage('estoqueLoteMessage', 'Ajuste os dados e clique em Confirmar novamente', 'info');
+    }
+
+    // Confirma inserção final do lote e envia para o servidor
+    function confirmarInsercaoFinalLote() {
+      if (itensConfirmadosLote.size !== itensParaConfirmarLote.length) {
+        alert('Confirme todos os itens antes de prosseguir');
+        return;
+      }
+
+      const operacao = document.querySelector('input[name="loteOperacao"]:checked').value;
+
+      // Prepara itens para envio
+      const itensParaEnviar = itensParaConfirmarLote.map(item => ({
+        item: item.item,
+        unidade: item.unidade,
+        nf: item.nf,
+        obs: item.obs,
+        entrada: item.entrada,
+        saida: item.saida,
+        valorUnitario: item.valorUnitario,
+        grupo: item.grupo
+      }));
+
+      fecharModalConfirmacaoLote();
+      showMessage('estoqueLoteMessage', 'Inserindo ' + itensParaEnviar.length + ' itens...', 'info');
+
+      // Envia para servidor com retorno de saldos
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            document.getElementById('estoqueLoteArea').style.display = 'none';
+            document.getElementById('estoqueLoteResultArea').style.display = 'block';
+
+            const tipoOp = operacao === 'entrada' ? 'ENTRADAS' : 'SAÍDAS';
+            document.getElementById('estoqueLoteResultMessage').innerHTML =
+              '<strong>' + itensParaEnviar.length + '</strong> ' + tipoOp + ' inserida(s) com sucesso!';
+
+            // Mostra tabela com saldos
+            mostrarTabelaSaldosLote(result.itensProcessados || itensParaEnviar, operacao);
+
+            // Atualiza cache e autocomplete
+            clearClientCache();
+            loadDashboardData();
+            loadAutocompleteData();
+
+            showMessage('estoqueLoteMessage', '', '');
+          } else {
+            showMessage('estoqueLoteMessage', result.message || 'Erro ao inserir itens', 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('estoqueLoteMessage', 'Erro: ' + error.message, 'error');
+        })
+        .processMultipleEstoqueItemsWithSaldos(itensParaEnviar);
+    }
+
+    // Mostra tabela com os saldos após inserção do lote (formato similar ao lançamento individual)
+    function mostrarTabelaSaldosLote(itens, operacao) {
+      const container = document.getElementById('estoqueLoteResultTable');
+      const tipoOp = operacao === 'entrada' ? '<span style="color: #28a745; font-weight: bold;">ENTRADA</span>' : '<span style="color: #dc3545; font-weight: bold;">SAÍDA</span>';
+
+      let html = '';
+
+      itens.forEach((item, idx) => {
+        const qtd = operacao === 'entrada' ? item.entrada : item.saida;
+        const saldoAnterior = item.saldoAnterior !== undefined ? item.saldoAnterior : 0;
+        const novoSaldo = item.novoSaldo !== undefined ? item.novoSaldo : 0;
+        const avisoStyle = item.aviso && item.aviso.includes('DESATUALIZADO') ? 'border-left: 4px solid #dc3545;' : (item.aviso ? 'border-left: 4px solid #ffc107;' : 'border-left: 4px solid #28a745;');
+
+        html += `
+          <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 15px; ${avisoStyle}">
+            ${item.aviso ? `<div class="novo-item-warning" style="margin-bottom: 10px;"><strong>⚠️</strong> ${item.aviso}</div>` : ''}
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 6px; font-weight: bold; width: 35%;">Produto:</td>
+                <td style="padding: 6px; font-size: 1.1rem;"><strong>${item.item}</strong></td>
+              </tr>
+              <tr style="background: #fff;">
+                <td style="padding: 6px; font-weight: bold;">Grupo:</td>
+                <td style="padding: 6px;">${item.grupo || '-'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px; font-weight: bold;">Tipo:</td>
+                <td style="padding: 6px;">${tipoOp}</td>
+              </tr>
+              <tr style="background: #fff;">
+                <td style="padding: 6px; font-weight: bold;">Quantidade:</td>
+                <td style="padding: 6px; font-size: 1.1rem; font-weight: bold;">${qtd}</td>
+              </tr>
+            </table>
+            <!-- Destaque para os saldos -->
+            <div style="margin-top: 10px; padding: 10px; background: linear-gradient(135deg, #e8f5e9, #c8e6c9); border-radius: 6px; border: 2px solid #4caf50;">
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 6px; font-weight: bold; width: 35%;">Saldo Anterior:</td>
+                  <td style="padding: 6px; font-size: 1.1rem;">${saldoAnterior}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px; font-weight: bold; font-size: 1rem; color: #2e7d32;">NOVO SALDO:</td>
+                  <td style="padding: 6px; font-size: 1.3rem; font-weight: bold; color: #2e7d32;">${novoSaldo}</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+    }
+
+    // Volta para o formulário de lote
+    function voltarParaLote() {
+      document.getElementById('estoqueLoteResultArea').style.display = 'none';
+      document.getElementById('estoqueLoteArea').style.display = 'block';
+      limparFormLote();
+      adicionarItemLote();
     }
 
     // Handle Inserir Grupo
@@ -4053,6 +4668,46 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-warning" onclick="voltarParaEdicao()">↩ Voltar e Ajustar</button>
         <button type="button" id="btnConfirmarInsercaoFinal" class="btn btn-success" onclick="confirmarInsercaoFinal()" disabled>
+          ✓ Confirmar e Inserir
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de Confirmação Lote -->
+  <div id="modalConfirmacaoLote" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>📦 Confirme a Movimentação em Lote</h3>
+        <button class="modal-close" onclick="fecharModalConfirmacaoLote()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="avisoItensNovosLote" class="novo-item-warning" style="display: none;">
+          <strong>⚠️ ATENÇÃO:</strong> Existem itens <strong>NOVOS</strong> que não existem na base de dados!
+          <br>Verifique se digitou corretamente para evitar problemas futuros.
+          <br>Itens novos estão destacados em <span style="background: #fff3cd; padding: 2px 6px;">amarelo</span>.
+        </div>
+        <div id="infoLoteModal" style="background: #e8f5e9; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
+          <!-- Info do Lote será inserida aqui -->
+        </div>
+        <div class="confirm-header-row-lote">
+          <span>#</span>
+          <span>Produto</span>
+          <span>Quantidade</span>
+          <span>Saldo Atual</span>
+          <span style="background: #28a745; color: white; padding: 2px 6px; border-radius: 3px;">Saldo Final</span>
+          <span>Ação</span>
+        </div>
+        <div id="listaItensConfirmacaoLote">
+          <!-- Itens serão listados aqui -->
+        </div>
+        <div id="contadorConfirmacaoLote" style="text-align: center; margin-top: 15px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
+          Confirmados: <strong><span id="totalConfirmadosLote">0</span></strong> de <strong><span id="totalItensLote">0</span></strong>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-warning" onclick="voltarParaEdicaoLote()">↩ Voltar e Ajustar</button>
+        <button type="button" id="btnConfirmarInsercaoFinalLote" class="btn btn-success" onclick="confirmarInsercaoFinalLote()" disabled>
           ✓ Confirmar e Inserir
         </button>
       </div>
