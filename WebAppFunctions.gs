@@ -417,6 +417,11 @@ function processEstoqueWebApp(formData) {
     sheetEstoque.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
     Logger.log("processEstoqueWebApp: Dados inseridos na linha " + nextRow);
 
+    // CORREÇÃO: Limpa TODA formatação antes de aplicar cores condicionalmente
+    var lastColumn = sheetEstoque.getLastColumn();
+    sheetEstoque.getRange(nextRow, 1, 1, lastColumn).clearFormat();
+    Logger.log("processEstoqueWebApp: Formatação limpa - linha começa SEM cor");
+
     PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
     backupEstoqueData();
 
@@ -557,9 +562,12 @@ function processMultipleEstoqueItems(itens) {
 
         sheetEstoque.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
 
+        // CORREÇÃO: Limpa formatação antes de aplicar cores
+        var lastColumn = sheetEstoque.getLastColumn();
+        sheetEstoque.getRange(nextRow, 1, 1, lastColumn).clearFormat();
+
         // Marca linha com amarelo para indicar entrada
         if (entrada > 0) {
-          var lastColumn = sheetEstoque.getLastColumn();
           sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("yellow");
         }
 
@@ -653,9 +661,12 @@ function processMultipleEstoqueItemsWithGroup(itens) {
 
         sheetEstoque.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
 
+        // CORREÇÃO: Limpa formatação antes de aplicar cores
+        var lastColumn = sheetEstoque.getLastColumn();
+        sheetEstoque.getRange(nextRow, 1, 1, lastColumn).clearFormat();
+
         // Marca linha com amarelo para indicar entrada
         if (entrada > 0) {
-          var lastColumn = sheetEstoque.getLastColumn();
           sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("yellow");
         }
 
@@ -761,7 +772,10 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
 
         sheetEstoque.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
 
+        // CORREÇÃO: Limpa formatação antes de aplicar cores
         var lastColumn = sheetEstoque.getLastColumn();
+        sheetEstoque.getRange(nextRow, 1, 1, lastColumn).clearFormat();
+
         var itemWarning = null;
 
         // Verifica se passou mais de 20 dias desde a última data de registro
