@@ -424,11 +424,21 @@ function processEstoqueWebApp(formData) {
 
     // Verifica se passou mais de 20 dias desde a última data de registro
     if (lastReg.lastDate) {
-      var lastDate = new Date(lastReg.lastDate);
+      // CORREÇÃO: Usa parseDateString para converter corretamente datas em formato brasileiro
+      var lastDate = parseDateString(lastReg.lastDate);
+
+      // Se a conversão falhar, tenta criar um Date object direto
+      if (!lastDate || isNaN(lastDate.getTime())) {
+        Logger.log("processEstoqueWebApp: AVISO - Conversão de data falhou, tentando new Date()");
+        lastDate = new Date(lastReg.lastDate);
+      }
+
       var diffDays = (now.getTime() - lastDate.getTime()) / (1000 * 3600 * 24);
       Logger.log("processEstoqueWebApp: ========================================");
       Logger.log("processEstoqueWebApp: DEBUG - Item: " + formData.item);
-      Logger.log("processEstoqueWebApp: DEBUG - Última data encontrada: " + lastReg.lastDate);
+      Logger.log("processEstoqueWebApp: DEBUG - Última data STRING: " + lastReg.lastDate);
+      Logger.log("processEstoqueWebApp: DEBUG - Última data CONVERTIDA: " + lastDate);
+      Logger.log("processEstoqueWebApp: DEBUG - lastDate é válido? " + !isNaN(lastDate.getTime()));
       Logger.log("processEstoqueWebApp: DEBUG - Data atual: " + now);
       Logger.log("processEstoqueWebApp: DEBUG - Diferença de dias: " + diffDays + " dias");
       Logger.log("processEstoqueWebApp: DEBUG - diffDays > 20? " + (diffDays > 20));
@@ -749,7 +759,15 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
 
         // Verifica se passou mais de 20 dias desde a última data de registro
         if (lastReg.lastDate) {
-          var lastDate = new Date(lastReg.lastDate);
+          // CORREÇÃO: Usa parseDateString para converter corretamente datas em formato brasileiro
+          var lastDate = parseDateString(lastReg.lastDate);
+
+          // Se a conversão falhar, tenta criar um Date object direto
+          if (!lastDate || isNaN(lastDate.getTime())) {
+            Logger.log("processMultipleEstoqueItemsWithSaldos: AVISO - Conversão de data falhou");
+            lastDate = new Date(lastReg.lastDate);
+          }
+
           var diffDays = (now.getTime() - lastDate.getTime()) / (1000 * 3600 * 24);
           Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - Diferença: " + diffDays + " dias");
 
