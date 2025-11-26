@@ -468,6 +468,13 @@ function processEstoqueWebApp(formData) {
     }
 
     // Verifica se houve ENTRADA de estoque - aviso para atualização (sobrescreve vermelho)
+    Logger.log("processEstoqueWebApp: ========================================");
+    Logger.log("processEstoqueWebApp: DEBUG AMARELO - Entrada: " + formData.entrada);
+    Logger.log("processEstoqueWebApp: DEBUG AMARELO - Saída: " + formData.saida);
+    Logger.log("processEstoqueWebApp: DEBUG AMARELO - parseFloat(entrada): " + parseFloat(formData.entrada));
+    Logger.log("processEstoqueWebApp: DEBUG AMARELO - parseFloat(entrada) > 0? " + (parseFloat(formData.entrada) > 0));
+    Logger.log("processEstoqueWebApp: ========================================");
+
     if (parseFloat(formData.entrada) > 0) {
       var lastColumn = sheetEstoque.getLastColumn();
       sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("yellow");
