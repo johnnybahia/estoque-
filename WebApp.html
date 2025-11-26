@@ -2255,10 +2255,15 @@
     function loadDashboardData() {
       google.script.run
         .withSuccessHandler(function(data) {
-          document.getElementById('totalItems').textContent = data.totalItems || '-';
-          document.getElementById('totalGroups').textContent = data.totalGroups || '-';
-          document.getElementById('recentEntries').textContent = data.recentEntries || '-';
-          document.getElementById('recentExits').textContent = data.recentExits || '-';
+          const totalItemsEl = document.getElementById('totalItems');
+          const totalGroupsEl = document.getElementById('totalGroups');
+          const recentEntriesEl = document.getElementById('recentEntries');
+          const recentExitsEl = document.getElementById('recentExits');
+
+          if (totalItemsEl) totalItemsEl.textContent = data.totalItems || '-';
+          if (totalGroupsEl) totalGroupsEl.textContent = data.totalGroups || '-';
+          if (recentEntriesEl) recentEntriesEl.textContent = data.recentEntries || '-';
+          if (recentExitsEl) recentExitsEl.textContent = data.recentExits || '-';
         })
         .withFailureHandler(function(error) {
           console.error('Erro ao carregar dashboard:', error);
