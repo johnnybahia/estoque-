@@ -667,6 +667,10 @@
       text-align: center;
       box-shadow: 0 10px 40px rgba(0,0,0,0.4);
       min-width: 300px;
+      max-width: 900px;
+      width: 90%;
+      max-height: 90vh;
+      overflow-y: auto;
     }
 
     .loading-spinner {
@@ -707,6 +711,100 @@
       color: #7f8c8d;
       margin-top: 5px;
     }
+
+    /* Lista de Últimos Lançamentos */
+    .ultimos-lancamentos {
+      margin-top: 25px;
+      padding-top: 20px;
+      border-top: 2px solid #e0e0e0;
+      max-width: 800px;
+      width: 100%;
+    }
+
+    .ultimos-lancamentos h4 {
+      font-size: 1rem;
+      color: var(--text-dark);
+      margin: 0 0 15px 0;
+      font-weight: 600;
+    }
+
+    .lancamentos-list {
+      max-height: 300px;
+      overflow-y: auto;
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 10px;
+    }
+
+    .loading-lancamentos {
+      text-align: center;
+      color: #7f8c8d;
+      padding: 20px;
+      font-size: 0.9rem;
+    }
+
+    .lancamento-item {
+      background: white;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      border-left: 4px solid var(--primary-color);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      transition: transform 0.2s;
+    }
+
+    .lancamento-item:hover {
+      transform: translateX(3px);
+    }
+
+    .lancamento-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+
+    .lancamento-item-nome {
+      font-weight: 600;
+      color: var(--text-dark);
+      font-size: 0.95rem;
+    }
+
+    .lancamento-data {
+      font-size: 0.8rem;
+      color: #7f8c8d;
+    }
+
+    .lancamento-details {
+      display: flex;
+      gap: 15px;
+      font-size: 0.85rem;
+      color: #555;
+      flex-wrap: wrap;
+    }
+
+    .lancamento-detail {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .lancamento-detail strong {
+      font-weight: 600;
+    }
+
+    .lancamento-entrada {
+      color: #28a745;
+    }
+
+    .lancamento-saida {
+      color: #dc3545;
+    }
+
+    .lancamento-saldo {
+      color: var(--primary-color);
+    }
+
     .modal-content {
       background: white;
       border-radius: 8px;
@@ -2189,7 +2287,65 @@
         overlay.classList.add('show');
         // Disable scrolling
         document.body.style.overflow = 'hidden';
+
+        // Carrega últimos lançamentos
+        carregarUltimosLancamentos();
       }
+    }
+
+    // Carrega e exibe os últimos 20 lançamentos
+    function carregarUltimosLancamentos() {
+      const lancamentosList = document.getElementById('lancamentosList');
+      if (!lancamentosList) return;
+
+      // Mostra loading
+      lancamentosList.innerHTML = '<div class="loading-lancamentos">Carregando lançamentos...</div>';
+
+      // Busca os lançamentos do servidor
+      google.script.run
+        .withSuccessHandler(function(lancamentos) {
+          if (!lancamentos || lancamentos.length === 0) {
+            lancamentosList.innerHTML = '<div class="loading-lancamentos">Nenhum lançamento encontrado</div>';
+            return;
+          }
+
+          // Renderiza os lançamentos
+          let html = '';
+          for (let i = 0; i < lancamentos.length; i++) {
+            const lanc = lancamentos[i];
+
+            // Formata entrada/saída
+            const entradaHtml = parseFloat(lanc.entrada) > 0
+              ? `<span class="lancamento-detail lancamento-entrada">↑ ${lanc.entrada}</span>`
+              : '';
+            const saidaHtml = parseFloat(lanc.saida) > 0
+              ? `<span class="lancamento-detail lancamento-saida">↓ ${lanc.saida}</span>`
+              : '';
+
+            html += `
+              <div class="lancamento-item">
+                <div class="lancamento-header">
+                  <div class="lancamento-item-nome">${lanc.item}</div>
+                  <div class="lancamento-data">${lanc.data}</div>
+                </div>
+                <div class="lancamento-details">
+                  <span class="lancamento-detail"><strong>Grupo:</strong> ${lanc.grupo}</span>
+                  ${entradaHtml}
+                  ${saidaHtml}
+                  <span class="lancamento-detail lancamento-saldo"><strong>Saldo:</strong> ${lanc.saldo}</span>
+                  ${lanc.nf ? `<span class="lancamento-detail"><strong>NF:</strong> ${lanc.nf}</span>` : ''}
+                </div>
+              </div>
+            `;
+          }
+
+          lancamentosList.innerHTML = html;
+        })
+        .withFailureHandler(function(error) {
+          console.error('Erro ao carregar lançamentos:', error);
+          lancamentosList.innerHTML = '<div class="loading-lancamentos">Erro ao carregar lançamentos</div>';
+        })
+        .getUltimosLancamentos();
     }
 
     // Hide loading overlay
@@ -4750,6 +4906,14 @@
       <div class="loading-spinner"></div>
       <div class="loading-text" id="loadingText">Processando...</div>
       <div class="loading-subtext">Aguarde, não feche esta janela</div>
+
+      <!-- Lista de Últimos Lançamentos -->
+      <div class="ultimos-lancamentos" id="ultimosLancamentos">
+        <h4>📋 Últimos 20 Lançamentos</h4>
+        <div class="lancamentos-list" id="lancamentosList">
+          <div class="loading-lancamentos">Carregando lançamentos...</div>
+        </div>
+      </div>
     </div>
   </div>
 

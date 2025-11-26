@@ -760,6 +760,74 @@ function getLoggedUser() {
 }
 
 /**
+ * getUltimosLancamentos: Retorna os últimos 20 lançamentos da planilha
+ * Ordenados por data (mais recente primeiro)
+ */
+function getUltimosLancamentos() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      Logger.log("getUltimosLancamentos: Planilha ESTOQUE não encontrada");
+      return [];
+    }
+
+    // Pega a última linha com dados
+    var lastRow = sheetEstoque.getLastRow();
+
+    // Se não há dados suficientes, retorna vazio
+    if (lastRow <= 1) {
+      return [];
+    }
+
+    // Calcula quantas linhas buscar (máximo 20, ou menos se não houver tantas)
+    var numLinhas = Math.min(20, lastRow - 1); // -1 porque linha 1 é cabeçalho
+    var startRow = lastRow - numLinhas + 1;
+
+    // Busca as últimas 20 linhas (colunas A-M: Grupo, Item, Unidade, Data, NF, Obs, Pedido, Entrada, Saída, Saldo, Valor Unitário, Alterado Em, Alterado Por)
+    var data = sheetEstoque.getRange(startRow, 1, numLinhas, 13).getDisplayValues();
+
+    // Converte para array de objetos com parse de datas
+    var lancamentos = [];
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+      var dataStr = row[3]; // Coluna D (Data)
+      var dataObj = parseDateString(dataStr);
+
+      lancamentos.push({
+        grupo: row[0],
+        item: row[1],
+        unidade: row[2],
+        data: dataStr,
+        dataObj: dataObj || new Date(0), // Usa epoch se conversão falhar (para ordenação)
+        nf: row[4],
+        obs: row[5],
+        pedido: row[6],
+        entrada: row[7],
+        saida: row[8],
+        saldo: row[9],
+        valorUnitario: row[10],
+        alteradoEm: row[11],
+        alteradoPor: row[12]
+      });
+    }
+
+    // Ordena por data (mais recente primeiro)
+    lancamentos.sort(function(a, b) {
+      return b.dataObj.getTime() - a.dataObj.getTime();
+    });
+
+    Logger.log("getUltimosLancamentos: Retornando " + lancamentos.length + " lançamentos");
+    return lancamentos;
+
+  } catch (e) {
+    Logger.log("getUltimosLancamentos: Erro - " + e.message);
+    return [];
+  }
+}
+
+/**
  * showEstoqueSidebar: Abre o formulário de cadastro de estoque na sidebar.
  */
 function showEstoqueSidebar() {
@@ -2478,6 +2546,74 @@ function getLoggedUser() {
   // Se ainda não conseguiu, retorna "Desconhecido"
   Logger.log("getLoggedUser: AVISO - Nenhum usuário identificado!");
   return "Usuário Desconhecido";
+}
+
+/**
+ * getUltimosLancamentos: Retorna os últimos 20 lançamentos da planilha
+ * Ordenados por data (mais recente primeiro)
+ */
+function getUltimosLancamentos() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      Logger.log("getUltimosLancamentos: Planilha ESTOQUE não encontrada");
+      return [];
+    }
+
+    // Pega a última linha com dados
+    var lastRow = sheetEstoque.getLastRow();
+
+    // Se não há dados suficientes, retorna vazio
+    if (lastRow <= 1) {
+      return [];
+    }
+
+    // Calcula quantas linhas buscar (máximo 20, ou menos se não houver tantas)
+    var numLinhas = Math.min(20, lastRow - 1); // -1 porque linha 1 é cabeçalho
+    var startRow = lastRow - numLinhas + 1;
+
+    // Busca as últimas 20 linhas (colunas A-M: Grupo, Item, Unidade, Data, NF, Obs, Pedido, Entrada, Saída, Saldo, Valor Unitário, Alterado Em, Alterado Por)
+    var data = sheetEstoque.getRange(startRow, 1, numLinhas, 13).getDisplayValues();
+
+    // Converte para array de objetos com parse de datas
+    var lancamentos = [];
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+      var dataStr = row[3]; // Coluna D (Data)
+      var dataObj = parseDateString(dataStr);
+
+      lancamentos.push({
+        grupo: row[0],
+        item: row[1],
+        unidade: row[2],
+        data: dataStr,
+        dataObj: dataObj || new Date(0), // Usa epoch se conversão falhar (para ordenação)
+        nf: row[4],
+        obs: row[5],
+        pedido: row[6],
+        entrada: row[7],
+        saida: row[8],
+        saldo: row[9],
+        valorUnitario: row[10],
+        alteradoEm: row[11],
+        alteradoPor: row[12]
+      });
+    }
+
+    // Ordena por data (mais recente primeiro)
+    lancamentos.sort(function(a, b) {
+      return b.dataObj.getTime() - a.dataObj.getTime();
+    });
+
+    Logger.log("getUltimosLancamentos: Retornando " + lancamentos.length + " lançamentos");
+    return lancamentos;
+
+  } catch (e) {
+    Logger.log("getUltimosLancamentos: Erro - " + e.message);
+    return [];
+  }
 }
 
 /**
