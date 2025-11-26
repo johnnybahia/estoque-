@@ -4036,11 +4036,48 @@
         const qtd = operacao === 'entrada' ? item.entrada : item.saida;
         const saldoAnterior = item.saldoAnterior !== undefined ? item.saldoAnterior : 0;
         const novoSaldo = item.novoSaldo !== undefined ? item.novoSaldo : 0;
-        const avisoStyle = item.aviso && item.aviso.includes('DESATUALIZADO') ? 'border-left: 4px solid #dc3545;' : (item.aviso ? 'border-left: 4px solid #ffc107;' : 'border-left: 4px solid #28a745;');
+
+        // Define estilo e HTML do aviso baseado no tipo
+        let avisoHtml = '';
+        let containerStyle = 'background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px;';
+
+        if (item.aviso && item.aviso.includes('DESATUALIZADO')) {
+          // AVISO URGENTE - Item desatualizado (+20 dias)
+          containerStyle = 'background: #ffebee; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 4px solid #f44336; box-shadow: 0 8px 16px rgba(244, 67, 54, 0.3);';
+          avisoHtml = `
+            <div style="background: #ffebee; padding: 20px; border-radius: 8px; margin-bottom: 15px; text-align: center; border: 4px solid #f44336;">
+              <div style="font-size: 2.5rem; margin-bottom: 10px; animation: pulse 1.5s infinite;">🚨</div>
+              <div style="font-size: 1.3rem; margin-bottom: 10px; text-transform: uppercase; color: #c62828; font-weight: bold;">⚠️ ATENÇÃO URGENTE ⚠️</div>
+              <div style="font-size: 1.1rem; margin-bottom: 15px; line-height: 1.5; color: #c62828;">
+                <strong>PRODUTO DESATUALIZADO!</strong><br>
+                Última atualização há mais de 20 dias
+              </div>
+              <div style="font-size: 1.2rem; background: #d32f2f; color: white; padding: 15px; border-radius: 6px; margin-top: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                ⚡ AÇÃO NECESSÁRIA: ATUALIZAR ESTOQUE URGENTE! ⚡<br>
+                <span style="font-size: 0.9rem; margin-top: 8px; display: block;">
+                  Realize uma contagem física e registre uma atualização completa do saldo
+                </span>
+              </div>
+            </div>
+          `;
+        } else if (item.aviso && item.aviso.includes('ENTRADA')) {
+          // AVISO - Entrada de estoque
+          containerStyle = 'background: #fff3cd; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 3px solid #ffc107; box-shadow: 0 4px 8px rgba(255, 193, 7, 0.2);';
+          avisoHtml = `
+            <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin-bottom: 15px; text-align: center; border: 3px solid #ffc107;">
+              <div style="font-size: 2rem; margin-bottom: 8px;">📦</div>
+              <div style="font-size: 1.1rem; margin-bottom: 10px; color: #856404;"><strong>⚠️ ENTRADA DE ESTOQUE REGISTRADA!</strong></div>
+              <div style="font-size: 0.95rem; line-height: 1.5; color: #856404;">
+                É necessário atualizar o estoque deste item para evitar furos de estoque.<br>
+                <strong>Realize uma contagem física e registre uma atualização completa do saldo.</strong>
+              </div>
+            </div>
+          `;
+        }
 
         html += `
-          <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 15px; ${avisoStyle}">
-            ${item.aviso ? `<div class="novo-item-warning" style="margin-bottom: 10px;"><strong>⚠️</strong> ${item.aviso}</div>` : ''}
+          <div style="${containerStyle}">
+            ${avisoHtml}
             <table style="width: 100%; border-collapse: collapse;">
               <tr>
                 <td style="padding: 6px; font-weight: bold; width: 35%;">Produto:</td>

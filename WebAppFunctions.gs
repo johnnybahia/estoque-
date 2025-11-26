@@ -665,9 +665,36 @@ function processMultipleEstoqueItemsWithGroup(itens) {
         var lastColumn = sheetEstoque.getLastColumn();
         sheetEstoque.getRange(nextRow, 1, 1, lastColumn).clearFormat();
 
-        // Marca linha com amarelo para indicar entrada
+        Logger.log("processMultipleEstoqueItemsWithGroup: Item " + (i + 1) + "/" + itens.length + " - " + itemData.item);
+
+        // Verifica se passou mais de 20 dias desde a última data de registro
+        if (lastReg.lastDate) {
+          var lastDate = parseDateString(lastReg.lastDate);
+
+          if (!lastDate || isNaN(lastDate.getTime())) {
+            Logger.log("processMultipleEstoqueItemsWithGroup: AVISO - Conversão de data falhou para item " + itemData.item);
+            lastDate = new Date(lastReg.lastDate);
+          }
+
+          var diffDays = (now.getTime() - lastDate.getTime()) / (1000 * 3600 * 24);
+          Logger.log("processMultipleEstoqueItemsWithGroup: Item " + itemData.item + " - Diferença: " + diffDays.toFixed(2) + " dias");
+
+          if (diffDays > 20) {
+            var startDate = new Date(now.getTime() - (20 * 24 * 60 * 60 * 1000));
+            var temAtualizacaoAnterior = hasAtualizacaoInPreviousEntries(itemData.item, startDate, now, nextRow);
+            Logger.log("processMultipleEstoqueItemsWithGroup: Item " + itemData.item + " - Encontrou 'ATUALIZAÇÃO'? " + temAtualizacaoAnterior);
+
+            if (!temAtualizacaoAnterior) {
+              sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("red");
+              Logger.log("processMultipleEstoqueItemsWithGroup: Item " + itemData.item + " - VERMELHO (desatualizado)");
+            }
+          }
+        }
+
+        // Marca linha com amarelo para indicar entrada (sobrescreve vermelho se for entrada)
         if (entrada > 0) {
           sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("yellow");
+          Logger.log("processMultipleEstoqueItemsWithGroup: Item " + itemData.item + " - AMARELO (entrada)");
         }
 
         processados++;
