@@ -616,10 +616,40 @@ function processLogin(formData) {
 }
 
 /**
- * getLoggedUser: Retorna o usuário logado.
+ * getLoggedUser: Retorna o usuário logado de forma robusta.
+ * Prioriza o usuário armazenado em UserProperties, mas usa Session como fallback.
  */
 function getLoggedUser() {
-  return PropertiesService.getUserProperties().getProperty("loggedUser");
+  // Tenta pegar o usuário logado via sistema de login
+  var loggedUser = PropertiesService.getUserProperties().getProperty("loggedUser");
+
+  // Se não houver usuário logado via sistema de login, usa o email do Google
+  if (!loggedUser || loggedUser.trim() === "") {
+    try {
+      // Tenta pegar o email do usuário ativo do Google Sheets
+      var activeUser = Session.getActiveUser().getEmail();
+      if (activeUser && activeUser !== "") {
+        Logger.log("getLoggedUser: Usando email do Session: " + activeUser);
+        return activeUser;
+      }
+
+      // Fallback: tenta getEffectiveUser
+      var effectiveUser = Session.getEffectiveUser().getEmail();
+      if (effectiveUser && effectiveUser !== "") {
+        Logger.log("getLoggedUser: Usando email do EffectiveUser: " + effectiveUser);
+        return effectiveUser;
+      }
+    } catch (e) {
+      Logger.log("getLoggedUser: Erro ao obter usuário via Session: " + e.message);
+    }
+
+    // Se ainda não conseguiu, retorna "Desconhecido"
+    Logger.log("getLoggedUser: AVISO - Nenhum usuário identificado!");
+    return "Usuário Desconhecido";
+  }
+
+  Logger.log("getLoggedUser: Usuário logado: " + loggedUser);
+  return loggedUser;
 }
 
 /**
@@ -1028,6 +1058,121 @@ function getLastRegistration(item, currentRow) {
 }
 
 /**
+ * hasAtualizacaoInPreviousEntries: Verifica se há alguma entrada com "ATUALIZAÇÃO"
+ * nas últimas entradas do item dentro do período especificado (últimos 20 dias antes do novo lançamento).
+ * @param {string} item - Nome do item
+ * @param {Date} startDate - Data inicial (20 dias antes do novo lançamento)
+ * @param {Date} endDate - Data final (data do último registro antes do novo lançamento)
+ * @param {number} currentRow - Linha atual para excluir da busca
+ * @return {boolean} - true se encontrou "ATUALIZAÇÃO" ou "ACERTO", false caso contrário
+ */
+function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
+  Logger.log("=== hasAtualizacaoInPreviousEntries INICIADO ===");
+  Logger.log("Item: '" + item + "'");
+  Logger.log("Data inicial: " + startDate);
+  Logger.log("Data final: " + endDate);
+  Logger.log("CurrentRow: " + currentRow);
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) {
+    Logger.log("ERRO: Aba ESTOQUE não encontrada!");
+    return false;
+  }
+
+  var lastRow = sheetEstoque.getLastRow();
+  Logger.log("Última linha da planilha: " + lastRow);
+  if (lastRow < 2) {
+    Logger.log("Planilha vazia - sem dados");
+    return false;
+  }
+
+  // Lê TODA a planilha
+  var startRow = 2;
+  var numRows = lastRow - startRow + 1;
+  Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow);
+
+  // Lê 5 colunas (A-E): Grupo, Item, Data, NF, Obs
+  var data = sheetEstoque.getRange(startRow, 1, numRows, 5).getDisplayValues();
+
+  var itemUpper = item.toString().trim().toUpperCase();
+  Logger.log("Item buscado (maiúsculas): '" + itemUpper + "'");
+
+  var encontrados = 0;
+  // Percorre de trás para frente (mais recentes primeiro)
+  for (var i = data.length - 1; i >= 0; i--) {
+    var rowNum = startRow + i;
+
+    // Pula a linha atual (novo registro)
+    if (rowNum >= currentRow) continue;
+
+    var currentItem = data[i][1]; // Coluna B (Item)
+    if (!currentItem || currentItem.toString().trim() === "") continue;
+
+    var currentItemUpper = currentItem.toString().trim().toUpperCase();
+
+    // Verifica se é o mesmo item
+    if (currentItemUpper === itemUpper) {
+      // Verifica a data do registro
+      var dataRegistroStr = data[i][2]; // Coluna C (Data)
+      if (!dataRegistroStr || dataRegistroStr === "") continue;
+
+      // Converte string para Date
+      var dataRegistro = parseDateString(dataRegistroStr);
+      if (!dataRegistro) continue;
+
+      // Verifica se está dentro do período de 20 dias
+      if (dataRegistro >= startDate && dataRegistro <= endDate) {
+        encontrados++;
+        var obs = data[i][4]; // Coluna E (Obs)
+        Logger.log("Analisando linha " + rowNum + " - Data: " + dataRegistroStr + " - Obs: '" + obs + "'");
+
+        // Verifica se contém "ATUALIZAÇÃO" ou "ACERTO"
+        if (obs && obs.toString().trim() !== "") {
+          var obsLower = obs.toString().toLowerCase();
+          var temKeyword = /acerto|atualiz/i.test(obsLower);
+          if (temKeyword) {
+            Logger.log("✓ ENCONTRADO 'ATUALIZAÇÃO' na linha " + rowNum);
+            Logger.log("=== hasAtualizacaoInPreviousEntries FINALIZADO: true ===");
+            return true;
+          }
+        }
+      }
+    }
+  }
+
+  Logger.log("Total de entradas analisadas no período: " + encontrados);
+  Logger.log("=== hasAtualizacaoInPreviousEntries FINALIZADO: false ===");
+  return false;
+}
+
+/**
+ * parseDateString: Converte string dd/mm/yyyy ou formato de data para objeto Date
+ */
+function parseDateString(dateStr) {
+  if (!dateStr) return null;
+
+  var str = dateStr.toString().trim();
+
+  // Se já é um formato de data completo (ex: "25/11/2025 14:30:00"), extrai apenas a parte da data
+  if (str.includes(" ")) {
+    str = str.split(" ")[0];
+  }
+
+  // Formato dd/mm/yyyy ou d/m/yyyy
+  var parts = str.split("/");
+  if (parts.length !== 3) return null;
+
+  var day = parseInt(parts[0], 10);
+  var month = parseInt(parts[1], 10) - 1; // Meses em JS são 0-11
+  var year = parseInt(parts[2], 10);
+
+  if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
+
+  return new Date(year, month, day);
+}
+
+/**
  * getLastInfoFromDados: Retorna a última informação não vazia da coluna C da aba DADOS para um produto.
  */
 function getLastInfoFromDados(product) {
@@ -1142,47 +1287,70 @@ function gerarRelatorioEstoque(dataInicio, dataFim) {
   var partsFim = dataFim.split("/");
   var startDate = new Date(partsInicio[2], partsInicio[1] - 1, partsInicio[0], 0, 0, 0);
   var endDate = new Date(partsFim[2], partsFim[1] - 1, partsFim[0], 23, 59, 59);
-  
+
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetEstoque = ss.getSheetByName("ESTOQUE");
   if (!sheetEstoque) throw new Error("A aba ESTOQUE não foi encontrada.");
-  
+
   var lastRow = sheetEstoque.getLastRow();
   if (lastRow < 2) throw new Error("Não há dados na aba ESTOQUE.");
-  
+
   var lastColumn = sheetEstoque.getLastColumn();
   var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, lastColumn);
   var dataValues = dataRange.getValues();
-  
-  var filtered = dataValues.filter(function(row) {
-    var dt = new Date(row[2]);
-    return dt >= startDate && dt <= endDate;
-  });
-  
+  var dataBackgrounds = dataRange.getBackgrounds();
+
+  var filtered = [];
+  for (var i = 0; i < dataValues.length; i++) {
+    var dt = new Date(dataValues[i][2]);
+    if (dt >= startDate && dt <= endDate) {
+      filtered.push({
+        row: dataValues[i],
+        background: dataBackgrounds[i][0] || "#ffffff"
+      });
+    }
+  }
+
   var grupos = {};
-  filtered.forEach(function(row) {
-    var prod = row[1];
+  for (var j = 0; j < filtered.length; j++) {
+    var item = filtered[j];
+    var prod = item.row[1];
     if (!grupos[prod]) {
-      grupos[prod] = row;
+      grupos[prod] = item;
     } else {
-      var currentDate = new Date(row[2]);
-      var storedDate = new Date(grupos[prod][2]);
+      var currentDate = new Date(item.row[2]);
+      var storedDate = new Date(grupos[prod].row[2]);
       if (currentDate > storedDate) {
-        grupos[prod] = row;
+        grupos[prod] = item;
       }
     }
-  });
-  
-  var reportData = [];
-  for (var prod in grupos) {
-    var row = grupos[prod];
-    reportData.push([prod, row[8], row[4], row[2]]);
   }
-  
+
+  var reportData = [];
+  var reportBackgrounds = [];
+  for (var prod in grupos) {
+    var item = grupos[prod];
+    var row = item.row;
+    var bg = item.background.toLowerCase();
+
+    // Determina o motivo baseado na cor
+    var motivo = "";
+    if (bg.indexOf("yellow") >= 0 || bg === "#ffff00" || bg === "#ffff") {
+      motivo = "⚠️ ENTRADA - Atualizar estoque";
+    } else if (bg.indexOf("red") >= 0 || bg === "#ff0000" || bg.indexOf("#f00") >= 0) {
+      motivo = "🔴 DESATUALIZADO (+20 dias)";
+    } else {
+      motivo = "OK";
+    }
+
+    reportData.push([prod, row[8], row[4], row[2], motivo]);
+    reportBackgrounds.push(item.background);
+  }
+
   reportData.sort(function(a, b) {
     return new Date(a[3]) - new Date(b[3]);
   });
-  
+
   var sheetRelatorio = ss.getSheetByName("RELATORIO");
   if (!sheetRelatorio) {
     sheetRelatorio = ss.insertSheet("RELATORIO");
@@ -1192,29 +1360,38 @@ function gerarRelatorioEstoque(dataInicio, dataFim) {
   if (isNaN(threshold)) {
     threshold = 0;
   }
-  
-  for (var i = 0; i < reportData.length; i++) {
-    var novoSaldo = parseFloat(reportData[i][1]);
+
+  for (var k = 0; k < reportData.length; k++) {
+    var novoSaldo = parseFloat(reportData[k][1]);
     if (novoSaldo < threshold) {
-      reportData[i].push("URGENTE");
+      reportData[k].push("URGENTE");
     } else {
-      reportData[i].push("ESTOQUE");
+      reportData[k].push("ESTOQUE");
     }
   }
-  
+
   sheetRelatorio.clearContents();
   sheetRelatorio.getRange("J1").setValue(threshold);
-  sheetRelatorio.getRange(1, 1, 1, 5).setValues([["PRODUTO", "NOVO SALDO", "OBS", "DATA/HORA", "STATUS"]]);
+  sheetRelatorio.getRange(1, 1, 1, 6).setValues([["PRODUTO", "NOVO SALDO", "OBS", "DATA/HORA", "MOTIVO", "STATUS"]]);
   if (reportData.length > 0) {
-    sheetRelatorio.getRange(2, 1, reportData.length, 5).setValues(reportData);
+    var reportRange = sheetRelatorio.getRange(2, 1, reportData.length, 6);
+    reportRange.setValues(reportData);
+
+    // Aplica as cores de fundo nas linhas do relatório
+    for (var m = 0; m < reportBackgrounds.length; m++) {
+      var bgColor = reportBackgrounds[m];
+      if (bgColor && bgColor !== "#ffffff" && bgColor !== "white") {
+        sheetRelatorio.getRange(m + 2, 1, 1, 6).setBackground(bgColor);
+      }
+    }
   }
-  
+
   var relFilter = sheetRelatorio.getFilter();
   if (relFilter) {
     relFilter.remove();
   }
-  sheetRelatorio.getRange(1, 1, sheetRelatorio.getLastRow(), 5).createFilter();
-  
+  sheetRelatorio.getRange(1, 1, sheetRelatorio.getLastRow(), 6).createFilter();
+
   Logger.log("gerarRelatorioEstoque: Relatório gerado com " + reportData.length + " registros.");
   return "Relatório gerado com sucesso!";
 }
@@ -1421,14 +1598,18 @@ function testarCadastro() {
  */
 function processEstoque(formData) {
   Logger.log("processEstoque: Dados inseridos: " + JSON.stringify(formData));
-  
+
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetEstoque = ss.getSheetByName("ESTOQUE");
   var now = new Date();
   var nextRow = sheetEstoque.getLastRow() + 1;
-  
+
   PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
-  
+
+  // Recupera o usuário que está fazendo a ação
+  var usuario = getLoggedUser();
+  Logger.log("processEstoque: Usuário identificado: " + usuario + " | Item: " + formData.item);
+
   // Recupera último registro para cálculo de saldo e data
   var lastReg = getLastRegistration(formData.item, nextRow);
   var previousSaldo = parseFloat(lastReg.lastStock) || 0;
@@ -1444,49 +1625,89 @@ function processEstoque(formData) {
     formData.saida,
     newSaldo,
     now,
-    getLoggedUser()
+    usuario
   ];
   
   try {
     sheetEstoque.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
     Logger.log("processEstoque: Dados inseridos na linha " + nextRow);
+
+    // Registra auditoria
+    var detalhesAuditoria = "E:" + formData.entrada + " | S:" + formData.saida + " | Saldo:" + newSaldo + " | NF:" + formData.nf;
+    registrarAuditoria("Inserir Estoque", formData.item, detalhesAuditoria);
   } catch (err) {
     Logger.log("processEstoque: Erro ao inserir dados: " + err);
     showCustomDialog("Erro ao inserir os dados. Por favor, contate o administrador.");
     PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
     return;
   }
-  
+
   PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
   backupEstoqueData();
+
+  // Variável para controlar o tipo de aviso
+  var avisoTipo = null;
+  var avisoMensagem = "";
 
   // Verifica se passou mais de 20 dias desde a última data de registro
   if (lastReg.lastDate) {
     var lastDate = new Date(lastReg.lastDate);
     var diffDays = (now.getTime() - lastDate.getTime()) / (1000 * 3600 * 24);
+    Logger.log("processEstoque: Diferença de dias desde último registro: " + diffDays + " dias");
+
     if (diffDays > 20) {
-      // Verifica coluna E (obs) por palavras-chave
-      var textoObs = formData.obs ? formData.obs.toString().toLowerCase() : "";
-      var temKeyword = /acerto|atualiza[cç][ãa]o/.test(textoObs);
-      // Se não conter 'acerto' ou 'atualização', pinta de vermelho
-      if (!temKeyword) {
+      // NOVA LÓGICA: Verifica se ALGUMA entrada ANTERIOR nos últimos 20 dias contém "ATUALIZAÇÃO"
+      // Calcula a data inicial (20 dias antes do novo lançamento)
+      var startDate = new Date(now.getTime() - (20 * 24 * 60 * 60 * 1000));
+
+      Logger.log("processEstoque: Verificando entradas anteriores entre " + startDate + " e " + now);
+
+      // Busca por "ATUALIZAÇÃO" nas entradas ANTERIORES dentro do período de 20 dias
+      var temAtualizacaoAnterior = hasAtualizacaoInPreviousEntries(formData.item, startDate, now, nextRow);
+      Logger.log("processEstoque: Encontrou 'ATUALIZAÇÃO' em entradas anteriores? " + temAtualizacaoAnterior);
+
+      // Se NÃO houver "ATUALIZAÇÃO" em NENHUMA entrada anterior nos últimos 20 dias, pinta de vermelho
+      if (!temAtualizacaoAnterior) {
         var lastColumn = sheetEstoque.getLastColumn();
         sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("red");
-        showCustomDialog("⚠️ PRODUTO DESATUALIZADO (ÚLTIMA ATUALIZAÇÃO HÁ MAIS DE 20 DIAS). POR FAVOR, ATUALIZAR URGENTE.");
-        return;
+        avisoTipo = "DESATUALIZADO";
+        avisoMensagem = "⚠️ PRODUTO DESATUALIZADO (ÚLTIMA ATUALIZAÇÃO HÁ MAIS DE 20 DIAS). POR FAVOR, ATUALIZAR URGENTE.";
+        Logger.log("processEstoque: Linha pintada de VERMELHO - produto desatualizado (sem ATUALIZAÇÃO nas entradas anteriores dos últimos 20 dias)");
+      } else {
+        Logger.log("processEstoque: Linha NÃO pintada de vermelho - há ATUALIZAÇÃO em entradas anteriores");
       }
+    } else {
+      Logger.log("processEstoque: Produto dentro dos 20 dias - NÃO verifica keyword");
     }
+  } else {
+    Logger.log("processEstoque: Primeiro registro do item - sem verificação de dias");
   }
 
-  // Verifica se houve ENTRADA de estoque - aviso para atualização
+  // Verifica se houve ENTRADA de estoque - aviso para atualização (sobrescreve vermelho)
   if (parseFloat(formData.entrada) > 0) {
     var lastColumn = sheetEstoque.getLastColumn();
     sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("yellow");
-    showCustomDialog("⚠️ ENTRADA DE ESTOQUE REGISTRADA!\n\nÉ NECESSÁRIO ATUALIZAR O ESTOQUE DESTE ITEM PARA EVITAR FUROS DE ESTOQUE.\n\nRealize uma contagem física e registre uma atualização completa do saldo.");
-    return;
+    avisoTipo = "ENTRADA";
+    avisoMensagem = "⚠️ ENTRADA DE ESTOQUE REGISTRADA!\n\nÉ NECESSÁRIO ATUALIZAR O ESTOQUE DESTE ITEM PARA EVITAR FUROS DE ESTOQUE.\n\nRealize uma contagem física e registre uma atualização completa do saldo.";
+    Logger.log("processEstoque: Linha pintada de AMARELO - entrada de estoque");
   }
 
-  // Se não entrou no critério, não exibe diálogo de sucesso para agilizar o cadastro.
+  // Invalida caches para garantir atualização
+  invalidateCache();
+  invalidateCacheOpt();
+
+  // Prepara mensagem de retorno
+  var mensagemRetorno = "";
+  if (avisoMensagem !== "") {
+    mensagemRetorno = avisoMensagem + "\n\n✅ REGISTRO SALVO COM SUCESSO!\nSaldo Anterior: " + previousSaldo + "\nNovo Saldo: " + newSaldo;
+  } else {
+    mensagemRetorno = "✅ REGISTRO SALVO COM SUCESSO!\n\nItem: " + formData.item + "\nSaldo Anterior: " + previousSaldo + "\nNovo Saldo: " + newSaldo;
+  }
+
+  Logger.log("processEstoque: Mensagem de retorno: " + mensagemRetorno);
+
+  // Retorna a mensagem para o callback do DialogEstoque.html
+  return mensagemRetorno;
 }
 
 /* ================================
@@ -2107,10 +2328,40 @@ function processLogin(formData) {
 }
 
 /**
- * getLoggedUser: Retorna o usuário logado.
+ * getLoggedUser: Retorna o usuário logado de forma robusta.
+ * Prioriza o usuário armazenado em UserProperties, mas usa Session como fallback.
  */
 function getLoggedUser() {
-  return PropertiesService.getUserProperties().getProperty("loggedUser");
+  // Tenta pegar o usuário logado via sistema de login
+  var loggedUser = PropertiesService.getUserProperties().getProperty("loggedUser");
+
+  // Se não houver usuário logado via sistema de login, usa o email do Google
+  if (!loggedUser || loggedUser.trim() === "") {
+    try {
+      // Tenta pegar o email do usuário ativo do Google Sheets
+      var activeUser = Session.getActiveUser().getEmail();
+      if (activeUser && activeUser !== "") {
+        Logger.log("getLoggedUser: Usando email do Session: " + activeUser);
+        return activeUser;
+      }
+
+      // Fallback: tenta getEffectiveUser
+      var effectiveUser = Session.getEffectiveUser().getEmail();
+      if (effectiveUser && effectiveUser !== "") {
+        Logger.log("getLoggedUser: Usando email do EffectiveUser: " + effectiveUser);
+        return effectiveUser;
+      }
+    } catch (e) {
+      Logger.log("getLoggedUser: Erro ao obter usuário via Session: " + e.message);
+    }
+
+    // Se ainda não conseguiu, retorna "Desconhecido"
+    Logger.log("getLoggedUser: AVISO - Nenhum usuário identificado!");
+    return "Usuário Desconhecido";
+  }
+
+  Logger.log("getLoggedUser: Usuário logado: " + loggedUser);
+  return loggedUser;
 }
 
 /**
@@ -2519,6 +2770,121 @@ function getLastRegistration(item, currentRow) {
 }
 
 /**
+ * hasAtualizacaoInPreviousEntries: Verifica se há alguma entrada com "ATUALIZAÇÃO"
+ * nas últimas entradas do item dentro do período especificado (últimos 20 dias antes do novo lançamento).
+ * @param {string} item - Nome do item
+ * @param {Date} startDate - Data inicial (20 dias antes do novo lançamento)
+ * @param {Date} endDate - Data final (data do último registro antes do novo lançamento)
+ * @param {number} currentRow - Linha atual para excluir da busca
+ * @return {boolean} - true se encontrou "ATUALIZAÇÃO" ou "ACERTO", false caso contrário
+ */
+function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
+  Logger.log("=== hasAtualizacaoInPreviousEntries INICIADO ===");
+  Logger.log("Item: '" + item + "'");
+  Logger.log("Data inicial: " + startDate);
+  Logger.log("Data final: " + endDate);
+  Logger.log("CurrentRow: " + currentRow);
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) {
+    Logger.log("ERRO: Aba ESTOQUE não encontrada!");
+    return false;
+  }
+
+  var lastRow = sheetEstoque.getLastRow();
+  Logger.log("Última linha da planilha: " + lastRow);
+  if (lastRow < 2) {
+    Logger.log("Planilha vazia - sem dados");
+    return false;
+  }
+
+  // Lê TODA a planilha
+  var startRow = 2;
+  var numRows = lastRow - startRow + 1;
+  Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow);
+
+  // Lê 5 colunas (A-E): Grupo, Item, Data, NF, Obs
+  var data = sheetEstoque.getRange(startRow, 1, numRows, 5).getDisplayValues();
+
+  var itemUpper = item.toString().trim().toUpperCase();
+  Logger.log("Item buscado (maiúsculas): '" + itemUpper + "'");
+
+  var encontrados = 0;
+  // Percorre de trás para frente (mais recentes primeiro)
+  for (var i = data.length - 1; i >= 0; i--) {
+    var rowNum = startRow + i;
+
+    // Pula a linha atual (novo registro)
+    if (rowNum >= currentRow) continue;
+
+    var currentItem = data[i][1]; // Coluna B (Item)
+    if (!currentItem || currentItem.toString().trim() === "") continue;
+
+    var currentItemUpper = currentItem.toString().trim().toUpperCase();
+
+    // Verifica se é o mesmo item
+    if (currentItemUpper === itemUpper) {
+      // Verifica a data do registro
+      var dataRegistroStr = data[i][2]; // Coluna C (Data)
+      if (!dataRegistroStr || dataRegistroStr === "") continue;
+
+      // Converte string para Date
+      var dataRegistro = parseDateString(dataRegistroStr);
+      if (!dataRegistro) continue;
+
+      // Verifica se está dentro do período de 20 dias
+      if (dataRegistro >= startDate && dataRegistro <= endDate) {
+        encontrados++;
+        var obs = data[i][4]; // Coluna E (Obs)
+        Logger.log("Analisando linha " + rowNum + " - Data: " + dataRegistroStr + " - Obs: '" + obs + "'");
+
+        // Verifica se contém "ATUALIZAÇÃO" ou "ACERTO"
+        if (obs && obs.toString().trim() !== "") {
+          var obsLower = obs.toString().toLowerCase();
+          var temKeyword = /acerto|atualiz/i.test(obsLower);
+          if (temKeyword) {
+            Logger.log("✓ ENCONTRADO 'ATUALIZAÇÃO' na linha " + rowNum);
+            Logger.log("=== hasAtualizacaoInPreviousEntries FINALIZADO: true ===");
+            return true;
+          }
+        }
+      }
+    }
+  }
+
+  Logger.log("Total de entradas analisadas no período: " + encontrados);
+  Logger.log("=== hasAtualizacaoInPreviousEntries FINALIZADO: false ===");
+  return false;
+}
+
+/**
+ * parseDateString: Converte string dd/mm/yyyy ou formato de data para objeto Date
+ */
+function parseDateString(dateStr) {
+  if (!dateStr) return null;
+
+  var str = dateStr.toString().trim();
+
+  // Se já é um formato de data completo (ex: "25/11/2025 14:30:00"), extrai apenas a parte da data
+  if (str.includes(" ")) {
+    str = str.split(" ")[0];
+  }
+
+  // Formato dd/mm/yyyy ou d/m/yyyy
+  var parts = str.split("/");
+  if (parts.length !== 3) return null;
+
+  var day = parseInt(parts[0], 10);
+  var month = parseInt(parts[1], 10) - 1; // Meses em JS são 0-11
+  var year = parseInt(parts[2], 10);
+
+  if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
+
+  return new Date(year, month, day);
+}
+
+/**
  * getLastInfoFromDados: Retorna a última informação não vazia da coluna C da aba DADOS para um produto.
  */
 function getLastInfoFromDados(product) {
@@ -2633,47 +2999,70 @@ function gerarRelatorioEstoque(dataInicio, dataFim) {
   var partsFim = dataFim.split("/");
   var startDate = new Date(partsInicio[2], partsInicio[1] - 1, partsInicio[0], 0, 0, 0);
   var endDate = new Date(partsFim[2], partsFim[1] - 1, partsFim[0], 23, 59, 59);
-  
+
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetEstoque = ss.getSheetByName("ESTOQUE");
   if (!sheetEstoque) throw new Error("A aba ESTOQUE não foi encontrada.");
-  
+
   var lastRow = sheetEstoque.getLastRow();
   if (lastRow < 2) throw new Error("Não há dados na aba ESTOQUE.");
-  
+
   var lastColumn = sheetEstoque.getLastColumn();
   var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, lastColumn);
   var dataValues = dataRange.getValues();
-  
-  var filtered = dataValues.filter(function(row) {
-    var dt = new Date(row[2]);
-    return dt >= startDate && dt <= endDate;
-  });
-  
+  var dataBackgrounds = dataRange.getBackgrounds();
+
+  var filtered = [];
+  for (var i = 0; i < dataValues.length; i++) {
+    var dt = new Date(dataValues[i][2]);
+    if (dt >= startDate && dt <= endDate) {
+      filtered.push({
+        row: dataValues[i],
+        background: dataBackgrounds[i][0] || "#ffffff"
+      });
+    }
+  }
+
   var grupos = {};
-  filtered.forEach(function(row) {
-    var prod = row[1];
+  for (var j = 0; j < filtered.length; j++) {
+    var item = filtered[j];
+    var prod = item.row[1];
     if (!grupos[prod]) {
-      grupos[prod] = row;
+      grupos[prod] = item;
     } else {
-      var currentDate = new Date(row[2]);
-      var storedDate = new Date(grupos[prod][2]);
+      var currentDate = new Date(item.row[2]);
+      var storedDate = new Date(grupos[prod].row[2]);
       if (currentDate > storedDate) {
-        grupos[prod] = row;
+        grupos[prod] = item;
       }
     }
-  });
-  
-  var reportData = [];
-  for (var prod in grupos) {
-    var row = grupos[prod];
-    reportData.push([prod, row[8], row[4], row[2]]);
   }
-  
+
+  var reportData = [];
+  var reportBackgrounds = [];
+  for (var prod in grupos) {
+    var item = grupos[prod];
+    var row = item.row;
+    var bg = item.background.toLowerCase();
+
+    // Determina o motivo baseado na cor
+    var motivo = "";
+    if (bg.indexOf("yellow") >= 0 || bg === "#ffff00" || bg === "#ffff") {
+      motivo = "⚠️ ENTRADA - Atualizar estoque";
+    } else if (bg.indexOf("red") >= 0 || bg === "#ff0000" || bg.indexOf("#f00") >= 0) {
+      motivo = "🔴 DESATUALIZADO (+20 dias)";
+    } else {
+      motivo = "OK";
+    }
+
+    reportData.push([prod, row[8], row[4], row[2], motivo]);
+    reportBackgrounds.push(item.background);
+  }
+
   reportData.sort(function(a, b) {
     return new Date(a[3]) - new Date(b[3]);
   });
-  
+
   var sheetRelatorio = ss.getSheetByName("RELATORIO");
   if (!sheetRelatorio) {
     sheetRelatorio = ss.insertSheet("RELATORIO");
@@ -2683,29 +3072,38 @@ function gerarRelatorioEstoque(dataInicio, dataFim) {
   if (isNaN(threshold)) {
     threshold = 0;
   }
-  
-  for (var i = 0; i < reportData.length; i++) {
-    var novoSaldo = parseFloat(reportData[i][1]);
+
+  for (var k = 0; k < reportData.length; k++) {
+    var novoSaldo = parseFloat(reportData[k][1]);
     if (novoSaldo < threshold) {
-      reportData[i].push("URGENTE");
+      reportData[k].push("URGENTE");
     } else {
-      reportData[i].push("ESTOQUE");
+      reportData[k].push("ESTOQUE");
     }
   }
-  
+
   sheetRelatorio.clearContents();
   sheetRelatorio.getRange("J1").setValue(threshold);
-  sheetRelatorio.getRange(1, 1, 1, 5).setValues([["PRODUTO", "NOVO SALDO", "OBS", "DATA/HORA", "STATUS"]]);
+  sheetRelatorio.getRange(1, 1, 1, 6).setValues([["PRODUTO", "NOVO SALDO", "OBS", "DATA/HORA", "MOTIVO", "STATUS"]]);
   if (reportData.length > 0) {
-    sheetRelatorio.getRange(2, 1, reportData.length, 5).setValues(reportData);
+    var reportRange = sheetRelatorio.getRange(2, 1, reportData.length, 6);
+    reportRange.setValues(reportData);
+
+    // Aplica as cores de fundo nas linhas do relatório
+    for (var m = 0; m < reportBackgrounds.length; m++) {
+      var bgColor = reportBackgrounds[m];
+      if (bgColor && bgColor !== "#ffffff" && bgColor !== "white") {
+        sheetRelatorio.getRange(m + 2, 1, 1, 6).setBackground(bgColor);
+      }
+    }
   }
-  
+
   var relFilter = sheetRelatorio.getFilter();
   if (relFilter) {
     relFilter.remove();
   }
-  sheetRelatorio.getRange(1, 1, sheetRelatorio.getLastRow(), 5).createFilter();
-  
+  sheetRelatorio.getRange(1, 1, sheetRelatorio.getLastRow(), 6).createFilter();
+
   Logger.log("gerarRelatorioEstoque: Relatório gerado com " + reportData.length + " registros.");
   return "Relatório gerado com sucesso!";
 }
@@ -4289,5 +4687,54 @@ function getEstoque3Meses() {
   } catch (error) {
     Logger.log("Erro getEstoque3Meses: " + error);
     return { success: false, message: "Erro ao buscar estoque: " + error.message };
+  }
+}
+
+/**
+ * registrarAuditoria: Registra ações realizadas no sistema para auditoria
+ * @param {string} acao - Descrição da ação realizada
+ * @param {string} item - Item afetado (opcional)
+ * @param {string} detalhes - Detalhes adicionais (opcional)
+ */
+function registrarAuditoria(acao, item, detalhes) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetAuditoria = ss.getSheetByName("AUDITORIA");
+
+    // Cria a aba se não existir
+    if (!sheetAuditoria) {
+      sheetAuditoria = ss.insertSheet("AUDITORIA");
+      sheetAuditoria.getRange(1, 1, 1, 6).setValues([["Data/Hora", "Usuário", "Email", "Ação", "Item", "Detalhes"]]);
+      sheetAuditoria.getRange(1, 1, 1, 6).setFontWeight("bold");
+      sheetAuditoria.setFrozenRows(1);
+    }
+
+    var now = new Date();
+    var usuario = getLoggedUser();
+    var email = "";
+
+    // Tenta pegar o email do usuário atual
+    try {
+      email = Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail() || "";
+    } catch (e) {
+      email = "N/A";
+    }
+
+    var rowData = [
+      now,
+      usuario,
+      email,
+      acao,
+      item || "",
+      detalhes || ""
+    ];
+
+    var nextRow = sheetAuditoria.getLastRow() + 1;
+    sheetAuditoria.getRange(nextRow, 1, 1, 6).setValues([rowData]);
+
+    Logger.log("Auditoria: " + acao + " | Usuário: " + usuario + " | Email: " + email + " | Item: " + (item || "N/A"));
+  } catch (error) {
+    Logger.log("Erro ao registrar auditoria: " + error.message);
+    // Não propaga o erro para não interromper a operação principal
   }
 }
