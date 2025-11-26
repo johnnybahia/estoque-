@@ -1092,8 +1092,8 @@ function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
   var numRows = lastRow - startRow + 1;
   Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow);
 
-  // Lê 5 colunas (A-E): Grupo, Item, Data, NF, Obs
-  var data = sheetEstoque.getRange(startRow, 1, numRows, 5).getDisplayValues();
+  // Lê 6 colunas (A-F): Grupo, Item, Unidade, Data, NF, Obs
+  var data = sheetEstoque.getRange(startRow, 1, numRows, 6).getDisplayValues();
 
   var itemUpper = item.toString().trim().toUpperCase();
   Logger.log("Item buscado (maiúsculas): '" + itemUpper + "'");
@@ -1114,7 +1114,7 @@ function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
     // Verifica se é o mesmo item
     if (currentItemUpper === itemUpper) {
       // Verifica a data do registro
-      var dataRegistroStr = data[i][2]; // Coluna C (Data)
+      var dataRegistroStr = data[i][3]; // Coluna D (Data)
       if (!dataRegistroStr || dataRegistroStr === "") continue;
 
       // Converte string para Date
@@ -1124,7 +1124,7 @@ function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
       // Verifica se está dentro do período de 20 dias
       if (dataRegistro >= startDate && dataRegistro <= endDate) {
         encontrados++;
-        var obs = data[i][4]; // Coluna E (Obs)
+        var obs = data[i][5]; // Coluna F (Obs)
         Logger.log("Analisando linha " + rowNum + " - Data: " + dataRegistroStr + " - Obs: '" + obs + "'");
 
         // Verifica se contém "ATUALIZAÇÃO" ou "ACERTO"
@@ -2804,8 +2804,8 @@ function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
   var numRows = lastRow - startRow + 1;
   Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow);
 
-  // Lê 5 colunas (A-E): Grupo, Item, Data, NF, Obs
-  var data = sheetEstoque.getRange(startRow, 1, numRows, 5).getDisplayValues();
+  // Lê 6 colunas (A-F): Grupo, Item, Unidade, Data, NF, Obs
+  var data = sheetEstoque.getRange(startRow, 1, numRows, 6).getDisplayValues();
 
   var itemUpper = item.toString().trim().toUpperCase();
   Logger.log("Item buscado (maiúsculas): '" + itemUpper + "'");
@@ -2826,7 +2826,7 @@ function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
     // Verifica se é o mesmo item
     if (currentItemUpper === itemUpper) {
       // Verifica a data do registro
-      var dataRegistroStr = data[i][2]; // Coluna C (Data)
+      var dataRegistroStr = data[i][3]; // Coluna D (Data)
       if (!dataRegistroStr || dataRegistroStr === "") continue;
 
       // Converte string para Date
@@ -2836,7 +2836,7 @@ function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
       // Verifica se está dentro do período de 20 dias
       if (dataRegistro >= startDate && dataRegistro <= endDate) {
         encontrados++;
-        var obs = data[i][4]; // Coluna E (Obs)
+        var obs = data[i][5]; // Coluna F (Obs)
         Logger.log("Analisando linha " + rowNum + " - Data: " + dataRegistroStr + " - Obs: '" + obs + "'");
 
         // Verifica se contém "ATUALIZAÇÃO" ou "ACERTO"
