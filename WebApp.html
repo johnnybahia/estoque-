@@ -667,6 +667,10 @@
       text-align: center;
       box-shadow: 0 10px 40px rgba(0,0,0,0.4);
       min-width: 300px;
+      max-width: 900px;
+      width: 90%;
+      max-height: 90vh;
+      overflow-y: auto;
     }
 
     .loading-spinner {
@@ -707,6 +711,100 @@
       color: #7f8c8d;
       margin-top: 5px;
     }
+
+    /* Lista de Últimos Lançamentos */
+    .ultimos-lancamentos {
+      margin-top: 25px;
+      padding-top: 20px;
+      border-top: 2px solid #e0e0e0;
+      max-width: 800px;
+      width: 100%;
+    }
+
+    .ultimos-lancamentos h4 {
+      font-size: 1rem;
+      color: var(--text-dark);
+      margin: 0 0 15px 0;
+      font-weight: 600;
+    }
+
+    .lancamentos-list {
+      max-height: 300px;
+      overflow-y: auto;
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 10px;
+    }
+
+    .loading-lancamentos {
+      text-align: center;
+      color: #7f8c8d;
+      padding: 20px;
+      font-size: 0.9rem;
+    }
+
+    .lancamento-item {
+      background: white;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      border-left: 4px solid var(--primary-color);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      transition: transform 0.2s;
+    }
+
+    .lancamento-item:hover {
+      transform: translateX(3px);
+    }
+
+    .lancamento-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+
+    .lancamento-item-nome {
+      font-weight: 600;
+      color: var(--text-dark);
+      font-size: 0.95rem;
+    }
+
+    .lancamento-data {
+      font-size: 0.8rem;
+      color: #7f8c8d;
+    }
+
+    .lancamento-details {
+      display: flex;
+      gap: 15px;
+      font-size: 0.85rem;
+      color: #555;
+      flex-wrap: wrap;
+    }
+
+    .lancamento-detail {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .lancamento-detail strong {
+      font-weight: 600;
+    }
+
+    .lancamento-entrada {
+      color: #28a745;
+    }
+
+    .lancamento-saida {
+      color: #dc3545;
+    }
+
+    .lancamento-saldo {
+      color: var(--primary-color);
+    }
+
     .modal-content {
       background: white;
       border-radius: 8px;
@@ -2189,7 +2287,65 @@
         overlay.classList.add('show');
         // Disable scrolling
         document.body.style.overflow = 'hidden';
+
+        // Carrega últimos lançamentos
+        carregarUltimosLancamentos();
       }
+    }
+
+    // Carrega e exibe os últimos 20 lançamentos
+    function carregarUltimosLancamentos() {
+      const lancamentosList = document.getElementById('lancamentosList');
+      if (!lancamentosList) return;
+
+      // Mostra loading
+      lancamentosList.innerHTML = '<div class="loading-lancamentos">Carregando lançamentos...</div>';
+
+      // Busca os lançamentos do servidor
+      google.script.run
+        .withSuccessHandler(function(lancamentos) {
+          if (!lancamentos || lancamentos.length === 0) {
+            lancamentosList.innerHTML = '<div class="loading-lancamentos">Nenhum lançamento encontrado</div>';
+            return;
+          }
+
+          // Renderiza os lançamentos
+          let html = '';
+          for (let i = 0; i < lancamentos.length; i++) {
+            const lanc = lancamentos[i];
+
+            // Formata entrada/saída
+            const entradaHtml = parseFloat(lanc.entrada) > 0
+              ? `<span class="lancamento-detail lancamento-entrada">↑ ${lanc.entrada}</span>`
+              : '';
+            const saidaHtml = parseFloat(lanc.saida) > 0
+              ? `<span class="lancamento-detail lancamento-saida">↓ ${lanc.saida}</span>`
+              : '';
+
+            html += `
+              <div class="lancamento-item">
+                <div class="lancamento-header">
+                  <div class="lancamento-item-nome">${lanc.item}</div>
+                  <div class="lancamento-data">${lanc.data}</div>
+                </div>
+                <div class="lancamento-details">
+                  <span class="lancamento-detail"><strong>Grupo:</strong> ${lanc.grupo}</span>
+                  ${entradaHtml}
+                  ${saidaHtml}
+                  <span class="lancamento-detail lancamento-saldo"><strong>Saldo:</strong> ${lanc.saldo}</span>
+                  ${lanc.nf ? `<span class="lancamento-detail"><strong>NF:</strong> ${lanc.nf}</span>` : ''}
+                </div>
+              </div>
+            `;
+          }
+
+          lancamentosList.innerHTML = html;
+        })
+        .withFailureHandler(function(error) {
+          console.error('Erro ao carregar lançamentos:', error);
+          lancamentosList.innerHTML = '<div class="loading-lancamentos">Erro ao carregar lançamentos</div>';
+        })
+        .getUltimosLancamentos();
     }
 
     // Hide loading overlay
@@ -3880,11 +4036,48 @@
         const qtd = operacao === 'entrada' ? item.entrada : item.saida;
         const saldoAnterior = item.saldoAnterior !== undefined ? item.saldoAnterior : 0;
         const novoSaldo = item.novoSaldo !== undefined ? item.novoSaldo : 0;
-        const avisoStyle = item.aviso && item.aviso.includes('DESATUALIZADO') ? 'border-left: 4px solid #dc3545;' : (item.aviso ? 'border-left: 4px solid #ffc107;' : 'border-left: 4px solid #28a745;');
+
+        // Define estilo e HTML do aviso baseado no tipo
+        let avisoHtml = '';
+        let containerStyle = 'background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px;';
+
+        if (item.aviso && item.aviso.includes('DESATUALIZADO')) {
+          // AVISO URGENTE - Item desatualizado (+20 dias)
+          containerStyle = 'background: #ffebee; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 4px solid #f44336; box-shadow: 0 8px 16px rgba(244, 67, 54, 0.3);';
+          avisoHtml = `
+            <div style="background: #ffebee; padding: 20px; border-radius: 8px; margin-bottom: 15px; text-align: center; border: 4px solid #f44336;">
+              <div style="font-size: 2.5rem; margin-bottom: 10px; animation: pulse 1.5s infinite;">🚨</div>
+              <div style="font-size: 1.3rem; margin-bottom: 10px; text-transform: uppercase; color: #c62828; font-weight: bold;">⚠️ ATENÇÃO URGENTE ⚠️</div>
+              <div style="font-size: 1.1rem; margin-bottom: 15px; line-height: 1.5; color: #c62828;">
+                <strong>PRODUTO DESATUALIZADO!</strong><br>
+                Última atualização há mais de 20 dias
+              </div>
+              <div style="font-size: 1.2rem; background: #d32f2f; color: white; padding: 15px; border-radius: 6px; margin-top: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                ⚡ AÇÃO NECESSÁRIA: ATUALIZAR ESTOQUE URGENTE! ⚡<br>
+                <span style="font-size: 0.9rem; margin-top: 8px; display: block;">
+                  Realize uma contagem física e registre uma atualização completa do saldo
+                </span>
+              </div>
+            </div>
+          `;
+        } else if (item.aviso && item.aviso.includes('ENTRADA')) {
+          // AVISO - Entrada de estoque
+          containerStyle = 'background: #fff3cd; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 3px solid #ffc107; box-shadow: 0 4px 8px rgba(255, 193, 7, 0.2);';
+          avisoHtml = `
+            <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin-bottom: 15px; text-align: center; border: 3px solid #ffc107;">
+              <div style="font-size: 2rem; margin-bottom: 8px;">📦</div>
+              <div style="font-size: 1.1rem; margin-bottom: 10px; color: #856404;"><strong>⚠️ ENTRADA DE ESTOQUE REGISTRADA!</strong></div>
+              <div style="font-size: 0.95rem; line-height: 1.5; color: #856404;">
+                É necessário atualizar o estoque deste item para evitar furos de estoque.<br>
+                <strong>Realize uma contagem física e registre uma atualização completa do saldo.</strong>
+              </div>
+            </div>
+          `;
+        }
 
         html += `
-          <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 15px; ${avisoStyle}">
-            ${item.aviso ? `<div class="novo-item-warning" style="margin-bottom: 10px;"><strong>⚠️</strong> ${item.aviso}</div>` : ''}
+          <div style="${containerStyle}">
+            ${avisoHtml}
             <table style="width: 100%; border-collapse: collapse;">
               <tr>
                 <td style="padding: 6px; font-weight: bold; width: 35%;">Produto:</td>
@@ -4750,6 +4943,14 @@
       <div class="loading-spinner"></div>
       <div class="loading-text" id="loadingText">Processando...</div>
       <div class="loading-subtext">Aguarde, não feche esta janela</div>
+
+      <!-- Lista de Últimos Lançamentos -->
+      <div class="ultimos-lancamentos" id="ultimosLancamentos">
+        <h4>📋 Últimos 20 Lançamentos</h4>
+        <div class="lancamentos-list" id="lancamentosList">
+          <div class="loading-lancamentos">Carregando lançamentos...</div>
+        </div>
+      </div>
     </div>
   </div>
 
