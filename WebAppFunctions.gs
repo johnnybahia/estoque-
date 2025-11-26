@@ -382,6 +382,16 @@ function processEstoqueWebApp(formData) {
 
     PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
 
+    // Recupera o usuário que está fazendo a ação (com logs para debug)
+    var usuario = getLoggedUser();
+    Logger.log("processEstoqueWebApp: Usuário identificado: " + usuario + " | Item: " + formData.item);
+
+    // Adiciona informação do usuário do formulário se disponível
+    if (formData.usuario) {
+      Logger.log("processEstoqueWebApp: Usuário do formulário: " + formData.usuario);
+      usuario = formData.usuario; // Prioriza o usuário enviado pelo formulário
+    }
+
     // Recupera último registro para cálculo de saldo e data
     var lastReg = getLastRegistration(formData.item, nextRow);
     var previousSaldo = parseFloat(lastReg.lastStock) || 0;
@@ -401,7 +411,7 @@ function processEstoqueWebApp(formData) {
       newSaldo,                    // J: Saldo
       parseFloat(formData.valorUnitario) || 0,  // K: Valor Unitário (NOVO)
       now,                         // L: Alterado Em
-      getLoggedUser()              // M: Alterado Por
+      usuario                      // M: Alterado Por
     ];
 
     sheetEstoque.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
@@ -416,36 +426,53 @@ function processEstoqueWebApp(formData) {
     if (lastReg.lastDate) {
       var lastDate = new Date(lastReg.lastDate);
       var diffDays = (now.getTime() - lastDate.getTime()) / (1000 * 3600 * 24);
+      Logger.log("processEstoqueWebApp: Diferença de dias desde último registro: " + diffDays + " dias");
+
       if (diffDays > 20) {
-        // Verifica coluna F (obs) por palavras-chave
-        var textoObs = formData.obs ? formData.obs.toString().toLowerCase() : "";
-        var temKeyword = /acerto|atualiza[cç][ãa]o/.test(textoObs);
-        // Se não conter 'acerto' ou 'atualização', pinta de vermelho
-        if (!temKeyword) {
+        // NOVA LÓGICA: Verifica se ALGUMA entrada ANTERIOR nos últimos 20 dias contém "ATUALIZAÇÃO"
+        // Calcula a data inicial (20 dias antes do novo lançamento)
+        var startDate = new Date(now.getTime() - (20 * 24 * 60 * 60 * 1000));
+
+        Logger.log("processEstoqueWebApp: Verificando entradas anteriores entre " + startDate + " e " + now);
+
+        // Busca por "ATUALIZAÇÃO" nas entradas ANTERIORES dentro do período de 20 dias
+        var temAtualizacaoAnterior = hasAtualizacaoInPreviousEntries(formData.item, startDate, now, nextRow);
+        Logger.log("processEstoqueWebApp: Encontrou 'ATUALIZAÇÃO' em entradas anteriores? " + temAtualizacaoAnterior);
+
+        // Se NÃO houver "ATUALIZAÇÃO" em NENHUMA entrada anterior nos últimos 20 dias, pinta de vermelho
+        if (!temAtualizacaoAnterior) {
           var lastColumn = sheetEstoque.getLastColumn();
           sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("red");
           warningMessage = "⚠️ PRODUTO DESATUALIZADO (ÚLTIMA ATUALIZAÇÃO HÁ MAIS DE 20 DIAS). POR FAVOR, ATUALIZAR URGENTE.";
+          Logger.log("processEstoqueWebApp: Linha pintada de VERMELHO - produto desatualizado (sem ATUALIZAÇÃO nas entradas anteriores dos últimos 20 dias)");
+        } else {
+          Logger.log("processEstoqueWebApp: Linha NÃO pintada de vermelho - há ATUALIZAÇÃO em entradas anteriores");
         }
       }
     }
 
-    // Verifica se houve ENTRADA de estoque - aviso para atualização
+    // Verifica se houve ENTRADA de estoque - aviso para atualização (sobrescreve vermelho)
     if (parseFloat(formData.entrada) > 0) {
       var lastColumn = sheetEstoque.getLastColumn();
       sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("yellow");
       warningMessage = "⚠️ ENTRADA DE ESTOQUE REGISTRADA!\n\nÉ NECESSÁRIO ATUALIZAR O ESTOQUE DESTE ITEM PARA EVITAR FUROS DE ESTOQUE.\n\nRealize uma contagem física e registre uma atualização completa do saldo.";
+      Logger.log("processEstoqueWebApp: Linha pintada de AMARELO - entrada de estoque");
     }
 
     // Invalida caches (padrão e otimizado)
     invalidateCache();
     invalidateCacheOpt();
 
+    // Busca o histórico do item recém inserido
+    var historico = getItemHistory(formData.item);
+
     return {
       success: true,
       message: warningMessage || "Estoque processado com sucesso!",
       warning: warningMessage ? true : false,
       saldoAnterior: previousSaldo,
-      novoSaldo: newSaldo
+      novoSaldo: newSaldo,
+      historico: historico.success ? historico : null
     };
   } catch (error) {
     PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
@@ -655,7 +682,17 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheetEstoque = ss.getSheetByName("ESTOQUE");
     var now = new Date();
+
+    // Recupera o usuário que está fazendo a ação (com logs para debug)
     var user = getLoggedUser();
+    Logger.log("processMultipleEstoqueItemsWithSaldos: Usuário identificado: " + user + " | Total de itens: " + itens.length);
+
+    // Se o primeiro item tiver usuário, usa esse (prioriza o enviado pelo formulário)
+    if (itens.length > 0 && itens[0].usuario) {
+      Logger.log("processMultipleEstoqueItemsWithSaldos: Usuário do formulário: " + itens[0].usuario);
+      user = itens[0].usuario;
+    }
+
     var processados = 0;
     var erros = [];
     var itensProcessados = [];
@@ -708,14 +745,26 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
         if (lastReg.lastDate) {
           var lastDate = new Date(lastReg.lastDate);
           var diffDays = (now.getTime() - lastDate.getTime()) / (1000 * 3600 * 24);
+          Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - Diferença: " + diffDays + " dias");
+
           if (diffDays > 20) {
-            // Verifica obs por palavras-chave
-            var textoObs = itemData.obs ? itemData.obs.toString().toLowerCase() : "";
-            var temKeyword = /acerto|atualiza[cç][ãa]o/.test(textoObs);
-            // Se não conter 'acerto' ou 'atualização', pinta de vermelho
-            if (!temKeyword) {
+            // NOVA LÓGICA: Verifica se ALGUMA entrada ANTERIOR nos últimos 20 dias contém "ATUALIZAÇÃO"
+            // Calcula a data inicial (20 dias antes do novo lançamento)
+            var startDate = new Date(now.getTime() - (20 * 24 * 60 * 60 * 1000));
+
+            Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - Verificando entradas anteriores entre " + startDate + " e " + now);
+
+            // Busca por "ATUALIZAÇÃO" nas entradas ANTERIORES dentro do período de 20 dias
+            var temAtualizacaoAnterior = hasAtualizacaoInPreviousEntries(itemData.item, startDate, now, nextRow);
+            Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - Encontrou 'ATUALIZAÇÃO' em entradas anteriores? " + temAtualizacaoAnterior);
+
+            // Se NÃO houver "ATUALIZAÇÃO" em NENHUMA entrada anterior nos últimos 20 dias, pinta de vermelho
+            if (!temAtualizacaoAnterior) {
               sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("red");
               itemWarning = "DESATUALIZADO (+20 dias)";
+              Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - VERMELHO (sem ATUALIZAÇÃO nas entradas anteriores dos últimos 20 dias)");
+            } else {
+              Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - NÃO pintado (há ATUALIZAÇÃO em entradas anteriores)");
             }
           }
         }
@@ -724,6 +773,7 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
         if (entrada > 0) {
           sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("yellow");
           if (!itemWarning) itemWarning = "ENTRADA - Atualizar estoque";
+          Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - AMARELO");
         }
 
         // Adiciona ao array de itens processados com os saldos
@@ -751,18 +801,33 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
     invalidateCacheOpt();
     backupEstoqueData();
 
+    // Busca o histórico de cada item processado
+    var historicos = [];
+    for (var h = 0; h < itensProcessados.length; h++) {
+      var itemHistorico = getItemHistory(itensProcessados[h].item);
+      if (itemHistorico.success) {
+        historicos.push({
+          item: itensProcessados[h].item,
+          grupo: itensProcessados[h].grupo,
+          historico: itemHistorico
+        });
+      }
+    }
+
     if (erros.length > 0) {
       return {
         success: processados > 0,
         message: "Processados: " + processados + "/" + itens.length + ". Erros: " + erros.join("; "),
-        itensProcessados: itensProcessados
+        itensProcessados: itensProcessados,
+        historicos: historicos
       };
     }
 
     return {
       success: true,
       message: processados + " item(ns) inserido(s) com sucesso!",
-      itensProcessados: itensProcessados
+      itensProcessados: itensProcessados,
+      historicos: historicos
     };
   } catch (error) {
     PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
@@ -932,7 +997,9 @@ function gerarRelatorioEstoqueWebApp(dataInicio, dataFim) {
       return { success: false, message: "Nenhum dado encontrado" };
     }
 
-    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
+    var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, 13);
+    var data = dataRange.getDisplayValues();
+    var backgrounds = dataRange.getBackgrounds();
     var results = [];
 
     // Corrige problema de timezone: input type="date" vem como YYYY-MM-DD (ISO)
@@ -947,9 +1014,26 @@ function gerarRelatorioEstoqueWebApp(dataInicio, dataFim) {
     for (var i = 0; i < data.length; i++) {
       var dataMovimento = parseDateBR(data[i][3]); // Coluna D (índice 3) - usa parseDateBR para formato brasileiro
       if (dataMovimento >= inicio && dataMovimento <= fim) {
+        var bg = backgrounds[i][0] ? backgrounds[i][0].toLowerCase() : "#ffffff";
+
+        // Determina o motivo baseado na cor
+        var motivo = "";
+        if (bg.indexOf("yellow") >= 0 || bg === "#ffff00" || bg === "#ffff") {
+          motivo = "⚠️ ENTRADA - Atualizar estoque";
+        } else if (bg.indexOf("red") >= 0 || bg === "#ff0000" || bg.indexOf("#f00") >= 0) {
+          motivo = "🔴 DESATUALIZADO (+20 dias)";
+        } else {
+          motivo = "OK";
+        }
+
+        // Adiciona a coluna MOTIVO ao resultado
+        var rowWithMotivo = data[i].slice(); // Copia o array
+        rowWithMotivo.push(motivo);
+
         results.push({
-          row: data[i],
-          date: dataMovimento
+          row: rowWithMotivo,
+          date: dataMovimento,
+          background: backgrounds[i][0] || "#ffffff"
         });
       }
     }
@@ -966,8 +1050,9 @@ function gerarRelatorioEstoqueWebApp(dataInicio, dataFim) {
     return {
       success: true,
       data: {
-        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
-        rows: results.map(function(r) { return r.row; })
+        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por", "MOTIVO"],
+        rows: results.map(function(r) { return r.row; }),
+        colors: results.map(function(r) { return r.background; })
       }
     };
   } catch (error) {
