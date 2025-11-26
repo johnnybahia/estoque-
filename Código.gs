@@ -1758,7 +1758,15 @@ function processEstoque(formData) {
 
   // Verifica se passou mais de 20 dias desde a última data de registro
   if (lastReg.lastDate) {
-    var lastDate = new Date(lastReg.lastDate);
+    // CORREÇÃO: Usa parseDateString para converter corretamente datas em formato brasileiro
+    var lastDate = parseDateString(lastReg.lastDate);
+
+    // Se a conversão falhar, tenta criar um Date object direto
+    if (!lastDate || isNaN(lastDate.getTime())) {
+      Logger.log("processEstoque: AVISO - Conversão de data falhou, tentando new Date()");
+      lastDate = new Date(lastReg.lastDate);
+    }
+
     var diffDays = (now.getTime() - lastDate.getTime()) / (1000 * 3600 * 24);
     Logger.log("processEstoque: Diferença de dias desde último registro: " + diffDays + " dias");
 
