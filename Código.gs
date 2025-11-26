@@ -1036,7 +1036,7 @@ function getLastRegistration(item, currentRow) {
       if (currentItemUpper === itemUpper) {
         encontrados++;
         result.lastGroup = data[i][0];  // Coluna A (Grupo)
-        result.lastDate = data[i][3];   // Coluna D (Data) - como texto
+        result.lastDate = data[i][2];   // Coluna C (Data) - CORRIGIDO!
         result.lastStock = data[i][9];  // Coluna J (Saldo) - como texto
         Logger.log("✓ ENCONTRADO na linha " + rowNum);
         Logger.log("  Grupo: '" + result.lastGroup + "'");
@@ -2748,7 +2748,7 @@ function getLastRegistration(item, currentRow) {
       if (currentItemUpper === itemUpper) {
         encontrados++;
         result.lastGroup = data[i][0];  // Coluna A (Grupo)
-        result.lastDate = data[i][3];   // Coluna D (Data) - como texto
+        result.lastDate = data[i][2];   // Coluna C (Data) - CORRIGIDO!
         result.lastStock = data[i][9];  // Coluna J (Saldo) - como texto
         Logger.log("✓ ENCONTRADO na linha " + rowNum);
         Logger.log("  Grupo: '" + result.lastGroup + "'");
