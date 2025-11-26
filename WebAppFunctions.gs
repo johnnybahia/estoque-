@@ -426,7 +426,13 @@ function processEstoqueWebApp(formData) {
     if (lastReg.lastDate) {
       var lastDate = new Date(lastReg.lastDate);
       var diffDays = (now.getTime() - lastDate.getTime()) / (1000 * 3600 * 24);
-      Logger.log("processEstoqueWebApp: Diferença de dias desde último registro: " + diffDays + " dias");
+      Logger.log("processEstoqueWebApp: ========================================");
+      Logger.log("processEstoqueWebApp: DEBUG - Item: " + formData.item);
+      Logger.log("processEstoqueWebApp: DEBUG - Última data encontrada: " + lastReg.lastDate);
+      Logger.log("processEstoqueWebApp: DEBUG - Data atual: " + now);
+      Logger.log("processEstoqueWebApp: DEBUG - Diferença de dias: " + diffDays + " dias");
+      Logger.log("processEstoqueWebApp: DEBUG - diffDays > 20? " + (diffDays > 20));
+      Logger.log("processEstoqueWebApp: ========================================");
 
       if (diffDays > 20) {
         // NOVA LÓGICA: Verifica se ALGUMA entrada ANTERIOR nos últimos 20 dias contém "ATUALIZAÇÃO"
