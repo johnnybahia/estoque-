@@ -684,6 +684,17 @@
       100% { transform: rotate(360deg); }
     }
 
+    @keyframes pulse {
+      0%, 100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+      50% {
+        transform: scale(1.2);
+        opacity: 0.8;
+      }
+    }
+
     .loading-text {
       font-size: 1.1rem;
       color: var(--text-dark);
@@ -2923,18 +2934,41 @@
             // Mostra aviso de status do produto (VERMELHO ou AMARELO)
             const avisoStatus = document.getElementById('avisoStatusProduto');
             if (result.warning && result.message) {
-              avisoStatus.textContent = result.message;
               avisoStatus.style.display = 'block';
 
               // Define a cor baseado no tipo de aviso
               if (result.message.includes('DESATUALIZADO') || result.message.includes('20 DIAS')) {
+                avisoStatus.innerHTML = `
+                  <div style="font-size: 2.5rem; margin-bottom: 10px; animation: pulse 1.5s infinite;">🚨</div>
+                  <div style="font-size: 1.3rem; margin-bottom: 10px; text-transform: uppercase;">⚠️ ATENÇÃO URGENTE ⚠️</div>
+                  <div style="font-size: 1.1rem; margin-bottom: 15px; line-height: 1.5;">
+                    <strong>PRODUTO DESATUALIZADO!</strong><br>
+                    Última atualização há mais de 20 dias
+                  </div>
+                  <div style="font-size: 1.2rem; background: #d32f2f; color: white; padding: 15px; border-radius: 6px; margin-top: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                    ⚡ AÇÃO NECESSÁRIA: ATUALIZAR ESTOQUE URGENTE! ⚡<br>
+                    <span style="font-size: 0.9rem; margin-top: 8px; display: block;">
+                      Realize uma contagem física e registre uma atualização completa do saldo
+                    </span>
+                  </div>
+                `;
                 avisoStatus.style.background = '#ffebee';
-                avisoStatus.style.border = '2px solid #f44336';
+                avisoStatus.style.border = '4px solid #f44336';
                 avisoStatus.style.color = '#c62828';
+                avisoStatus.style.boxShadow = '0 8px 16px rgba(244, 67, 54, 0.3)';
               } else if (result.message.includes('ENTRADA')) {
+                avisoStatus.innerHTML = `
+                  <div style="font-size: 2rem; margin-bottom: 8px;">📦</div>
+                  <div style="font-size: 1.1rem; margin-bottom: 10px;"><strong>⚠️ ENTRADA DE ESTOQUE REGISTRADA!</strong></div>
+                  <div style="font-size: 0.95rem; line-height: 1.5;">
+                    É necessário atualizar o estoque deste item para evitar furos de estoque.<br>
+                    <strong>Realize uma contagem física e registre uma atualização completa do saldo.</strong>
+                  </div>
+                `;
                 avisoStatus.style.background = '#fff3cd';
-                avisoStatus.style.border = '2px solid #ffc107';
+                avisoStatus.style.border = '3px solid #ffc107';
                 avisoStatus.style.color = '#856404';
+                avisoStatus.style.boxShadow = '0 4px 8px rgba(255, 193, 7, 0.2)';
               }
             } else {
               avisoStatus.style.display = 'none';
@@ -4733,7 +4767,7 @@
           <strong>⚠️ ATENÇÃO:</strong> Este é um item <strong>NOVO</strong> que foi cadastrado agora!
         </div>
         <!-- Aviso de Produto Desatualizado ou Entrada -->
-        <div id="avisoStatusProduto" style="display: none; margin-bottom: 15px; padding: 15px; border-radius: 8px; font-weight: bold;"></div>
+        <div id="avisoStatusProduto" style="display: none; margin-bottom: 15px; padding: 20px; border-radius: 8px; font-weight: bold; text-align: center;"></div>
         <div style="background: #f5f5f5; padding: 15px; border-radius: 8px;">
           <table style="width: 100%; border-collapse: collapse;">
             <tr>

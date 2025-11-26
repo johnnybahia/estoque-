@@ -27,6 +27,112 @@ function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
 
+// ==============================
+// Gerenciamento de Sessão de Usuário
+// Corrige bug de sessões compartilhadas
+// ==============================
+
+/**
+ * Gera uma chave única de sessão baseada no usuário do Google
+ */
+function getSessionKey() {
+  try {
+    // Tenta usar o email do usuário ativo
+    var email = Session.getActiveUser().getEmail();
+    if (email && email !== "") {
+      return "session_" + email;
+    }
+
+    // Fallback: usa temporary key (única por sessão do navegador)
+    var tempKey = Session.getTemporaryActiveUserKey();
+    if (tempKey && tempKey !== "") {
+      return "session_" + tempKey;
+    }
+
+    // Último fallback: usa effective user
+    email = Session.getEffectiveUser().getEmail();
+    if (email && email !== "") {
+      return "session_eff_" + email;
+    }
+  } catch (e) {
+    Logger.log("Erro ao obter session key: " + e.message);
+  }
+
+  // Se tudo falhar, gera um ID baseado em timestamp + random
+  return "session_" + new Date().getTime() + "_" + Math.random().toString(36).substr(2, 9);
+}
+
+/**
+ * Salva o usuário logado na sessão usando Cache (expira em 6 horas)
+ */
+function setLoggedUserSession(username) {
+  var sessionKey = getSessionKey();
+  var cache = CacheService.getUserCache();
+
+  // Salva no cache por 6 horas (21600 segundos)
+  cache.put(sessionKey, username, 21600);
+
+  // Também salva em UserProperties como backup (mas não é a fonte principal)
+  try {
+    PropertiesService.getUserProperties().setProperty(sessionKey, username);
+  } catch (e) {
+    Logger.log("Aviso: Não foi possível salvar em UserProperties: " + e.message);
+  }
+
+  Logger.log("Sessão criada - Key: " + sessionKey + " | Usuário: " + username);
+}
+
+/**
+ * Recupera o usuário logado da sessão
+ */
+function getLoggedUserSession() {
+  var sessionKey = getSessionKey();
+  var cache = CacheService.getUserCache();
+
+  // Tenta pegar do cache primeiro (mais confiável)
+  var username = cache.get(sessionKey);
+
+  if (username && username !== "") {
+    Logger.log("Usuário recuperado do cache - Key: " + sessionKey + " | Usuário: " + username);
+    return username;
+  }
+
+  // Fallback: tenta pegar de UserProperties
+  try {
+    username = PropertiesService.getUserProperties().getProperty(sessionKey);
+    if (username && username !== "") {
+      Logger.log("Usuário recuperado de UserProperties - Key: " + sessionKey + " | Usuário: " + username);
+      // Re-popula o cache
+      cache.put(sessionKey, username, 21600);
+      return username;
+    }
+  } catch (e) {
+    Logger.log("Aviso: Não foi possível ler UserProperties: " + e.message);
+  }
+
+  return null;
+}
+
+/**
+ * Remove o usuário da sessão (logout)
+ */
+function clearLoggedUserSession() {
+  var sessionKey = getSessionKey();
+  var cache = CacheService.getUserCache();
+
+  // Remove do cache
+  cache.remove(sessionKey);
+
+  // Remove de UserProperties
+  try {
+    PropertiesService.getUserProperties().deleteProperty(sessionKey);
+  } catch (e) {
+    Logger.log("Aviso: Não foi possível deletar de UserProperties: " + e.message);
+  }
+
+  Logger.log("Sessão removida - Key: " + sessionKey);
+}
+
 /**
  * Atualiza o menu principal e adiciona um menu separado para processar cores.
  */
@@ -620,36 +726,37 @@ function processLogin(formData) {
  * Prioriza o usuário armazenado em UserProperties, mas usa Session como fallback.
  */
 function getLoggedUser() {
-  // Tenta pegar o usuário logado via sistema de login
-  var loggedUser = PropertiesService.getUserProperties().getProperty("loggedUser");
+  // NOVO SISTEMA: Usa getLoggedUserSession() que gerencia sessões corretamente
+  var loggedUser = getLoggedUserSession();
 
-  // Se não houver usuário logado via sistema de login, usa o email do Google
-  if (!loggedUser || loggedUser.trim() === "") {
-    try {
-      // Tenta pegar o email do usuário ativo do Google Sheets
-      var activeUser = Session.getActiveUser().getEmail();
-      if (activeUser && activeUser !== "") {
-        Logger.log("getLoggedUser: Usando email do Session: " + activeUser);
-        return activeUser;
-      }
-
-      // Fallback: tenta getEffectiveUser
-      var effectiveUser = Session.getEffectiveUser().getEmail();
-      if (effectiveUser && effectiveUser !== "") {
-        Logger.log("getLoggedUser: Usando email do EffectiveUser: " + effectiveUser);
-        return effectiveUser;
-      }
-    } catch (e) {
-      Logger.log("getLoggedUser: Erro ao obter usuário via Session: " + e.message);
-    }
-
-    // Se ainda não conseguiu, retorna "Desconhecido"
-    Logger.log("getLoggedUser: AVISO - Nenhum usuário identificado!");
-    return "Usuário Desconhecido";
+  // Se encontrou usuário na sessão, retorna
+  if (loggedUser && loggedUser.trim() !== "") {
+    Logger.log("getLoggedUser: Usuário logado (sessão): " + loggedUser);
+    return loggedUser;
   }
 
-  Logger.log("getLoggedUser: Usuário logado: " + loggedUser);
-  return loggedUser;
+  // Fallback: tenta usar email do Google (para compatibilidade)
+  try {
+    // Tenta pegar o email do usuário ativo do Google Sheets
+    var activeUser = Session.getActiveUser().getEmail();
+    if (activeUser && activeUser !== "") {
+      Logger.log("getLoggedUser: Usando email do Session: " + activeUser);
+      return activeUser;
+    }
+
+    // Fallback: tenta getEffectiveUser
+    var effectiveUser = Session.getEffectiveUser().getEmail();
+    if (effectiveUser && effectiveUser !== "") {
+      Logger.log("getLoggedUser: Usando email do EffectiveUser: " + effectiveUser);
+      return effectiveUser;
+    }
+  } catch (e) {
+    Logger.log("getLoggedUser: Erro ao obter usuário via Session: " + e.message);
+  }
+
+  // Se ainda não conseguiu, retorna "Desconhecido"
+  Logger.log("getLoggedUser: AVISO - Nenhum usuário identificado!");
+  return "Usuário Desconhecido";
 }
 
 /**
@@ -1092,8 +1199,8 @@ function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
   var numRows = lastRow - startRow + 1;
   Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow);
 
-  // Lê 5 colunas (A-E): Grupo, Item, Data, NF, Obs
-  var data = sheetEstoque.getRange(startRow, 1, numRows, 5).getDisplayValues();
+  // Lê 6 colunas (A-F): Grupo, Item, Unidade, Data, NF, Obs
+  var data = sheetEstoque.getRange(startRow, 1, numRows, 6).getDisplayValues();
 
   var itemUpper = item.toString().trim().toUpperCase();
   Logger.log("Item buscado (maiúsculas): '" + itemUpper + "'");
@@ -1114,7 +1221,7 @@ function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
     // Verifica se é o mesmo item
     if (currentItemUpper === itemUpper) {
       // Verifica a data do registro
-      var dataRegistroStr = data[i][2]; // Coluna C (Data)
+      var dataRegistroStr = data[i][3]; // Coluna D (Data)
       if (!dataRegistroStr || dataRegistroStr === "") continue;
 
       // Converte string para Date
@@ -1124,7 +1231,7 @@ function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
       // Verifica se está dentro do período de 20 dias
       if (dataRegistro >= startDate && dataRegistro <= endDate) {
         encontrados++;
-        var obs = data[i][4]; // Coluna E (Obs)
+        var obs = data[i][5]; // Coluna F (Obs)
         Logger.log("Analisando linha " + rowNum + " - Data: " + dataRegistroStr + " - Obs: '" + obs + "'");
 
         // Verifica se contém "ATUALIZAÇÃO" ou "ACERTO"
@@ -2332,36 +2439,37 @@ function processLogin(formData) {
  * Prioriza o usuário armazenado em UserProperties, mas usa Session como fallback.
  */
 function getLoggedUser() {
-  // Tenta pegar o usuário logado via sistema de login
-  var loggedUser = PropertiesService.getUserProperties().getProperty("loggedUser");
+  // NOVO SISTEMA: Usa getLoggedUserSession() que gerencia sessões corretamente
+  var loggedUser = getLoggedUserSession();
 
-  // Se não houver usuário logado via sistema de login, usa o email do Google
-  if (!loggedUser || loggedUser.trim() === "") {
-    try {
-      // Tenta pegar o email do usuário ativo do Google Sheets
-      var activeUser = Session.getActiveUser().getEmail();
-      if (activeUser && activeUser !== "") {
-        Logger.log("getLoggedUser: Usando email do Session: " + activeUser);
-        return activeUser;
-      }
-
-      // Fallback: tenta getEffectiveUser
-      var effectiveUser = Session.getEffectiveUser().getEmail();
-      if (effectiveUser && effectiveUser !== "") {
-        Logger.log("getLoggedUser: Usando email do EffectiveUser: " + effectiveUser);
-        return effectiveUser;
-      }
-    } catch (e) {
-      Logger.log("getLoggedUser: Erro ao obter usuário via Session: " + e.message);
-    }
-
-    // Se ainda não conseguiu, retorna "Desconhecido"
-    Logger.log("getLoggedUser: AVISO - Nenhum usuário identificado!");
-    return "Usuário Desconhecido";
+  // Se encontrou usuário na sessão, retorna
+  if (loggedUser && loggedUser.trim() !== "") {
+    Logger.log("getLoggedUser: Usuário logado (sessão): " + loggedUser);
+    return loggedUser;
   }
 
-  Logger.log("getLoggedUser: Usuário logado: " + loggedUser);
-  return loggedUser;
+  // Fallback: tenta usar email do Google (para compatibilidade)
+  try {
+    // Tenta pegar o email do usuário ativo do Google Sheets
+    var activeUser = Session.getActiveUser().getEmail();
+    if (activeUser && activeUser !== "") {
+      Logger.log("getLoggedUser: Usando email do Session: " + activeUser);
+      return activeUser;
+    }
+
+    // Fallback: tenta getEffectiveUser
+    var effectiveUser = Session.getEffectiveUser().getEmail();
+    if (effectiveUser && effectiveUser !== "") {
+      Logger.log("getLoggedUser: Usando email do EffectiveUser: " + effectiveUser);
+      return effectiveUser;
+    }
+  } catch (e) {
+    Logger.log("getLoggedUser: Erro ao obter usuário via Session: " + e.message);
+  }
+
+  // Se ainda não conseguiu, retorna "Desconhecido"
+  Logger.log("getLoggedUser: AVISO - Nenhum usuário identificado!");
+  return "Usuário Desconhecido";
 }
 
 /**
@@ -2804,8 +2912,8 @@ function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
   var numRows = lastRow - startRow + 1;
   Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow);
 
-  // Lê 5 colunas (A-E): Grupo, Item, Data, NF, Obs
-  var data = sheetEstoque.getRange(startRow, 1, numRows, 5).getDisplayValues();
+  // Lê 6 colunas (A-F): Grupo, Item, Unidade, Data, NF, Obs
+  var data = sheetEstoque.getRange(startRow, 1, numRows, 6).getDisplayValues();
 
   var itemUpper = item.toString().trim().toUpperCase();
   Logger.log("Item buscado (maiúsculas): '" + itemUpper + "'");
@@ -2826,7 +2934,7 @@ function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
     // Verifica se é o mesmo item
     if (currentItemUpper === itemUpper) {
       // Verifica a data do registro
-      var dataRegistroStr = data[i][2]; // Coluna C (Data)
+      var dataRegistroStr = data[i][3]; // Coluna D (Data)
       if (!dataRegistroStr || dataRegistroStr === "") continue;
 
       // Converte string para Date
@@ -2836,7 +2944,7 @@ function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
       // Verifica se está dentro do período de 20 dias
       if (dataRegistro >= startDate && dataRegistro <= endDate) {
         encontrados++;
-        var obs = data[i][4]; // Coluna E (Obs)
+        var obs = data[i][5]; // Coluna F (Obs)
         Logger.log("Analisando linha " + rowNum + " - Data: " + dataRegistroStr + " - Obs: '" + obs + "'");
 
         // Verifica se contém "ATUALIZAÇÃO" ou "ACERTO"
@@ -4190,7 +4298,8 @@ function loginUser(username, password) {
       if (dbUser === usernameClean && dbPass === passwordClean) {
         // Login bem-sucedido
         Logger.log("Login bem-sucedido!");
-        PropertiesService.getUserProperties().setProperty("loggedUser", usernameClean);
+        // NOVO SISTEMA: Usa setLoggedUserSession() para salvar sessão corretamente
+        setLoggedUserSession(usernameClean);
         return { success: true, user: usernameClean };
       }
     }
@@ -4241,7 +4350,8 @@ function debugUsuarios() {
  * logoutUser: Remove autenticação do usuário
  */
 function logoutUser() {
-  PropertiesService.getUserProperties().deleteProperty("loggedUser");
+  // NOVO SISTEMA: Usa clearLoggedUserSession() para limpar sessão corretamente
+  clearLoggedUserSession();
   return { success: true };
 }
 
