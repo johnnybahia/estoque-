@@ -2103,11 +2103,11 @@
       const username = document.getElementById('loginUser').value;
       const password = document.getElementById('loginPassword').value;
 
-      showLoading(true);
+      showLoading('Autenticando...');
 
       google.script.run
         .withSuccessHandler(async function(result) {
-          showLoading(false);
+          hideLoading();
           if (result.success) {
             currentUser = result.user;
             document.getElementById('userName').textContent = currentUser;
@@ -2126,7 +2126,7 @@
           }
         })
         .withFailureHandler(function(error) {
-          showLoading(false);
+          hideLoading();
           showMessage('loginMessage', 'Erro ao fazer login: ' + error.message, 'error');
         })
         .loginUser(username, password);
@@ -2144,15 +2144,6 @@
           })
           .logoutUser();
       }
-    }
-
-    // Show loading
-    function showLoading(show) {
-      const forms = document.querySelectorAll('form');
-      const loadings = document.querySelectorAll('.loading');
-
-      forms.forEach(form => form.style.display = show ? 'none' : 'block');
-      loadings.forEach(loading => loading.classList.toggle('show', show));
     }
 
     // Show message
@@ -3924,11 +3915,11 @@
         return false;
       }
 
-      showLoading(true);
+      showLoading('Inserindo grupo...');
 
       google.script.run
         .withSuccessHandler(function(result) {
-          showLoading(false);
+          hideLoading();
           if (result.success) {
             showMessage('grupoMessage', 'Grupo "' + grupo + '" inserido com sucesso!', 'success');
             document.getElementById('grupoForm').reset();
@@ -3939,7 +3930,7 @@
           }
         })
         .withFailureHandler(function(error) {
-          showLoading(false);
+          hideLoading();
           showMessage('grupoMessage', 'Erro: ' + error.message, 'error');
         })
         .insertGroup(grupo);
