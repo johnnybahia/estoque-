@@ -640,6 +640,62 @@
     .modal-overlay.show {
       display: flex;
     }
+
+    /* Loading Overlay */
+    #loadingOverlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.8);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+      backdrop-filter: blur(3px);
+    }
+
+    #loadingOverlay.show {
+      display: flex;
+    }
+
+    .loading-content {
+      background: white;
+      padding: 30px 40px;
+      border-radius: 12px;
+      text-align: center;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+      min-width: 300px;
+    }
+
+    .loading-spinner {
+      width: 50px;
+      height: 50px;
+      border: 5px solid #f3f3f3;
+      border-top: 5px solid var(--secondary-color);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 15px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .loading-text {
+      font-size: 1.1rem;
+      color: var(--text-dark);
+      font-weight: 500;
+      margin-top: 10px;
+    }
+
+    .loading-subtext {
+      font-size: 0.9rem;
+      color: #7f8c8d;
+      margin-top: 5px;
+    }
     .modal-content {
       background: white;
       border-radius: 8px;
@@ -2122,6 +2178,28 @@
       msgElement.className = 'message';
     }
 
+    // Show loading overlay
+    function showLoading(message = 'Processando...') {
+      const overlay = document.getElementById('loadingOverlay');
+      const loadingText = document.getElementById('loadingText');
+      if (overlay && loadingText) {
+        loadingText.textContent = message;
+        overlay.classList.add('show');
+        // Disable scrolling
+        document.body.style.overflow = 'hidden';
+      }
+    }
+
+    // Hide loading overlay
+    function hideLoading() {
+      const overlay = document.getElementById('loadingOverlay');
+      if (overlay) {
+        overlay.classList.remove('show');
+        // Re-enable scrolling
+        document.body.style.overflow = '';
+      }
+    }
+
     // Toggle sidebar
     function toggleSidebar() {
       const sidebar = document.getElementById('sidebar');
@@ -2818,12 +2896,12 @@
         autocompleteData.items.some(item => item.toUpperCase() === nomeItemUpper));
 
       // Mostra loading enquanto processa
-      showMessage('estoqueMessage', 'Processando lançamento...', 'info');
+      showLoading('Processando lançamento...');
 
       // Envia para servidor e AGUARDA confirmação antes de mostrar resultado
       google.script.run
         .withSuccessHandler(function(result) {
-          hideMessage('estoqueMessage');
+          hideLoading();
 
           if (result.success) {
             // Preenche modal de resultado com dados CONFIRMADOS do servidor
@@ -2881,7 +2959,7 @@
           }
         })
         .withFailureHandler(function(error) {
-          hideMessage('estoqueMessage');
+          hideLoading();
           showMessage('estoqueMessage', 'Erro: ' + error.message, 'error');
         })
         .processEstoqueWebApp(formData);
@@ -3165,8 +3243,14 @@
 
       if (hasError) return;
 
-      // Abre modal de confirmação
-      abrirModalConfirmacao(nfNumero, nfPedido, nfUnidade, nfObs, temItemNovo);
+      // Mostra loading enquanto prepara modal de confirmação
+      showLoading('Preparando confirmação...');
+
+      // Pequeno delay para garantir que o loading seja exibido
+      setTimeout(() => {
+        // Abre modal de confirmação
+        abrirModalConfirmacao(nfNumero, nfPedido, nfUnidade, nfObs, temItemNovo);
+      }, 100);
     }
 
     // Abre o modal de confirmação com os itens
@@ -3210,7 +3294,8 @@
       document.getElementById('totalItensNF').textContent = itensParaConfirmar.length;
       document.getElementById('btnConfirmarInsercaoFinal').disabled = true;
 
-      // Mostra modal
+      // Esconde loading e mostra modal
+      hideLoading();
       document.getElementById('modalConfirmacaoNF').classList.add('show');
     }
 
@@ -3265,11 +3350,14 @@
       }));
 
       fecharModalConfirmacao();
-      showMessage('nfMessage', 'Inserindo ' + itensParaEnviar.length + ' itens...', 'info');
+
+      // Mostra loading durante processamento
+      showLoading('Inserindo ' + itensParaEnviar.length + ' itens no sistema...');
 
       // Envia para servidor
       google.script.run
         .withSuccessHandler(function(result) {
+          hideLoading();
           if (result.success) {
             document.getElementById('nfFormArea').style.display = 'none';
             document.getElementById('nfResultArea').style.display = 'block';
@@ -3292,6 +3380,7 @@
           }
         })
         .withFailureHandler(function(error) {
+          hideLoading();
           showMessage('nfMessage', 'Erro: ' + error.message, 'error');
         })
         .processMultipleEstoqueItemsWithGroup(itensParaEnviar);
@@ -3553,8 +3642,14 @@
 
       if (hasError) return;
 
-      // Abre modal de confirmação
-      abrirModalConfirmacaoLote(operacao, grupo, unidade, obs, nf, temItemNovo);
+      // Mostra loading enquanto prepara modal de confirmação
+      showLoading('Preparando confirmação do lote...');
+
+      // Pequeno delay para garantir que o loading seja exibido
+      setTimeout(() => {
+        // Abre modal de confirmação
+        abrirModalConfirmacaoLote(operacao, grupo, unidade, obs, nf, temItemNovo);
+      }, 100);
     }
 
     // Abre o modal de confirmação do lote
@@ -3599,7 +3694,7 @@
       document.getElementById('totalItensLote').textContent = itensParaConfirmarLote.length;
       document.getElementById('btnConfirmarInsercaoFinalLote').disabled = true;
 
-      // Mostra modal
+      // Mostra modal (mantém loading até carregar saldos)
       document.getElementById('modalConfirmacaoLote').classList.add('show');
 
       // Busca saldos de todos os itens
@@ -3637,6 +3732,8 @@
               }
             }
           });
+          // Esconde loading após carregar saldos
+          hideLoading();
         })
         .withFailureHandler(function(error) {
           console.error('Erro ao carregar saldos:', error);
@@ -3647,6 +3744,8 @@
             if (spanAtual) spanAtual.textContent = '?';
             if (spanFinal) spanFinal.textContent = '?';
           });
+          // Esconde loading mesmo em caso de erro
+          hideLoading();
         })
         .getMultipleSaldos(itensNomes);
     }
@@ -3702,11 +3801,14 @@
       }));
 
       fecharModalConfirmacaoLote();
-      showMessage('estoqueLoteMessage', 'Inserindo ' + itensParaEnviar.length + ' itens...', 'info');
+
+      // Mostra loading durante processamento
+      showLoading('Processando ' + itensParaEnviar.length + ' itens em lote...');
 
       // Envia para servidor com retorno de saldos
       google.script.run
         .withSuccessHandler(function(result) {
+          hideLoading();
           if (result.success) {
             document.getElementById('estoqueLoteArea').style.display = 'none';
             document.getElementById('estoqueLoteResultArea').style.display = 'block';
@@ -3731,6 +3833,7 @@
           }
         })
         .withFailureHandler(function(error) {
+          hideLoading();
           showMessage('estoqueLoteMessage', 'Erro: ' + error.message, 'error');
         })
         .processMultipleEstoqueItemsWithSaldos(itensParaEnviar);
@@ -4611,6 +4714,15 @@
   </script>
 
   <!-- Modal de Resultado Inserir Estoque -->
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay">
+    <div class="loading-content">
+      <div class="loading-spinner"></div>
+      <div class="loading-text" id="loadingText">Processando...</div>
+      <div class="loading-subtext">Aguarde, não feche esta janela</div>
+    </div>
+  </div>
+
   <div id="modalResultadoEstoque" class="modal-overlay">
     <div class="modal-content" style="max-width: 600px;">
       <div class="modal-header" style="background: #28a745; color: white;">
