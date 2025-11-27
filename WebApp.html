@@ -2279,22 +2279,34 @@
     }
 
     // Show loading overlay
-    function showLoading(message = 'Processando...') {
+    function showLoading(message = 'Processando...', itemNome = null) {
       const overlay = document.getElementById('loadingOverlay');
       const loadingText = document.getElementById('loadingText');
+      const ultimosLancamentosSection = document.getElementById('ultimosLancamentos');
+
       if (overlay && loadingText) {
         loadingText.textContent = message;
         overlay.classList.add('show');
         // Disable scrolling
         document.body.style.overflow = 'hidden';
 
-        // Carrega últimos lançamentos
-        carregarUltimosLancamentos();
+        // Se houver um item especificado, carrega e mostra os lançamentos desse item
+        if (itemNome && itemNome.trim() !== '') {
+          if (ultimosLancamentosSection) {
+            ultimosLancamentosSection.style.display = 'block';
+          }
+          carregarUltimosLancamentos(itemNome);
+        } else {
+          // Sem item, oculta a seção de lançamentos
+          if (ultimosLancamentosSection) {
+            ultimosLancamentosSection.style.display = 'none';
+          }
+        }
       }
     }
 
-    // Carrega e exibe os últimos 20 lançamentos
-    function carregarUltimosLancamentos() {
+    // Carrega e exibe os últimos 20 lançamentos de um item específico
+    function carregarUltimosLancamentos(itemNome) {
       const lancamentosList = document.getElementById('lancamentosList');
       if (!lancamentosList) return;
 
@@ -2305,7 +2317,7 @@
       google.script.run
         .withSuccessHandler(function(lancamentos) {
           if (!lancamentos || lancamentos.length === 0) {
-            lancamentosList.innerHTML = '<div class="loading-lancamentos">Nenhum lançamento encontrado</div>';
+            lancamentosList.innerHTML = '<div class="loading-lancamentos">Nenhum lançamento anterior encontrado para este item</div>';
             return;
           }
 
@@ -2345,7 +2357,7 @@
           console.error('Erro ao carregar lançamentos:', error);
           lancamentosList.innerHTML = '<div class="loading-lancamentos">Erro ao carregar lançamentos</div>';
         })
-        .getUltimosLancamentos();
+        .getUltimosLancamentos(itemNome);
     }
 
     // Hide loading overlay
@@ -3058,8 +3070,8 @@
       const isItemNovo = !(autocompleteData && autocompleteData.items &&
         autocompleteData.items.some(item => item.toUpperCase() === nomeItemUpper));
 
-      // Mostra loading enquanto processa
-      showLoading('Processando lançamento...');
+      // Mostra loading enquanto processa, exibindo últimos 20 lançamentos deste item
+      showLoading('Processando lançamento...', formData.item);
 
       // Envia para servidor e AGUARDA confirmação antes de mostrar resultado
       google.script.run
@@ -4946,7 +4958,7 @@
 
       <!-- Lista de Últimos Lançamentos -->
       <div class="ultimos-lancamentos" id="ultimosLancamentos">
-        <h4>📋 Últimos 20 Lançamentos</h4>
+        <h4>📋 Últimos 20 Lançamentos do Item</h4>
         <div class="lancamentos-list" id="lancamentosList">
           <div class="loading-lancamentos">Carregando lançamentos...</div>
         </div>

@@ -760,11 +760,19 @@ function getLoggedUser() {
 }
 
 /**
- * getUltimosLancamentos: Retorna os últimos 20 lançamentos da planilha
+ * getUltimosLancamentos: Retorna os últimos 20 lançamentos de um item específico
  * Ordenados por data (mais recente primeiro)
+ * @param {string} itemNome - Nome do item para filtrar (opcional)
+ * @returns {Array} - Array de objetos com os lançamentos do item
  */
-function getUltimosLancamentos() {
+function getUltimosLancamentos(itemNome) {
   try {
+    // Se não passar item, não retorna nada
+    if (!itemNome || itemNome.trim() === '') {
+      Logger.log("getUltimosLancamentos: Nenhum item especificado, retornando vazio");
+      return [];
+    }
+
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheetEstoque = ss.getSheetByName("ESTOQUE");
 
@@ -773,44 +781,42 @@ function getUltimosLancamentos() {
       return [];
     }
 
-    // Pega a última linha com dados
     var lastRow = sheetEstoque.getLastRow();
-
-    // Se não há dados suficientes, retorna vazio
     if (lastRow <= 1) {
       return [];
     }
 
-    // Calcula quantas linhas buscar (máximo 20, ou menos se não houver tantas)
-    var numLinhas = Math.min(20, lastRow - 1); // -1 porque linha 1 é cabeçalho
-    var startRow = lastRow - numLinhas + 1;
+    // Busca TODAS as linhas da planilha (começando da linha 2, pois 1 é cabeçalho)
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
 
-    // Busca as últimas 20 linhas (colunas A-M: Grupo, Item, Unidade, Data, NF, Obs, Pedido, Entrada, Saída, Saldo, Valor Unitário, Alterado Em, Alterado Por)
-    var data = sheetEstoque.getRange(startRow, 1, numLinhas, 13).getDisplayValues();
-
-    // Converte para array de objetos com parse de datas
+    // Filtra apenas lançamentos do item especificado
     var lancamentos = [];
     for (var i = 0; i < data.length; i++) {
       var row = data[i];
-      var dataStr = row[3]; // Coluna D (Data)
-      var dataObj = parseDateString(dataStr);
+      var itemRow = row[1]; // Coluna B (Item)
 
-      lancamentos.push({
-        grupo: row[0],
-        item: row[1],
-        unidade: row[2],
-        data: dataStr,
-        dataObj: dataObj || new Date(0), // Usa epoch se conversão falhar (para ordenação)
-        nf: row[4],
-        obs: row[5],
-        pedido: row[6],
-        entrada: row[7],
-        saida: row[8],
-        saldo: row[9],
-        valorUnitario: row[10],
-        alteradoEm: row[11],
-        alteradoPor: row[12]
-      });
+      // Compara ignorando case e espaços
+      if (itemRow.trim().toUpperCase() === itemNome.trim().toUpperCase()) {
+        var dataStr = row[3]; // Coluna D (Data)
+        var dataObj = parseDateString(dataStr);
+
+        lancamentos.push({
+          grupo: row[0],
+          item: row[1],
+          unidade: row[2],
+          data: dataStr,
+          dataObj: dataObj || new Date(0),
+          nf: row[4],
+          obs: row[5],
+          pedido: row[6],
+          entrada: row[7],
+          saida: row[8],
+          saldo: row[9],
+          valorUnitario: row[10],
+          alteradoEm: row[11],
+          alteradoPor: row[12]
+        });
+      }
     }
 
     // Ordena por data (mais recente primeiro)
@@ -818,8 +824,11 @@ function getUltimosLancamentos() {
       return b.dataObj.getTime() - a.dataObj.getTime();
     });
 
-    Logger.log("getUltimosLancamentos: Retornando " + lancamentos.length + " lançamentos");
-    return lancamentos;
+    // Retorna apenas os últimos 20
+    var ultimos20 = lancamentos.slice(0, 20);
+
+    Logger.log("getUltimosLancamentos: Item '" + itemNome + "' - Encontrados " + lancamentos.length + " lançamentos, retornando " + ultimos20.length);
+    return ultimos20;
 
   } catch (e) {
     Logger.log("getUltimosLancamentos: Erro - " + e.message);
@@ -2549,11 +2558,19 @@ function getLoggedUser() {
 }
 
 /**
- * getUltimosLancamentos: Retorna os últimos 20 lançamentos da planilha
+ * getUltimosLancamentos: Retorna os últimos 20 lançamentos de um item específico
  * Ordenados por data (mais recente primeiro)
+ * @param {string} itemNome - Nome do item para filtrar (opcional)
+ * @returns {Array} - Array de objetos com os lançamentos do item
  */
-function getUltimosLancamentos() {
+function getUltimosLancamentos(itemNome) {
   try {
+    // Se não passar item, não retorna nada
+    if (!itemNome || itemNome.trim() === '') {
+      Logger.log("getUltimosLancamentos: Nenhum item especificado, retornando vazio");
+      return [];
+    }
+
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheetEstoque = ss.getSheetByName("ESTOQUE");
 
@@ -2562,44 +2579,42 @@ function getUltimosLancamentos() {
       return [];
     }
 
-    // Pega a última linha com dados
     var lastRow = sheetEstoque.getLastRow();
-
-    // Se não há dados suficientes, retorna vazio
     if (lastRow <= 1) {
       return [];
     }
 
-    // Calcula quantas linhas buscar (máximo 20, ou menos se não houver tantas)
-    var numLinhas = Math.min(20, lastRow - 1); // -1 porque linha 1 é cabeçalho
-    var startRow = lastRow - numLinhas + 1;
+    // Busca TODAS as linhas da planilha (começando da linha 2, pois 1 é cabeçalho)
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
 
-    // Busca as últimas 20 linhas (colunas A-M: Grupo, Item, Unidade, Data, NF, Obs, Pedido, Entrada, Saída, Saldo, Valor Unitário, Alterado Em, Alterado Por)
-    var data = sheetEstoque.getRange(startRow, 1, numLinhas, 13).getDisplayValues();
-
-    // Converte para array de objetos com parse de datas
+    // Filtra apenas lançamentos do item especificado
     var lancamentos = [];
     for (var i = 0; i < data.length; i++) {
       var row = data[i];
-      var dataStr = row[3]; // Coluna D (Data)
-      var dataObj = parseDateString(dataStr);
+      var itemRow = row[1]; // Coluna B (Item)
 
-      lancamentos.push({
-        grupo: row[0],
-        item: row[1],
-        unidade: row[2],
-        data: dataStr,
-        dataObj: dataObj || new Date(0), // Usa epoch se conversão falhar (para ordenação)
-        nf: row[4],
-        obs: row[5],
-        pedido: row[6],
-        entrada: row[7],
-        saida: row[8],
-        saldo: row[9],
-        valorUnitario: row[10],
-        alteradoEm: row[11],
-        alteradoPor: row[12]
-      });
+      // Compara ignorando case e espaços
+      if (itemRow.trim().toUpperCase() === itemNome.trim().toUpperCase()) {
+        var dataStr = row[3]; // Coluna D (Data)
+        var dataObj = parseDateString(dataStr);
+
+        lancamentos.push({
+          grupo: row[0],
+          item: row[1],
+          unidade: row[2],
+          data: dataStr,
+          dataObj: dataObj || new Date(0),
+          nf: row[4],
+          obs: row[5],
+          pedido: row[6],
+          entrada: row[7],
+          saida: row[8],
+          saldo: row[9],
+          valorUnitario: row[10],
+          alteradoEm: row[11],
+          alteradoPor: row[12]
+        });
+      }
     }
 
     // Ordena por data (mais recente primeiro)
@@ -2607,8 +2622,11 @@ function getUltimosLancamentos() {
       return b.dataObj.getTime() - a.dataObj.getTime();
     });
 
-    Logger.log("getUltimosLancamentos: Retornando " + lancamentos.length + " lançamentos");
-    return lancamentos;
+    // Retorna apenas os últimos 20
+    var ultimos20 = lancamentos.slice(0, 20);
+
+    Logger.log("getUltimosLancamentos: Item '" + itemNome + "' - Encontrados " + lancamentos.length + " lançamentos, retornando " + ultimos20.length);
+    return ultimos20;
 
   } catch (e) {
     Logger.log("getUltimosLancamentos: Erro - " + e.message);
