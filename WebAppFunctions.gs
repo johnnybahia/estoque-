@@ -1543,7 +1543,8 @@ function gerarRelatorioEstoqueWebApp(dataInicio, dataFim) {
     }
 
     var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, 13);
-    var data = dataRange.getDisplayValues();
+    var data = dataRange.getDisplayValues(); // Para exibição (strings formatadas)
+    var dataValues = dataRange.getValues(); // Para comparação (objetos Date nativos)
     var backgrounds = dataRange.getBackgrounds();
     var results = [];
 
@@ -1556,9 +1557,23 @@ function gerarRelatorioEstoqueWebApp(dataInicio, dataFim) {
     var inicio = new Date(parseInt(partesInicio[0]), parseInt(partesInicio[1]) - 1, parseInt(partesInicio[2]), 0, 0, 0, 0);
     var fim = new Date(parseInt(partesFim[0]), parseInt(partesFim[1]) - 1, parseInt(partesFim[2]), 23, 59, 59, 999);
 
+    Logger.log("gerarRelatorioEstoqueWebApp: Período de " + inicio + " até " + fim);
+    Logger.log("gerarRelatorioEstoqueWebApp: Total de linhas a verificar: " + data.length);
+
     for (var i = 0; i < data.length; i++) {
-      var dataMovimento = parseDateBR(data[i][3]); // Coluna D (índice 3) - usa parseDateBR para formato brasileiro
-      if (dataMovimento >= inicio && dataMovimento <= fim) {
+      // CORREÇÃO: Usa getValues() para pegar objeto Date nativo ao invés de string
+      var dataMovimento = dataValues[i][3]; // Coluna D (índice 3) - Date nativo
+
+      // Garante que é um Date válido
+      if (!(dataMovimento instanceof Date) || isNaN(dataMovimento.getTime())) {
+        // Fallback: tenta parsear como string se não for Date válido
+        dataMovimento = parseDateBR(data[i][3]);
+      }
+
+      // Normaliza para 00:00:00 para comparação apenas por dia
+      var dataMovimentoNormalizada = new Date(dataMovimento.getFullYear(), dataMovimento.getMonth(), dataMovimento.getDate(), 0, 0, 0, 0);
+
+      if (dataMovimentoNormalizada >= inicio && dataMovimentoNormalizada <= fim) {
         var bg = backgrounds[i][0] ? backgrounds[i][0].toLowerCase() : "#ffffff";
 
         // Determina o motivo baseado na cor
