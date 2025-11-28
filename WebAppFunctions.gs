@@ -120,29 +120,27 @@ function getItemIndexOpt() {
 }
 
 function _buildItemIndexOpt() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetEstoque = ss.getSheetByName("ESTOQUE");
-  if (!sheetEstoque) return {};
-
-  var lastRow = sheetEstoque.getLastRow();
-  if (lastRow < 2) return {};
-
-  var data = sheetEstoque.getRange(2, 1, lastRow - 1, 10).getDisplayValues();
+  // OTIMIZAÇÃO: Usa ÍNDICE_ITENS ao invés de ler ESTOQUE (40k linhas)
+  var indice = getIndiceItensCache();
   var index = {};
 
-  for (var i = 0; i < data.length; i++) {
-    var item = data[i][1] ? data[i][1].toString().trim().toLowerCase() : null;
-    if (item) {
-      index[item] = {
-        row: i + 2,
-        group: data[i][0],
-        date: data[i][3],
-        stock: data[i][9]
+  // Converte formato do ÍNDICE_ITENS para formato esperado por getLastRegistrationOpt
+  for (var itemKey in indice) {
+    if (indice.hasOwnProperty(itemKey)) {
+      var itemData = indice[itemKey];
+      // itemKey já está em maiúsculas, converter para minúsculas para compatibilidade
+      var itemLowercase = itemKey.toLowerCase();
+
+      index[itemLowercase] = {
+        row: itemData.linha || 0,
+        group: itemData.grupo || '',
+        date: itemData.data || null,
+        stock: itemData.saldo || 0
       };
     }
   }
 
-  Logger.log("Item index built with " + Object.keys(index).length + " entries");
+  Logger.log("Item index built from ÍNDICE_ITENS with " + Object.keys(index).length + " entries");
   return index;
 }
 
