@@ -1425,23 +1425,35 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
 
     PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
 
+    // OTIMIZAÇÃO: Carrega índice UMA VEZ para todos os itens
+    var indice = getIndiceItensCache();
+    Logger.log("processMultipleEstoqueItemsWithSaldos: Índice carregado com " + Object.keys(indice).length + " itens");
+
     for (var i = 0; i < itens.length; i++) {
       var itemData = itens[i];
 
       try {
         var nextRow = sheetEstoque.getLastRow() + 1;
+        var itemKey = itemData.item.toString().trim().toUpperCase();
 
-        // Se o cliente enviou grupo, usa esse; senão, busca na base
+        // OTIMIZAÇÃO: Busca no índice ao invés de ler planilha
         var grupoItem = '';
+        var previousSaldo = 0;
+        var lastDate = null;
+
+        // Se o cliente enviou grupo, usa esse; senão, busca no índice
         if (itemData.grupo && itemData.grupo.trim() !== '') {
           grupoItem = itemData.grupo.trim();
-        } else {
-          grupoItem = getItemGroup(itemData.item) || '';
+        } else if (indice[itemKey]) {
+          grupoItem = indice[itemKey].grupo || '';
         }
 
-        // Recupera último registro para cálculo de saldo
-        var lastReg = getLastRegistration(itemData.item, nextRow);
-        var previousSaldo = parseFloat(lastReg.lastStock) || 0;
+        // Recupera saldo anterior do índice (O(1) - instantâneo!)
+        if (indice[itemKey]) {
+          previousSaldo = parseFloat(indice[itemKey].saldo) || 0;
+          lastDate = indice[itemKey].data;
+        }
+
         var entrada = parseFloat(itemData.entrada) || 0;
         var saida = parseFloat(itemData.saida) || 0;
         var newSaldo = previousSaldo + entrada - saida;
@@ -1471,17 +1483,17 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
         var itemWarning = null;
 
         // Verifica se passou mais de 20 dias desde a última data de registro
-        if (lastReg.lastDate) {
+        if (lastDate) {
           // CORREÇÃO: Usa parseDateString para converter corretamente datas em formato brasileiro
-          var lastDate = parseDateString(lastReg.lastDate);
+          var parsedLastDate = parseDateString(lastDate);
 
           // Se a conversão falhar, tenta criar um Date object direto
-          if (!lastDate || isNaN(lastDate.getTime())) {
+          if (!parsedLastDate || isNaN(parsedLastDate.getTime())) {
             Logger.log("processMultipleEstoqueItemsWithSaldos: AVISO - Conversão de data falhou");
-            lastDate = new Date(lastReg.lastDate);
+            parsedLastDate = new Date(lastDate);
           }
 
-          var diffDays = (now.getTime() - lastDate.getTime()) / (1000 * 3600 * 24);
+          var diffDays = (now.getTime() - parsedLastDate.getTime()) / (1000 * 3600 * 24);
           Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - Diferença: " + diffDays + " dias");
 
           if (diffDays > 20) {
@@ -1512,6 +1524,17 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
           if (!itemWarning) itemWarning = "ENTRADA - Atualizar estoque";
           Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - AMARELO");
         }
+
+        // OTIMIZAÇÃO BATCH: Atualiza índice SEM invalidar cache (false)
+        // Cache será invalidado UMA VEZ no final
+        updateIndiceItem(
+          itemData.item,
+          newSaldo,
+          now,
+          grupoItem,
+          nextRow,
+          false  // ✅ Não invalida cache aqui (batch)
+        );
 
         // Adiciona ao array de itens processados com os saldos
         itensProcessados.push({
