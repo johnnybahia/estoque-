@@ -298,6 +298,11 @@ function buildIndiceItensInitial() {
     Logger.log("Índice escrito na aba ÍNDICE_ITENS: " + indiceArray.length + " linhas");
   }
 
+  // CRÍTICO: Invalida o cache para forçar reload imediato
+  var cache = CacheService.getScriptCache();
+  cache.remove("indiceItensCache");
+  Logger.log("Cache do índice invalidado - próxima leitura vai recarregar do sheet");
+
   var endTime = new Date().getTime();
   var duration = ((endTime - startTime) / 1000).toFixed(2);
 
@@ -424,8 +429,14 @@ function getLastRegistrationFromIndex(item) {
     var initResult = initializeIndiceIfNeeded();
     Logger.log("Resultado da inicialização: " + initResult.message);
 
-    // Recarrega o índice após inicialização
-    indice = getIndiceItensCache();
+    // IMPORTANTE: Invalida cache para forçar reload
+    var cache = CacheService.getScriptCache();
+    cache.remove("indiceItensCache");
+
+    // Recarrega o índice após inicialização (agora vai ler do sheet recém-populado)
+    indice = _loadIndiceItensFromSheet(); // Carrega direto do sheet (bypassa cache)
+
+    Logger.log("Índice recarregado: " + Object.keys(indice).length + " itens encontrados");
 
     // Se ainda estiver vazio, algo deu MUITO errado - usa fallback seguro
     if (!indice || Object.keys(indice).length === 0) {
@@ -503,8 +514,14 @@ function getItemGroupFromIndex(itemName) {
     var initResult = initializeIndiceIfNeeded();
     Logger.log("Resultado da inicialização: " + initResult.message);
 
-    // Recarrega o índice
-    indice = getIndiceItensCache();
+    // IMPORTANTE: Invalida cache para forçar reload
+    var cache = CacheService.getScriptCache();
+    cache.remove("indiceItensCache");
+
+    // Recarrega o índice (carrega direto do sheet)
+    indice = _loadIndiceItensFromSheet();
+
+    Logger.log("Índice recarregado em getItemGroupFromIndex: " + Object.keys(indice).length + " itens");
 
     // Se ainda estiver vazio, usa busca direta SEGURA
     if (!indice || Object.keys(indice).length === 0) {
