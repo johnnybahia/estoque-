@@ -407,7 +407,7 @@ function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque) {
 /**
  * getLastRegistrationFromIndex: Busca registro usando a aba ÍNDICE_ITENS
  * SUPER RÁPIDO: O(1) com cache, sem ler ESTOQUE
- * FALLBACK AUTOMÁTICO: Se o índice não existir, usa a função antiga
+ * INICIALIZAÇÃO AUTOMÁTICA: Se o índice não existir, cria automaticamente
  */
 function getLastRegistrationFromIndex(item) {
   if (!item) return { lastDate: null, lastStock: 0, lastGroup: null };
@@ -415,37 +415,26 @@ function getLastRegistrationFromIndex(item) {
   var itemKey = item.toString().trim().toUpperCase();
   var indice = getIndiceItensCache();
 
-  // CORREÇÃO: Se o índice está vazio, significa que não foi inicializado
-  // Faz fallback para a função antiga getLastRegistration()
+  // CRÍTICO: Se o índice está vazio, INICIALIZA AUTOMATICAMENTE
+  // Isso garante que SEMPRE teremos dados corretos
   if (!indice || Object.keys(indice).length === 0) {
-    Logger.log("AVISO: Índice vazio, usando fallback getLastRegistration()");
-    // Usa a função antiga do Código.gs que lê direto da planilha
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheetEstoque = ss.getSheetByName("ESTOQUE");
-    var lastRow = sheetEstoque.getLastRow();
+    Logger.log("⚠️ CRÍTICO: Índice vazio detectado! Inicializando automaticamente...");
 
-    if (lastRow < 2) {
-      return { lastDate: null, lastStock: 0, lastGroup: null };
+    // Inicializa o índice AGORA (primeira vez)
+    var initResult = initializeIndiceIfNeeded();
+    Logger.log("Resultado da inicialização: " + initResult.message);
+
+    // Recarrega o índice após inicialização
+    indice = getIndiceItensCache();
+
+    // Se ainda estiver vazio, algo deu MUITO errado - usa fallback seguro
+    if (!indice || Object.keys(indice).length === 0) {
+      Logger.log("🔴 ERRO CRÍTICO: Não foi possível inicializar o índice! Usando busca direta na planilha.");
+      return _getFallbackLastRegistration(item);
     }
-
-    // Busca manual (mesma lógica de getLastRegistration)
-    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 10).getDisplayValues();
-    var itemUpper = item.toString().trim().toUpperCase();
-
-    for (var i = data.length - 1; i >= 0; i--) {
-      var currentItem = data[i][1];
-      if (currentItem && currentItem.toString().trim().toUpperCase() === itemUpper) {
-        return {
-          lastDate: data[i][3],
-          lastStock: data[i][9],
-          lastGroup: data[i][0]
-        };
-      }
-    }
-
-    return { lastDate: null, lastStock: 0, lastGroup: null };
   }
 
+  // Busca no índice (O(1) super rápido)
   if (indice[itemKey]) {
     return {
       lastDate: indice[itemKey].data,
@@ -454,20 +443,89 @@ function getLastRegistrationFromIndex(item) {
     };
   }
 
+  // Item não encontrado no índice (novo item)
   return { lastDate: null, lastStock: 0, lastGroup: null };
 }
 
 /**
+ * _getFallbackLastRegistration: Busca SEGURA direto na planilha
+ * Usa getValues() para garantir tipos nativos (números como Number, datas como Date)
+ * ONLY usado em caso de erro crítico de índice
+ */
+function _getFallbackLastRegistration(item) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var lastRow = sheetEstoque.getLastRow();
+
+    if (lastRow < 2) {
+      return { lastDate: null, lastStock: 0, lastGroup: null };
+    }
+
+    // USA getValues() para obter tipos nativos (não strings)
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 10).getValues();
+    var itemUpper = item.toString().trim().toUpperCase();
+
+    // Busca reversa (última ocorrência)
+    for (var i = data.length - 1; i >= 0; i--) {
+      var currentItem = data[i][1];
+      if (currentItem && currentItem.toString().trim().toUpperCase() === itemUpper) {
+        var saldo = data[i][9]; // Coluna J - vem como NUMBER nativo
+
+        return {
+          lastDate: data[i][3],   // Date nativo
+          lastStock: saldo,       // Number nativo (não string!)
+          lastGroup: data[i][0]
+        };
+      }
+    }
+
+    return { lastDate: null, lastStock: 0, lastGroup: null };
+  } catch (e) {
+    Logger.log("🔴 ERRO no fallback: " + e.message);
+    return { lastDate: null, lastStock: 0, lastGroup: null };
+  }
+}
+
+/**
  * getItemGroupFromIndex: Busca grupo usando índice
- * FALLBACK AUTOMÁTICO: Se o índice não existir, busca direto na planilha
+ * INICIALIZAÇÃO AUTOMÁTICA: Se o índice não existir, cria automaticamente
  */
 function getItemGroupFromIndex(itemName) {
   var itemKey = itemName.toString().trim().toUpperCase();
   var indice = getIndiceItensCache();
 
-  // CORREÇÃO: Se o índice está vazio, faz fallback para busca manual
+  // CRÍTICO: Se o índice está vazio, INICIALIZA AUTOMATICAMENTE
   if (!indice || Object.keys(indice).length === 0) {
-    Logger.log("AVISO: Índice vazio, buscando grupo direto na planilha");
+    Logger.log("⚠️ CRÍTICO: Índice vazio detectado em getItemGroupFromIndex! Inicializando...");
+
+    // Inicializa o índice AGORA
+    var initResult = initializeIndiceIfNeeded();
+    Logger.log("Resultado da inicialização: " + initResult.message);
+
+    // Recarrega o índice
+    indice = getIndiceItensCache();
+
+    // Se ainda estiver vazio, usa busca direta SEGURA
+    if (!indice || Object.keys(indice).length === 0) {
+      Logger.log("🔴 ERRO: Não foi possível inicializar o índice! Buscando grupo direto na planilha.");
+      return _getFallbackItemGroup(itemName);
+    }
+  }
+
+  // Busca no índice
+  if (indice[itemKey]) {
+    return indice[itemKey].grupo || '';
+  }
+
+  return '';
+}
+
+/**
+ * _getFallbackItemGroup: Busca SEGURA de grupo direto na planilha
+ */
+function _getFallbackItemGroup(itemName) {
+  try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheetEstoque = ss.getSheetByName("ESTOQUE");
     var lastRow = sheetEstoque.getLastRow();
@@ -483,13 +541,53 @@ function getItemGroupFromIndex(itemName) {
       }
     }
     return '';
+  } catch (e) {
+    Logger.log("🔴 ERRO no fallback de grupo: " + e.message);
+    return '';
+  }
+}
+
+/**
+ * _parseNumeroSeguro: Converte qualquer valor para número de forma SEGURA
+ * Trata: null, undefined, strings com vírgula, números nativos
+ * GARANTE que sempre retorna um número válido
+ */
+function _parseNumeroSeguro(valor, padrao) {
+  padrao = padrao || 0;
+
+  // Se for null, undefined ou string vazia
+  if (valor === null || valor === undefined || valor === '') {
+    return padrao;
   }
 
-  if (indice[itemKey]) {
-    return indice[itemKey].grupo || '';
+  // Se já for número válido
+  if (typeof valor === 'number' && !isNaN(valor)) {
+    return valor;
   }
 
-  return '';
+  // Se for string, trata vírgula brasileira
+  if (typeof valor === 'string') {
+    // Remove espaços e troca vírgula por ponto
+    var valorLimpo = valor.trim().replace(',', '.');
+    var numero = parseFloat(valorLimpo);
+
+    // Se conversão falhou, retorna padrão
+    if (isNaN(numero)) {
+      Logger.log("⚠️ AVISO: Não foi possível converter '" + valor + "' para número. Usando padrão: " + padrao);
+      return padrao;
+    }
+
+    return numero;
+  }
+
+  // Tipo desconhecido, tenta conversão direta
+  var numero = parseFloat(valor);
+  if (isNaN(numero)) {
+    Logger.log("⚠️ AVISO: Valor '" + valor + "' (tipo: " + typeof valor + ") não é número válido. Usando padrão: " + padrao);
+    return padrao;
+  }
+
+  return numero;
 }
 
 /**
@@ -831,24 +929,23 @@ function processEstoqueWebApp(formData) {
       usuario = formData.usuario; // Prioriza o usuário enviado pelo formulário
     }
 
-    // OTIMIZAÇÃO: Recupera último registro do ÍNDICE ao invés de ler planilha
+    // OTIMIZAÇÃO: Recupera último registro do ÍNDICE (com inicialização automática se necessário)
     var lastReg = getLastRegistrationFromIndex(formData.item);
 
-    // CORREÇÃO: Converte saldo para número, tratando formato brasileiro (vírgula)
-    var previousSaldoStr = lastReg.lastStock ? lastReg.lastStock.toString().replace(',', '.') : '0';
-    var previousSaldo = parseFloat(previousSaldoStr) || 0;
-
-    var entradaStr = formData.entrada ? formData.entrada.toString().replace(',', '.') : '0';
-    var saidaStr = formData.saida ? formData.saida.toString().replace(',', '.') : '0';
-    var entrada = parseFloat(entradaStr) || 0;
-    var saida = parseFloat(saidaStr) || 0;
+    // CONVERSÃO SEGURA: Usa função especializada que trata TODOS os formatos
+    var previousSaldo = _parseNumeroSeguro(lastReg.lastStock, 0);
+    var entrada = _parseNumeroSeguro(formData.entrada, 0);
+    var saida = _parseNumeroSeguro(formData.saida, 0);
 
     var newSaldo = previousSaldo + entrada - saida;
 
+    Logger.log("processEstoqueWebApp: ===== DADOS DO LANÇAMENTO =====");
     Logger.log("processEstoqueWebApp: Item: " + formData.item);
     Logger.log("processEstoqueWebApp: Saldo anterior (raw): " + lastReg.lastStock + " | Convertido: " + previousSaldo);
-    Logger.log("processEstoqueWebApp: Entrada: " + entrada + " | Saída: " + saida);
+    Logger.log("processEstoqueWebApp: Entrada (raw): " + formData.entrada + " | Convertido: " + entrada);
+    Logger.log("processEstoqueWebApp: Saída (raw): " + formData.saida + " | Convertido: " + saida);
     Logger.log("processEstoqueWebApp: Novo saldo: " + newSaldo);
+    Logger.log("processEstoqueWebApp: ================================");
 
     // Nova estrutura com Unidade de Medida (após Item) e Valor (após Saldo)
     var rowData = [
