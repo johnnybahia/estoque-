@@ -368,8 +368,14 @@ function _loadIndiceItensFromSheet() {
 /**
  * updateIndiceItem: Atualiza UM item no índice (chamado após cada insert)
  * Muito rápido: apenas 1 linha atualizada
+ * @param {boolean} invalidateCache - Se deve invalidar cache (default: true). Use false em loops batch.
  */
-function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque) {
+function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque, invalidateCache) {
+  // Default: invalida cache (compatibilidade com código existente)
+  if (invalidateCache === undefined) {
+    invalidateCache = true;
+  }
+
   try {
     var sheetIndice = getOrCreateIndiceItensSheet();
     var itemKey = itemName.toString().trim().toUpperCase();
@@ -400,9 +406,12 @@ function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque) {
       sheetIndice.getRange(nextRow, 1, 1, 6).setValues([rowData]);
     }
 
-    // Invalida cache para forçar reload
-    var cache = CacheService.getScriptCache();
-    cache.remove("indiceItensCache");
+    // OTIMIZAÇÃO BATCH: Invalida cache apenas se solicitado
+    // Em operações batch, cache é invalidado UMA VEZ no final
+    if (invalidateCache) {
+      var cache = CacheService.getScriptCache();
+      cache.remove("indiceItensCache");
+    }
 
   } catch (e) {
     Logger.log("ERRO ao atualizar índice: " + e.message);
@@ -1171,20 +1180,22 @@ function processMultipleEstoqueItems(itens) {
           sheetEstoque.getRange(currentRow, 1, 1, lastColumn).setBackground("yellow");
         }
 
-        // Atualiza índice para este item
+        // OTIMIZAÇÃO BATCH: Atualiza índice SEM invalidar cache (false)
+        // Cache será invalidado UMA VEZ no final
         updateIndiceItem(
           rowsToInsert[i].item,
           rowsToInsert[i].newSaldo,
           now,
           rowsToInsert[i].grupo,
-          currentRow
+          currentRow,
+          false  // ✅ Não invalida cache aqui (batch)
         );
       }
     }
 
     PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
 
-    // Invalida caches
+    // Invalida caches UMA VEZ no final (OTIMIZADO!)
     invalidateCache();
     invalidateCacheOpt();
     backupEstoqueData();
@@ -1344,20 +1355,22 @@ function processMultipleEstoqueItemsWithGroup(itens) {
           sheetEstoque.getRange(currentRow, 1, 1, lastColumn).setBackground(rowsToInsert[i].background);
         }
 
-        // Atualiza índice para este item
+        // OTIMIZAÇÃO BATCH: Atualiza índice SEM invalidar cache (false)
+        // Cache será invalidado UMA VEZ no final
         updateIndiceItem(
           rowsToInsert[i].item,
           rowsToInsert[i].newSaldo,
           now,
           rowsToInsert[i].grupo,
-          currentRow
+          currentRow,
+          false  // ✅ Não invalida cache aqui (batch)
         );
       }
     }
 
     PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
 
-    // Invalida caches
+    // Invalida caches UMA VEZ no final (OTIMIZADO!)
     invalidateCache();
     invalidateCacheOpt();
     backupEstoqueData();
