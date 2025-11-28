@@ -407,12 +407,44 @@ function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque) {
 /**
  * getLastRegistrationFromIndex: Busca registro usando a aba ÍNDICE_ITENS
  * SUPER RÁPIDO: O(1) com cache, sem ler ESTOQUE
+ * FALLBACK AUTOMÁTICO: Se o índice não existir, usa a função antiga
  */
 function getLastRegistrationFromIndex(item) {
   if (!item) return { lastDate: null, lastStock: 0, lastGroup: null };
 
   var itemKey = item.toString().trim().toUpperCase();
   var indice = getIndiceItensCache();
+
+  // CORREÇÃO: Se o índice está vazio, significa que não foi inicializado
+  // Faz fallback para a função antiga getLastRegistration()
+  if (!indice || Object.keys(indice).length === 0) {
+    Logger.log("AVISO: Índice vazio, usando fallback getLastRegistration()");
+    // Usa a função antiga do Código.gs que lê direto da planilha
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var lastRow = sheetEstoque.getLastRow();
+
+    if (lastRow < 2) {
+      return { lastDate: null, lastStock: 0, lastGroup: null };
+    }
+
+    // Busca manual (mesma lógica de getLastRegistration)
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 10).getDisplayValues();
+    var itemUpper = item.toString().trim().toUpperCase();
+
+    for (var i = data.length - 1; i >= 0; i--) {
+      var currentItem = data[i][1];
+      if (currentItem && currentItem.toString().trim().toUpperCase() === itemUpper) {
+        return {
+          lastDate: data[i][3],
+          lastStock: data[i][9],
+          lastGroup: data[i][0]
+        };
+      }
+    }
+
+    return { lastDate: null, lastStock: 0, lastGroup: null };
+  }
 
   if (indice[itemKey]) {
     return {
@@ -427,10 +459,31 @@ function getLastRegistrationFromIndex(item) {
 
 /**
  * getItemGroupFromIndex: Busca grupo usando índice
+ * FALLBACK AUTOMÁTICO: Se o índice não existir, busca direto na planilha
  */
 function getItemGroupFromIndex(itemName) {
   var itemKey = itemName.toString().trim().toUpperCase();
   var indice = getIndiceItensCache();
+
+  // CORREÇÃO: Se o índice está vazio, faz fallback para busca manual
+  if (!indice || Object.keys(indice).length === 0) {
+    Logger.log("AVISO: Índice vazio, buscando grupo direto na planilha");
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var lastRow = sheetEstoque.getLastRow();
+
+    if (lastRow < 2) return '';
+
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 2).getValues();
+    var itemNormalized = itemName.toString().trim().toUpperCase();
+
+    for (var i = data.length - 1; i >= 0; i--) {
+      if (data[i][1] && data[i][1].toString().trim().toUpperCase() === itemNormalized) {
+        return data[i][0] || '';
+      }
+    }
+    return '';
+  }
 
   if (indice[itemKey]) {
     return indice[itemKey].grupo || '';
@@ -780,9 +833,22 @@ function processEstoqueWebApp(formData) {
 
     // OTIMIZAÇÃO: Recupera último registro do ÍNDICE ao invés de ler planilha
     var lastReg = getLastRegistrationFromIndex(formData.item);
-    var previousSaldo = parseFloat(lastReg.lastStock) || 0;
-    var newSaldo = previousSaldo + parseFloat(formData.entrada) - parseFloat(formData.saida);
-    Logger.log("processEstoqueWebApp: Saldo anterior: " + previousSaldo + " | Novo saldo: " + newSaldo);
+
+    // CORREÇÃO: Converte saldo para número, tratando formato brasileiro (vírgula)
+    var previousSaldoStr = lastReg.lastStock ? lastReg.lastStock.toString().replace(',', '.') : '0';
+    var previousSaldo = parseFloat(previousSaldoStr) || 0;
+
+    var entradaStr = formData.entrada ? formData.entrada.toString().replace(',', '.') : '0';
+    var saidaStr = formData.saida ? formData.saida.toString().replace(',', '.') : '0';
+    var entrada = parseFloat(entradaStr) || 0;
+    var saida = parseFloat(saidaStr) || 0;
+
+    var newSaldo = previousSaldo + entrada - saida;
+
+    Logger.log("processEstoqueWebApp: Item: " + formData.item);
+    Logger.log("processEstoqueWebApp: Saldo anterior (raw): " + lastReg.lastStock + " | Convertido: " + previousSaldo);
+    Logger.log("processEstoqueWebApp: Entrada: " + entrada + " | Saída: " + saida);
+    Logger.log("processEstoqueWebApp: Novo saldo: " + newSaldo);
 
     // Nova estrutura com Unidade de Medida (após Item) e Valor (após Saldo)
     var rowData = [
@@ -793,8 +859,8 @@ function processEstoqueWebApp(formData) {
       formData.nf || '',           // E: NF
       formData.obs || '',          // F: Obs
       previousSaldo,               // G: Saldo Anterior
-      formData.entrada,            // H: Entrada
-      formData.saida,              // I: Saída
+      entrada,                     // H: Entrada (usa valor convertido)
+      saida,                       // I: Saída (usa valor convertido)
       newSaldo,                    // J: Saldo
       parseFloat(formData.valorUnitario) || 0,  // K: Valor Unitário (NOVO)
       now,                         // L: Alterado Em
@@ -861,13 +927,12 @@ function processEstoqueWebApp(formData) {
 
     // Verifica se houve ENTRADA de estoque - aviso para atualização (sobrescreve vermelho)
     Logger.log("processEstoqueWebApp: ========================================");
-    Logger.log("processEstoqueWebApp: DEBUG AMARELO - Entrada: " + formData.entrada);
-    Logger.log("processEstoqueWebApp: DEBUG AMARELO - Saída: " + formData.saida);
-    Logger.log("processEstoqueWebApp: DEBUG AMARELO - parseFloat(entrada): " + parseFloat(formData.entrada));
-    Logger.log("processEstoqueWebApp: DEBUG AMARELO - parseFloat(entrada) > 0? " + (parseFloat(formData.entrada) > 0));
+    Logger.log("processEstoqueWebApp: DEBUG AMARELO - Entrada: " + entrada);
+    Logger.log("processEstoqueWebApp: DEBUG AMARELO - Saída: " + saida);
+    Logger.log("processEstoqueWebApp: DEBUG AMARELO - entrada > 0? " + (entrada > 0));
     Logger.log("processEstoqueWebApp: ========================================");
 
-    if (parseFloat(formData.entrada) > 0) {
+    if (entrada > 0) {
       var lastColumn = sheetEstoque.getLastColumn();
       sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("yellow");
       warningMessage = "⚠️ ENTRADA DE ESTOQUE REGISTRADA!\n\nÉ NECESSÁRIO ATUALIZAR O ESTOQUE DESTE ITEM PARA EVITAR FUROS DE ESTOQUE.\n\nRealize uma contagem física e registre uma atualização completa do saldo.";
