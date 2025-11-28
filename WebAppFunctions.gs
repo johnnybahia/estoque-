@@ -8,15 +8,22 @@
 // ========================================
 
 /**
- * Constantes de cache - TTLs reduzidos para atualização mais rápida
- * Valores menores = dados mais atualizados, mais chamadas à planilha
+ * Constantes de cache - TTLs OTIMIZADOS para 40k+ linhas
+ * Com índice permanente, podemos usar TTLs maiores
  */
 var CACHE_TTL_OPT = {
-  AUTOCOMPLETE: 120,    // 2 minutos para dados de autocomplete
-  DASHBOARD: 60,        // 1 minuto para dashboard
-  ITEM_INDEX: 120,      // 2 minutos para índice de itens
-  DEFAULT: 120          // 2 minutos padrão
+  AUTOCOMPLETE: 600,    // 10 minutos para dados de autocomplete
+  DASHBOARD: 300,       // 5 minutos para dashboard
+  ITEM_INDEX: 1800,     // 30 minutos para índice de itens (segmentado)
+  INDEX_FULL: 3600,     // 1 hora para índice completo da aba ÍNDICE_ITENS
+  DEFAULT: 600          // 10 minutos padrão
 };
+
+/**
+ * Constante: número máximo de linhas recentes para cache segmentado
+ * Para planilhas grandes (40k+), cachear apenas os últimos registros
+ */
+var MAX_RECENT_ROWS = 5000;
 
 /**
  * getCachedDataOpt: Versão otimizada de cache com TTL maior
@@ -169,7 +176,386 @@ function invalidateCacheOpt() {
   cache.remove("itemIndexOpt");
   cache.remove("dashboardData");
   cache.remove("itemHistoryIndex");
+  cache.remove("indiceItensCache");
   Logger.log("Optimized caches invalidated");
+}
+
+// ========================================
+// FASE 2: SISTEMA DE ÍNDICE PERMANENTE
+// Aba ÍNDICE_ITENS para busca O(1) em planilhas grandes (40k+)
+// ========================================
+
+/**
+ * getOrCreateIndiceItensSheet: Obtém ou cria a aba ÍNDICE_ITENS
+ */
+function getOrCreateIndiceItensSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ÍNDICE_ITENS");
+
+  if (!sheet) {
+    sheet = ss.insertSheet("ÍNDICE_ITENS");
+
+    // Configura cabeçalhos
+    var headers = [
+      ["Item", "Saldo Atual", "Última Data", "Grupo", "Linha ESTOQUE", "Última Atualização"]
+    ];
+    sheet.getRange(1, 1, 1, 6).setValues(headers);
+    sheet.getRange(1, 1, 1, 6).setFontWeight("bold").setBackground("#4285f4").setFontColor("white");
+
+    // Congela primeira linha
+    sheet.setFrozenRows(1);
+
+    // Ajusta larguras
+    sheet.setColumnWidth(1, 250); // Item
+    sheet.setColumnWidth(2, 100); // Saldo
+    sheet.setColumnWidth(3, 120); // Data
+    sheet.setColumnWidth(4, 150); // Grupo
+    sheet.setColumnWidth(5, 120); // Linha
+    sheet.setColumnWidth(6, 150); // Atualização
+
+    Logger.log("Aba ÍNDICE_ITENS criada com sucesso");
+  }
+
+  return sheet;
+}
+
+/**
+ * buildIndiceItensInitial: Constrói o índice inicial a partir da aba ESTOQUE
+ * ATENÇÃO: Esta função pode demorar 30-60 segundos para 40k linhas
+ * Use apenas uma vez ou quando precisar reconstruir o índice completamente
+ */
+function buildIndiceItensInitial() {
+  Logger.log("=== INICIANDO CONSTRUÇÃO DO ÍNDICE INICIAL ===");
+  var startTime = new Date().getTime();
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  var sheetIndice = getOrCreateIndiceItensSheet();
+
+  if (!sheetEstoque) {
+    Logger.log("ERRO: Aba ESTOQUE não encontrada");
+    return { success: false, message: "Aba ESTOQUE não encontrada" };
+  }
+
+  var lastRow = sheetEstoque.getLastRow();
+  if (lastRow < 2) {
+    Logger.log("Planilha ESTOQUE vazia");
+    return { success: true, message: "Planilha vazia, nada a indexar" };
+  }
+
+  Logger.log("Lendo " + (lastRow - 1) + " linhas da aba ESTOQUE...");
+
+  // Lê TODA a planilha UMA VEZ
+  var data = sheetEstoque.getRange(2, 1, lastRow - 1, 10).getDisplayValues();
+
+  // Constrói índice em memória (Map para O(1) lookup)
+  var indiceMap = {};
+
+  for (var i = 0; i < data.length; i++) {
+    var item = data[i][1]; // Coluna B
+    if (!item || item.trim() === '') continue;
+
+    var itemKey = item.toString().trim().toUpperCase();
+    var rowNum = i + 2;
+
+    // Mantém sempre o ÚLTIMO registro de cada item
+    indiceMap[itemKey] = {
+      item: data[i][1],           // Item original (com case)
+      saldo: data[i][9],          // Coluna J - Saldo
+      data: data[i][3],           // Coluna D - Data
+      grupo: data[i][0],          // Coluna A - Grupo
+      linha: rowNum
+    };
+  }
+
+  Logger.log("Índice construído em memória: " + Object.keys(indiceMap).length + " itens únicos");
+
+  // Converte Map para array para escrever na planilha
+  var indiceArray = [];
+  var now = new Date();
+
+  for (var key in indiceMap) {
+    var item = indiceMap[key];
+    indiceArray.push([
+      item.item,
+      item.saldo,
+      item.data,
+      item.grupo,
+      item.linha,
+      now
+    ]);
+  }
+
+  // Limpa conteúdo anterior (mantém cabeçalho)
+  var lastRowIndice = sheetIndice.getLastRow();
+  if (lastRowIndice > 1) {
+    sheetIndice.getRange(2, 1, lastRowIndice - 1, 6).clear();
+  }
+
+  // Escreve TUDO de uma vez (muito mais rápido)
+  if (indiceArray.length > 0) {
+    sheetIndice.getRange(2, 1, indiceArray.length, 6).setValues(indiceArray);
+    Logger.log("Índice escrito na aba ÍNDICE_ITENS: " + indiceArray.length + " linhas");
+  }
+
+  var endTime = new Date().getTime();
+  var duration = ((endTime - startTime) / 1000).toFixed(2);
+
+  Logger.log("=== ÍNDICE CONSTRUÍDO COM SUCESSO EM " + duration + " SEGUNDOS ===");
+
+  return {
+    success: true,
+    message: "Índice construído: " + indiceArray.length + " itens em " + duration + "s",
+    totalItems: indiceArray.length,
+    duration: duration
+  };
+}
+
+/**
+ * getIndiceItensCache: Retorna o índice completo em cache ou reconstrói do sheet ÍNDICE_ITENS
+ * Muito mais rápido que ler ESTOQUE (300 linhas vs 40k linhas)
+ */
+function getIndiceItensCache() {
+  return getCachedDataOpt("indiceItensCache", function() {
+    return _loadIndiceItensFromSheet();
+  }, CACHE_TTL_OPT.INDEX_FULL);
+}
+
+/**
+ * _loadIndiceItensFromSheet: Carrega o índice da aba ÍNDICE_ITENS
+ * Rápido porque a aba tem apenas ~300-500 linhas (itens únicos)
+ */
+function _loadIndiceItensFromSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetIndice = ss.getSheetByName("ÍNDICE_ITENS");
+
+  if (!sheetIndice) {
+    Logger.log("AVISO: Aba ÍNDICE_ITENS não existe, criando...");
+    return {}; // Retorna vazio, será criado no próximo insert
+  }
+
+  var lastRow = sheetIndice.getLastRow();
+  if (lastRow < 2) {
+    return {};
+  }
+
+  var data = sheetIndice.getRange(2, 1, lastRow - 1, 5).getValues();
+  var indice = {};
+
+  for (var i = 0; i < data.length; i++) {
+    var item = data[i][0];
+    if (!item) continue;
+
+    var itemKey = item.toString().trim().toUpperCase();
+    indice[itemKey] = {
+      item: data[i][0],
+      saldo: data[i][1],
+      data: data[i][2],
+      grupo: data[i][3],
+      linha: data[i][4]
+    };
+  }
+
+  Logger.log("Índice carregado do sheet: " + Object.keys(indice).length + " itens");
+  return indice;
+}
+
+/**
+ * updateIndiceItem: Atualiza UM item no índice (chamado após cada insert)
+ * Muito rápido: apenas 1 linha atualizada
+ */
+function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque) {
+  try {
+    var sheetIndice = getOrCreateIndiceItensSheet();
+    var itemKey = itemName.toString().trim().toUpperCase();
+
+    // Busca item no índice
+    var lastRow = sheetIndice.getLastRow();
+    var itemRow = -1;
+
+    if (lastRow > 1) {
+      var items = sheetIndice.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (var i = 0; i < items.length; i++) {
+        if (items[i][0] && items[i][0].toString().trim().toUpperCase() === itemKey) {
+          itemRow = i + 2;
+          break;
+        }
+      }
+    }
+
+    var now = new Date();
+    var rowData = [itemName, saldo, data, grupo, linhaEstoque, now];
+
+    if (itemRow > 0) {
+      // Atualiza linha existente
+      sheetIndice.getRange(itemRow, 1, 1, 6).setValues([rowData]);
+    } else {
+      // Adiciona novo item
+      var nextRow = sheetIndice.getLastRow() + 1;
+      sheetIndice.getRange(nextRow, 1, 1, 6).setValues([rowData]);
+    }
+
+    // Invalida cache para forçar reload
+    var cache = CacheService.getScriptCache();
+    cache.remove("indiceItensCache");
+
+  } catch (e) {
+    Logger.log("ERRO ao atualizar índice: " + e.message);
+  }
+}
+
+/**
+ * getLastRegistrationFromIndex: Busca registro usando a aba ÍNDICE_ITENS
+ * SUPER RÁPIDO: O(1) com cache, sem ler ESTOQUE
+ */
+function getLastRegistrationFromIndex(item) {
+  if (!item) return { lastDate: null, lastStock: 0, lastGroup: null };
+
+  var itemKey = item.toString().trim().toUpperCase();
+  var indice = getIndiceItensCache();
+
+  if (indice[itemKey]) {
+    return {
+      lastDate: indice[itemKey].data,
+      lastStock: indice[itemKey].saldo,
+      lastGroup: indice[itemKey].grupo
+    };
+  }
+
+  return { lastDate: null, lastStock: 0, lastGroup: null };
+}
+
+/**
+ * getItemGroupFromIndex: Busca grupo usando índice
+ */
+function getItemGroupFromIndex(itemName) {
+  var itemKey = itemName.toString().trim().toUpperCase();
+  var indice = getIndiceItensCache();
+
+  if (indice[itemKey]) {
+    return indice[itemKey].grupo || '';
+  }
+
+  return '';
+}
+
+/**
+ * initializeIndiceIfNeeded: Inicializa o índice se ele não existir ou estiver vazio
+ * Retorna: { exists: boolean, initialized: boolean, message: string }
+ */
+function initializeIndiceIfNeeded() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetIndice = ss.getSheetByName("ÍNDICE_ITENS");
+
+  // Se a aba não existe, cria e popula
+  if (!sheetIndice) {
+    Logger.log("initializeIndiceIfNeeded: Aba ÍNDICE_ITENS não existe, criando...");
+    var result = buildIndiceItensInitial();
+    return {
+      exists: false,
+      initialized: true,
+      message: "Índice criado: " + (result.totalItems || 0) + " itens em " + (result.duration || "?") + "s",
+      totalItems: result.totalItems
+    };
+  }
+
+  // Se a aba existe mas está vazia (só cabeçalho), popula
+  var lastRow = sheetIndice.getLastRow();
+  if (lastRow <= 1) {
+    Logger.log("initializeIndiceIfNeeded: Aba ÍNDICE_ITENS existe mas está vazia, populando...");
+    var result = buildIndiceItensInitial();
+    return {
+      exists: true,
+      initialized: true,
+      message: "Índice populado: " + (result.totalItems || 0) + " itens em " + (result.duration || "?") + "s",
+      totalItems: result.totalItems
+    };
+  }
+
+  // Índice já existe e tem dados
+  Logger.log("initializeIndiceIfNeeded: Índice já existe com " + (lastRow - 1) + " itens");
+  return {
+    exists: true,
+    initialized: false,
+    message: "Índice já existe com " + (lastRow - 1) + " itens",
+    totalItems: lastRow - 1
+  };
+}
+
+/**
+ * SCRIPT MANUAL: Reconstrói o índice completamente
+ * Use apenas quando precisar reconstruir o índice do zero
+ * ATENÇÃO: Pode levar 30-60 segundos para 40k+ linhas
+ */
+function reconstruirIndiceCompleto() {
+  Logger.log("=== RECONSTRUÇÃO MANUAL DO ÍNDICE SOLICITADA ===");
+  var result = buildIndiceItensInitial();
+  Logger.log("=== RECONSTRUÇÃO CONCLUÍDA ===");
+  return result;
+}
+
+/**
+ * SCRIPT MANUAL: Verifica e repara o índice
+ * Mais rápido que reconstruir: apenas adiciona itens faltantes
+ */
+function verificarERepararIndice() {
+  Logger.log("=== VERIFICAÇÃO E REPARO DO ÍNDICE ===");
+  var startTime = new Date().getTime();
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  var sheetIndice = ss.getSheetByName("ÍNDICE_ITENS");
+
+  if (!sheetIndice) {
+    return initializeIndiceIfNeeded();
+  }
+
+  var lastRowEstoque = sheetEstoque.getLastRow();
+  var lastRowIndice = sheetIndice.getLastRow();
+
+  Logger.log("ESTOQUE: " + (lastRowEstoque - 1) + " linhas | ÍNDICE: " + (lastRowIndice - 1) + " itens");
+
+  // Lê itens do índice
+  var indiceItems = {};
+  if (lastRowIndice > 1) {
+    var indiceData = sheetIndice.getRange(2, 1, lastRowIndice - 1, 1).getValues();
+    for (var i = 0; i < indiceData.length; i++) {
+      if (indiceData[i][0]) {
+        indiceItems[indiceData[i][0].toString().trim().toUpperCase()] = true;
+      }
+    }
+  }
+
+  // Lê últimos 1000 itens do ESTOQUE para verificar se há itens novos
+  var checkRows = Math.min(1000, lastRowEstoque - 1);
+  var estoqueData = sheetEstoque.getRange(lastRowEstoque - checkRows + 1, 2, checkRows, 1).getValues();
+
+  var itemsFaltantes = [];
+  for (var i = 0; i < estoqueData.length; i++) {
+    if (estoqueData[i][0]) {
+      var itemKey = estoqueData[i][0].toString().trim().toUpperCase();
+      if (!indiceItems[itemKey]) {
+        itemsFaltantes.push(estoqueData[i][0]);
+        indiceItems[itemKey] = true; // Evita duplicatas
+      }
+    }
+  }
+
+  if (itemsFaltantes.length === 0) {
+    var duration = ((new Date().getTime() - startTime) / 1000).toFixed(2);
+    Logger.log("=== ÍNDICE OK - Nenhum item faltante ===");
+    return {
+      success: true,
+      message: "Índice verificado OK - " + Object.keys(indiceItems).length + " itens - " + duration + "s",
+      repaired: false
+    };
+  }
+
+  // Reconstrói o índice (mais rápido que adicionar item por item)
+  Logger.log("=== ITENS FALTANTES ENCONTRADOS - RECONSTRUINDO ÍNDICE ===");
+  var result = buildIndiceItensInitial();
+  result.repaired = true;
+  return result;
 }
 
 // ========================================
@@ -392,10 +778,11 @@ function processEstoqueWebApp(formData) {
       usuario = formData.usuario; // Prioriza o usuário enviado pelo formulário
     }
 
-    // Recupera último registro para cálculo de saldo e data
-    var lastReg = getLastRegistration(formData.item, nextRow);
+    // OTIMIZAÇÃO: Recupera último registro do ÍNDICE ao invés de ler planilha
+    var lastReg = getLastRegistrationFromIndex(formData.item);
     var previousSaldo = parseFloat(lastReg.lastStock) || 0;
     var newSaldo = previousSaldo + parseFloat(formData.entrada) - parseFloat(formData.saida);
+    Logger.log("processEstoqueWebApp: Saldo anterior: " + previousSaldo + " | Novo saldo: " + newSaldo);
 
     // Nova estrutura com Unidade de Medida (após Item) e Valor (após Saldo)
     var rowData = [
@@ -487,6 +874,10 @@ function processEstoqueWebApp(formData) {
       Logger.log("processEstoqueWebApp: Linha pintada de AMARELO - entrada de estoque");
     }
 
+    // OTIMIZAÇÃO: Atualiza o índice com o novo registro
+    updateIndiceItem(formData.item, newSaldo, now, formData.group, nextRow);
+    Logger.log("processEstoqueWebApp: Índice atualizado para item " + formData.item);
+
     // Invalida caches (padrão e otimizado)
     invalidateCache();
     invalidateCacheOpt();
@@ -528,18 +919,28 @@ function processMultipleEstoqueItems(itens) {
 
     PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
 
+    // OTIMIZAÇÃO: Carrega índice UMA VEZ para todos os itens
+    var indice = getIndiceItensCache();
+    Logger.log("Índice carregado com " + Object.keys(indice).length + " itens");
+
+    // Array para coletar todas as linhas a inserir
+    var rowsToInsert = [];
+
     for (var i = 0; i < itens.length; i++) {
       var itemData = itens[i];
 
       try {
-        var nextRow = sheetEstoque.getLastRow() + 1;
+        var itemKey = itemData.item.toString().trim().toUpperCase();
 
-        // Busca grupo do item se existir
-        var grupoItem = getItemGroup(itemData.item) || '';
+        // OTIMIZAÇÃO: Busca no índice ao invés de ler planilha
+        var grupoItem = '';
+        var previousSaldo = 0;
 
-        // Recupera último registro para cálculo de saldo
-        var lastReg = getLastRegistration(itemData.item, nextRow);
-        var previousSaldo = parseFloat(lastReg.lastStock) || 0;
+        if (indice[itemKey]) {
+          grupoItem = indice[itemKey].grupo || '';
+          previousSaldo = parseFloat(indice[itemKey].saldo) || 0;
+        }
+
         var entrada = parseFloat(itemData.entrada) || 0;
         var saida = parseFloat(itemData.saida) || 0;
         var newSaldo = previousSaldo + entrada - saida;
@@ -560,20 +961,45 @@ function processMultipleEstoqueItems(itens) {
           user                          // M: Alterado Por
         ];
 
-        sheetEstoque.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
-
-        // CORREÇÃO: Limpa formatação antes de aplicar cores
-        var lastColumn = sheetEstoque.getLastColumn();
-        sheetEstoque.getRange(nextRow, 1, 1, lastColumn).clearFormat();
-
-        // Marca linha com amarelo para indicar entrada
-        if (entrada > 0) {
-          sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("yellow");
-        }
+        rowsToInsert.push({
+          data: rowData,
+          entrada: entrada,
+          item: itemData.item,
+          newSaldo: newSaldo,
+          grupo: grupoItem
+        });
 
         processados++;
       } catch (itemError) {
         erros.push("Item " + (i + 1) + " (" + itemData.item + "): " + itemError.message);
+      }
+    }
+
+    // OTIMIZAÇÃO: Insere TODAS as linhas de uma vez
+    if (rowsToInsert.length > 0) {
+      var nextRow = sheetEstoque.getLastRow() + 1;
+      var dataToInsert = rowsToInsert.map(function(r) { return r.data; });
+
+      sheetEstoque.getRange(nextRow, 1, dataToInsert.length, dataToInsert[0].length).setValues(dataToInsert);
+
+      // Aplica formatação e atualiza índice
+      var lastColumn = sheetEstoque.getLastColumn();
+      for (var i = 0; i < rowsToInsert.length; i++) {
+        var currentRow = nextRow + i;
+        sheetEstoque.getRange(currentRow, 1, 1, lastColumn).clearFormat();
+
+        if (rowsToInsert[i].entrada > 0) {
+          sheetEstoque.getRange(currentRow, 1, 1, lastColumn).setBackground("yellow");
+        }
+
+        // Atualiza índice para este item
+        updateIndiceItem(
+          rowsToInsert[i].item,
+          rowsToInsert[i].newSaldo,
+          now,
+          rowsToInsert[i].grupo,
+          currentRow
+        );
       }
     }
 
@@ -622,23 +1048,36 @@ function processMultipleEstoqueItemsWithGroup(itens) {
 
     PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
 
+    // OTIMIZAÇÃO: Carrega índice UMA VEZ para todos os itens
+    var indice = getIndiceItensCache();
+    Logger.log("processMultipleEstoqueItemsWithGroup: Índice carregado com " + Object.keys(indice).length + " itens");
+
+    // Array para coletar todas as linhas a inserir
+    var rowsToInsert = [];
+
     for (var i = 0; i < itens.length; i++) {
       var itemData = itens[i];
 
       try {
-        var nextRow = sheetEstoque.getLastRow() + 1;
+        var itemKey = itemData.item.toString().trim().toUpperCase();
 
-        // Se o cliente enviou grupo, usa esse; senão, busca na base
+        // Se o cliente enviou grupo, usa esse; senão, busca no índice
         var grupoItem = '';
+        var previousSaldo = 0;
+        var lastDate = null;
+
         if (itemData.grupo && itemData.grupo.trim() !== '') {
           grupoItem = itemData.grupo.trim();
-        } else {
-          grupoItem = getItemGroup(itemData.item) || '';
+        } else if (indice[itemKey]) {
+          grupoItem = indice[itemKey].grupo || '';
         }
 
-        // Recupera último registro para cálculo de saldo
-        var lastReg = getLastRegistration(itemData.item, nextRow);
-        var previousSaldo = parseFloat(lastReg.lastStock) || 0;
+        // OTIMIZAÇÃO: Busca no índice ao invés de ler planilha
+        if (indice[itemKey]) {
+          previousSaldo = parseFloat(indice[itemKey].saldo) || 0;
+          lastDate = indice[itemKey].data;
+        }
+
         var entrada = parseFloat(itemData.entrada) || 0;
         var saida = parseFloat(itemData.saida) || 0;
         var newSaldo = previousSaldo + entrada - saida;
@@ -659,33 +1098,31 @@ function processMultipleEstoqueItemsWithGroup(itens) {
           user                          // M: Alterado Por
         ];
 
-        sheetEstoque.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
-
-        // CORREÇÃO: Limpa formatação antes de aplicar cores
-        var lastColumn = sheetEstoque.getLastColumn();
-        sheetEstoque.getRange(nextRow, 1, 1, lastColumn).clearFormat();
-
         Logger.log("processMultipleEstoqueItemsWithGroup: Item " + (i + 1) + "/" + itens.length + " - " + itemData.item);
 
-        // Verifica se passou mais de 20 dias desde a última data de registro
-        if (lastReg.lastDate) {
-          var lastDate = parseDateString(lastReg.lastDate);
+        // Determina cor da linha ANTES de inserir
+        var backgroundColor = null;
 
-          if (!lastDate || isNaN(lastDate.getTime())) {
+        // Verifica se passou mais de 20 dias desde a última data de registro
+        if (lastDate) {
+          var parsedLastDate = parseDateString(lastDate);
+
+          if (!parsedLastDate || isNaN(parsedLastDate.getTime())) {
             Logger.log("processMultipleEstoqueItemsWithGroup: AVISO - Conversão de data falhou para item " + itemData.item);
-            lastDate = new Date(lastReg.lastDate);
+            parsedLastDate = new Date(lastDate);
           }
 
-          var diffDays = (now.getTime() - lastDate.getTime()) / (1000 * 3600 * 24);
+          var diffDays = (now.getTime() - parsedLastDate.getTime()) / (1000 * 3600 * 24);
           Logger.log("processMultipleEstoqueItemsWithGroup: Item " + itemData.item + " - Diferença: " + diffDays.toFixed(2) + " dias");
 
           if (diffDays > 20) {
+            // NOTA: hasAtualizacaoInPreviousEntries ainda lê ESTOQUE, mas só quando necessário
             var startDate = new Date(now.getTime() - (20 * 24 * 60 * 60 * 1000));
-            var temAtualizacaoAnterior = hasAtualizacaoInPreviousEntries(itemData.item, startDate, now, nextRow);
+            var temAtualizacaoAnterior = hasAtualizacaoInPreviousEntries(itemData.item, startDate, now, 999999);
             Logger.log("processMultipleEstoqueItemsWithGroup: Item " + itemData.item + " - Encontrou 'ATUALIZAÇÃO'? " + temAtualizacaoAnterior);
 
             if (!temAtualizacaoAnterior) {
-              sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("red");
+              backgroundColor = "red";
               Logger.log("processMultipleEstoqueItemsWithGroup: Item " + itemData.item + " - VERMELHO (desatualizado)");
             }
           }
@@ -693,13 +1130,49 @@ function processMultipleEstoqueItemsWithGroup(itens) {
 
         // Marca linha com amarelo para indicar entrada (sobrescreve vermelho se for entrada)
         if (entrada > 0) {
-          sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("yellow");
+          backgroundColor = "yellow";
           Logger.log("processMultipleEstoqueItemsWithGroup: Item " + itemData.item + " - AMARELO (entrada)");
         }
+
+        rowsToInsert.push({
+          data: rowData,
+          background: backgroundColor,
+          item: itemData.item,
+          newSaldo: newSaldo,
+          grupo: grupoItem
+        });
 
         processados++;
       } catch (itemError) {
         erros.push("Item " + (i + 1) + " (" + itemData.item + "): " + itemError.message);
+      }
+    }
+
+    // OTIMIZAÇÃO: Insere TODAS as linhas de uma vez
+    if (rowsToInsert.length > 0) {
+      var nextRow = sheetEstoque.getLastRow() + 1;
+      var dataToInsert = rowsToInsert.map(function(r) { return r.data; });
+
+      sheetEstoque.getRange(nextRow, 1, dataToInsert.length, dataToInsert[0].length).setValues(dataToInsert);
+
+      // Aplica formatação e atualiza índice
+      var lastColumn = sheetEstoque.getLastColumn();
+      for (var i = 0; i < rowsToInsert.length; i++) {
+        var currentRow = nextRow + i;
+        sheetEstoque.getRange(currentRow, 1, 1, lastColumn).clearFormat();
+
+        if (rowsToInsert[i].background) {
+          sheetEstoque.getRange(currentRow, 1, 1, lastColumn).setBackground(rowsToInsert[i].background);
+        }
+
+        // Atualiza índice para este item
+        updateIndiceItem(
+          rowsToInsert[i].item,
+          rowsToInsert[i].newSaldo,
+          now,
+          rowsToInsert[i].grupo,
+          currentRow
+        );
       }
     }
 
