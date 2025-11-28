@@ -120,29 +120,27 @@ function getItemIndexOpt() {
 }
 
 function _buildItemIndexOpt() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetEstoque = ss.getSheetByName("ESTOQUE");
-  if (!sheetEstoque) return {};
-
-  var lastRow = sheetEstoque.getLastRow();
-  if (lastRow < 2) return {};
-
-  var data = sheetEstoque.getRange(2, 1, lastRow - 1, 10).getDisplayValues();
+  // OTIMIZAÇÃO: Usa ÍNDICE_ITENS ao invés de ler ESTOQUE (40k linhas)
+  var indice = getIndiceItensCache();
   var index = {};
 
-  for (var i = 0; i < data.length; i++) {
-    var item = data[i][1] ? data[i][1].toString().trim().toLowerCase() : null;
-    if (item) {
-      index[item] = {
-        row: i + 2,
-        group: data[i][0],
-        date: data[i][3],
-        stock: data[i][9]
+  // Converte formato do ÍNDICE_ITENS para formato esperado por getLastRegistrationOpt
+  for (var itemKey in indice) {
+    if (indice.hasOwnProperty(itemKey)) {
+      var itemData = indice[itemKey];
+      // itemKey já está em maiúsculas, converter para minúsculas para compatibilidade
+      var itemLowercase = itemKey.toLowerCase();
+
+      index[itemLowercase] = {
+        row: itemData.linha || 0,
+        group: itemData.grupo || '',
+        date: itemData.data || null,
+        stock: itemData.saldo || 0
       };
     }
   }
 
-  Logger.log("Item index built with " + Object.keys(index).length + " entries");
+  Logger.log("Item index built from ÍNDICE_ITENS with " + Object.keys(index).length + " entries");
   return index;
 }
 
@@ -733,6 +731,52 @@ function verificarERepararIndice() {
   var result = buildIndiceItensInitial();
   result.repaired = true;
   return result;
+}
+
+/**
+ * TRIGGER AUTOMÁTICO: Atualiza o índice automaticamente
+ * Configure um trigger para executar esta função a cada 5, 10 ou 30 minutos
+ *
+ * COMO CONFIGURAR:
+ * 1. Abra Apps Script (Extensões → Apps Script)
+ * 2. No menu esquerdo, clique em "Triggers" (relógio)
+ * 3. Clique em "+ Adicionar trigger"
+ * 4. Configure:
+ *    - Função: atualizarIndiceAutomatico
+ *    - Tipo de evento: Baseado em tempo
+ *    - Tipo de timer: Acionador com base em minutos
+ *    - Intervalo: 5, 10 ou 30 minutos (recomendado: 10 minutos)
+ *
+ * IMPORTANTE: Google Apps Script NÃO permite triggers a cada 3 segundos
+ * O intervalo mínimo é 1 minuto, mas recomenda-se 10 minutos para evitar limites de cota
+ */
+function atualizarIndiceAutomatico() {
+  try {
+    Logger.log("=== TRIGGER AUTOMÁTICO: Iniciando atualização do índice ===");
+    var startTime = new Date();
+
+    // Verifica se o índice existe
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetIndice = ss.getSheetByName("ÍNDICE_ITENS");
+
+    if (!sheetIndice) {
+      Logger.log("Índice não existe - criando pela primeira vez");
+      var result = initializeIndiceIfNeeded();
+      Logger.log("Resultado: " + result.message);
+      return result;
+    }
+
+    // Verifica e repara o índice (adiciona itens novos se necessário)
+    var result = verificarERepararIndice();
+
+    var duration = ((new Date().getTime() - startTime.getTime()) / 1000).toFixed(2);
+    Logger.log("=== TRIGGER AUTOMÁTICO: Concluído em " + duration + "s ===");
+
+    return result;
+  } catch (e) {
+    Logger.log("ERRO no trigger automático: " + e.message);
+    return { success: false, message: "Erro: " + e.message };
+  }
 }
 
 // ========================================
@@ -1608,47 +1652,25 @@ function getMultipleSaldos(itensNomes) {
       return {};
     }
 
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheetEstoque = ss.getSheetByName("ESTOQUE");
-    var lastRow = sheetEstoque.getLastRow();
+    // OTIMIZAÇÃO: Usa índice ao invés de ler ESTOQUE (40k linhas)
+    var indice = getIndiceItensCache();
+    Logger.log("getMultipleSaldos: Índice carregado com " + Object.keys(indice).length + " itens");
 
     // Inicializa resultado com saldos 0
     var result = {};
     itensNomes.forEach(function(item) {
-      result[item.toString().trim().toUpperCase()] = 0;
-    });
+      var itemKey = item.toString().trim().toUpperCase();
 
-    if (lastRow < 2) {
-      return result;
-    }
-
-    // USA getDisplayValues() para forçar conversão para texto (mesma lógica de getLastRegistration)
-    // Lê colunas B (Item) e J (Saldo) - posições 2 a 10
-    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 10).getDisplayValues();
-
-    // Cria mapa de itens para busca com correspondência EXATA
-    var itensParaBuscar = {};
-    itensNomes.forEach(function(item) {
-      var itemUpper = item.toString().trim().toUpperCase();
-      itensParaBuscar[itemUpper] = true;
-    });
-
-    // Percorre de trás para frente para pegar o último saldo de cada item
-    for (var i = data.length - 1; i >= 0; i--) {
-      var itemNome = data[i][1]; // Coluna B (Item)
-      if (!itemNome || itemNome.toString().trim() === '') continue;
-
-      var itemNomeUpper = itemNome.toString().trim().toUpperCase();
-
-      // CORRESPONDÊNCIA EXATA: verifica se o item em maiúsculas é exatamente igual
-      if (itensParaBuscar.hasOwnProperty(itemNomeUpper) && result[itemNomeUpper] === 0) {
-        // Coluna J (Saldo) está no índice 9
-        var saldoStr = data[i][9];
-        var saldo = parseFloat(saldoStr.toString().replace(',', '.')) || 0;
-        result[itemNomeUpper] = saldo;
+      // Busca O(1) no índice
+      if (indice[itemKey]) {
+        result[itemKey] = parseFloat(indice[itemKey].saldo) || 0;
+      } else {
+        // Item novo - saldo 0
+        result[itemKey] = 0;
       }
-    }
+    });
 
+    Logger.log("getMultipleSaldos: Retornando saldos para " + itensNomes.length + " itens");
     return result;
   } catch (e) {
     Logger.log("Erro getMultipleSaldos: " + e);
