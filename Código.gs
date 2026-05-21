@@ -1,5115 +1,5012 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sistema de Gestão de Estoque</title>
+// ==============================
+// Code.gs
+// ==============================
 
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
+/**
+ * doGet: Função principal do Web App
+ * Serve a interface web quando alguém acessa a URL do Web App
+ */
+function doGet(e) {
+  var template = HtmlService.createTemplateFromFile('WebApp');
+
+  // Passa parâmetros da URL para o template, se houver
+  template.params = e.parameter;
+
+  return template.evaluate()
+    .setTitle('Sistema de Gestão de Estoque')
+    .setFaviconUrl('https://www.gstatic.com/images/branding/product/1x/drive_2020q4_48dp.png')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/**
+ * include: Função helper para incluir arquivos HTML parciais
+ * Permite modularizar o código HTML
+ */
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+// ==============================
+// Gerenciamento de Sessão de Usuário
+// Corrige bug de sessões compartilhadas
+// ==============================
+
+/**
+ * Gera uma chave única de sessão baseada no usuário do Google
+ */
+function getSessionKey() {
+  try {
+    // Tenta usar o email do usuário ativo
+    var email = Session.getActiveUser().getEmail();
+    if (email && email !== "") {
+      return "session_" + email;
     }
 
-    :root {
-      --primary-color: #2c3e50;
-      --secondary-color: #3498db;
-      --success-color: #27ae60;
-      --warning-color: #f39c12;
-      --danger-color: #e74c3c;
-      --light-bg: #ecf0f1;
-      --white: #ffffff;
-      --text-dark: #2c3e50;
-      --border-color: #bdc3c7;
-      --sidebar-width: 250px;
+    // Fallback: usa temporary key (única por sessão do navegador)
+    var tempKey = Session.getTemporaryActiveUserKey();
+    if (tempKey && tempKey !== "") {
+      return "session_" + tempKey;
     }
 
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      background: var(--light-bg);
-      color: var(--text-dark);
-      line-height: 1.6;
+    // Último fallback: usa effective user
+    email = Session.getEffectiveUser().getEmail();
+    if (email && email !== "") {
+      return "session_eff_" + email;
     }
+  } catch (e) {
+    Logger.log("Erro ao obter session key: " + e.message);
+  }
 
-    /* Header */
-    .header {
-      background: var(--primary-color);
-      color: var(--white);
-      padding: 1rem 2rem;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 1000;
+  // Se tudo falhar, gera um ID baseado em timestamp + random
+  return "session_" + new Date().getTime() + "_" + Math.random().toString(36).substr(2, 9);
+}
+
+/**
+ * Salva o usuário logado na sessão usando Cache (expira em 6 horas)
+ */
+function setLoggedUserSession(username) {
+  var sessionKey = getSessionKey();
+  var cache = CacheService.getUserCache();
+
+  // Salva no cache por 6 horas (21600 segundos)
+  cache.put(sessionKey, username, 21600);
+
+  // Também salva em UserProperties como backup (mas não é a fonte principal)
+  try {
+    PropertiesService.getUserProperties().setProperty(sessionKey, username);
+  } catch (e) {
+    Logger.log("Aviso: Não foi possível salvar em UserProperties: " + e.message);
+  }
+
+  Logger.log("Sessão criada - Key: " + sessionKey + " | Usuário: " + username);
+}
+
+/**
+ * Recupera o usuário logado da sessão
+ */
+function getLoggedUserSession() {
+  var sessionKey = getSessionKey();
+  var cache = CacheService.getUserCache();
+
+  // Tenta pegar do cache primeiro (mais confiável)
+  var username = cache.get(sessionKey);
+
+  if (username && username !== "") {
+    Logger.log("Usuário recuperado do cache - Key: " + sessionKey + " | Usuário: " + username);
+    return username;
+  }
+
+  // Fallback: tenta pegar de UserProperties
+  try {
+    username = PropertiesService.getUserProperties().getProperty(sessionKey);
+    if (username && username !== "") {
+      Logger.log("Usuário recuperado de UserProperties - Key: " + sessionKey + " | Usuário: " + username);
+      // Re-popula o cache
+      cache.put(sessionKey, username, 21600);
+      return username;
     }
+  } catch (e) {
+    Logger.log("Aviso: Não foi possível ler UserProperties: " + e.message);
+  }
 
-    .header h1 {
-      font-size: 1.5rem;
-      font-weight: 600;
+  return null;
+}
+
+/**
+ * Remove o usuário da sessão (logout)
+ */
+function clearLoggedUserSession() {
+  var sessionKey = getSessionKey();
+  var cache = CacheService.getUserCache();
+
+  // Remove do cache
+  cache.remove(sessionKey);
+
+  // Remove de UserProperties
+  try {
+    PropertiesService.getUserProperties().deleteProperty(sessionKey);
+  } catch (e) {
+    Logger.log("Aviso: Não foi possível deletar de UserProperties: " + e.message);
+  }
+
+  Logger.log("Sessão removida - Key: " + sessionKey);
+}
+
+/**
+ * Atualiza o menu principal e adiciona um menu separado para processar cores.
+ */
+function updateMenus() {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu("GESTÃO DO ESTOQUE")
+    .addItem("Inserir Estoque", "showEstoqueSidebar")
+    .addItem("Inserir Grupo", "showGrupoDialog")
+    .addSeparator()
+    .addItem("Localizar Produto", "localizarProduto")
+    .addItem("Mostrar Todos", "mostrarTodos")
+    .addSeparator()
+    .addItem("Gerar Relatório", "abrirDialogRelatorioEstoque")
+    .addItem("Relatório por Grupo", "abrirDialogRelatorioPorGrupo")
+    .addItem("Listagem de Estoque", "showListagemEstoqueSidebar")
+    .addItem("Atualizar Compra de Fio e Histórico", "atualizarCompraDeFioEHistorico")
+    .addSeparator()
+    .addItem("Atualizar Total Embarcado", "atualizarTotalEmbarcado")
+    .addItem("Alternar Restauração", "toggleRestore")
+    .addItem("Apagar Última Linha", "apagarUltimaLinha")
+    .addSeparator()
+    .addItem("ÚLTIMA LINHA", "select10RowsBelow")
+    .addSeparator()
+    .addItem("Estoque por Período", "abrirDialogEstoquePorPeriodo")
+    .addItem("Limpar Filtro", "limparFiltroEstoque")
+    .addSeparator()
+    .addItem("Estoque 3 Meses", "showEstoque3MesesSidebar")
+    .addSeparator()
+    .addItem("Cores Desatualizadas", "showCoresDesatualizadasDialog")
+    .addToUi();
+}
+
+/**
+ * onOpen: Executada quando a planilha é aberta.
+ */
+function onOpen() {
+  PropertiesService.getUserProperties().deleteProperty("loggedUser");
+  Logger.log("onOpen: Propriedade 'loggedUser' apagada.");
+  
+  backupEstoqueData();
+  removeFilterOnOpen();
+  showLoginDialog();
+  // O updateMenus() só é chamado após login bem-sucedido
+}
+
+/* ... (demais funções já existentes no seu script, como backupEstoqueData, showEstoqueSidebar, etc.) ... */
+
+
+/* ================================
+   NOVAS FUNÇÕES: Processamento de Cores Desatualizadas via Sidebar
+   ================================ */
+
+/**
+ * showCoresSidebar: Abre a sidebar que lista os valores (cores) da coluna E da aba "CORES DESATUALIZADAS".
+ */
+function showCoresSidebar() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetCores = ss.getSheetByName("CORES DESATUALIZADAS");
+  if (!sheetCores) {
+    SpreadsheetApp.getUi().alert("A aba 'CORES DESATUALIZADAS' não foi encontrada.");
+    return;
+  }
+  
+  // Considera que os dados da coluna E começam na linha 2 (com cabeçalho na linha 1)
+  var lastRow = sheetCores.getLastRow();
+  if (lastRow < 2) {
+    SpreadsheetApp.getUi().alert("Não há dados na coluna E da aba CORES DESATUALIZADAS.");
+    return;
+  }
+  var coresData = sheetCores.getRange(2, 5, lastRow - 1, 1).getValues();
+  var cores = [];
+  for (var i = 0; i < coresData.length; i++) {
+    var val = coresData[i][0];
+    if (val && cores.indexOf(val) === -1) {
+      cores.push(val);
     }
+  }
+  
+  var template = HtmlService.createTemplateFromFile("SidebarCores");
+  template.cores = JSON.stringify(cores);
+  var html = template.evaluate().setTitle("Cores Desatualizadas");
+  SpreadsheetApp.getUi().showSidebar(html);
+}
 
-    .header .user-info {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
+/**
+ * processCoresFromSidebar: Para cada item (cor) selecionado na sidebar,
+ * procura na aba "ESPELHO DO ESTOQUE" os registros cujo valor da coluna A seja igual (case-insensitive)
+ * e pega os 5 últimos registros. Em seguida, escreve na aba "CORES DESATUALIZADAS" nas colunas:
+ *   - A: Item (coluna A do ESPELHO)
+ *   - B: Valor da coluna B do ESPELHO
+ *   - C: Data (coluna C do ESPELHO)
+ *   - D: Valor da coluna E do ESPELHO
+ */
+function processCoresFromSidebar(selectedCores) {
+  if (!selectedCores || selectedCores.length === 0) {
+    return "Nenhuma cor foi selecionada.";
+  }
+  
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEspelho = ss.getSheetByName("ESPELHO DO ESTOQUE");
+  if (!sheetEspelho) {
+    throw new Error("A aba 'ESPELHO DO ESTOQUE' não foi encontrada.");
+  }
+  
+  // Lê todos os registros da aba ESPELHO DO ESTOQUE (supondo cabeçalho na linha 1)
+  var lastRowEspelho = sheetEspelho.getLastRow();
+  if (lastRowEspelho < 2) {
+    throw new Error("Não há dados na aba 'ESPELHO DO ESTOQUE'.");
+  }
+  var espelhoData = sheetEspelho.getRange(2, 1, lastRowEspelho - 1, sheetEspelho.getLastColumn()).getValues();
+  
+  var resultados = [];
+  
+  // Para cada item selecionado, filtra os registros cujo valor da coluna A (índice 0) seja igual (case-insensitive)
+  selectedCores.forEach(function(item) {
+    var filtrados = espelhoData.filter(function(row) {
+      return row[0] && row[0].toString().toLowerCase() === item.toString().toLowerCase();
+    });
+    // Pega os 5 últimos registros
+    var ultimos5 = filtrados.slice(-5);
+    ultimos5.forEach(function(row) {
+      // Mapeia: Coluna A: item (índice 0), Coluna B: valor (índice 1), Coluna C: data (índice 2), Coluna D: valor da coluna E (índice 4)
+      resultados.push([row[0], row[1], row[2], row[4]]);
+    });
+  });
+  
+  // Escreve os resultados na aba "CORES DESATUALIZADAS" sobrescrevendo as colunas A:D
+  var sheetCores = ss.getSheetByName("CORES DESATUALIZADAS");
+  if (!sheetCores) {
+    sheetCores = ss.insertSheet("CORES DESATUALIZADAS");
+  }
+  // Limpa as colunas A a D
+  sheetCores.getRange("A:D").clearContent();
+  // Cabeçalho opcional
+  sheetCores.getRange("A1:D1").setValues([["Item", "Valor B", "Data", "Valor E"]]);
+  if (resultados.length > 0) {
+    sheetCores.getRange(2, 1, resultados.length, 4).setValues(resultados);
+  }
+  
+  return "Processamento concluído. Foram encontrados " + resultados.length + " registros.";
+}
+
+/* ================================
+   Fim das Novas Funções
+   ================================ */
+
+
+/**
+ * onOpen: Executada quando a planilha é aberta.
+ * Apaga a propriedade "loggedUser", remove filtros na aba "ESTOQUE" e faz backup dos dados.
+ * Exibe o diálogo de login (o menu só é criado após um login bem-sucedido).
+ */
+function onOpen() {
+  PropertiesService.getUserProperties().deleteProperty("loggedUser");
+  Logger.log("onOpen: Propriedade 'loggedUser' apagada.");
+  
+  backupEstoqueData();
+  removeFilterOnOpen();
+  showLoginDialog();
+  // updateMenus() não é chamado aqui para restringir acesso sem login.
+}
+
+/**
+ * removeFilterOnOpen: Remove o filtro ativo na aba "ESTOQUE", se existir.
+ */
+function removeFilterOnOpen() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (sheetEstoque && sheetEstoque.getFilter()) {
+    sheetEstoque.getFilter().remove();
+    Logger.log("removeFilterOnOpen: Filtro removido na aba ESTOQUE.");
+  }
+}
+
+/**
+ * backupEstoqueData: Copia as últimas 500 linhas da aba "ESTOQUE" para a aba "BACKUP_ESTOQUE".
+ */
+function backupEstoqueData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) return;
+  
+  var lastRow = sheetEstoque.getLastRow();
+  var startRow = Math.max(1, lastRow - 500 + 1);
+  var numRows = lastRow - startRow + 1;
+  var lastColumn = sheetEstoque.getLastColumn();
+  var values = sheetEstoque.getRange(startRow, 1, numRows, lastColumn).getValues();
+  
+  var sheetBackup = ss.getSheetByName("BACKUP_ESTOQUE");
+  if (!sheetBackup) {
+    sheetBackup = ss.insertSheet("BACKUP_ESTOQUE");
+  }
+  if (sheetBackup.getMaxRows() < lastRow) {
+    sheetBackup.insertRowsAfter(sheetBackup.getMaxRows(), lastRow - sheetBackup.getMaxRows());
+  }
+  sheetBackup.getRange(startRow, 1, numRows, lastColumn).clearContent();
+  sheetBackup.getRange(startRow, 1, numRows, lastColumn).setValues(values);
+  sheetBackup.hideSheet();
+  Logger.log("backupEstoqueData: Backup das linhas de " + startRow + " até " + lastRow + " realizado.");
+}
+
+/**
+ * onEdit: Se a edição ocorrer na aba EMBARQUES (colunas A, B ou E), chama atualizarTotalEmbarcado;
+ * se ocorrer na aba ESTOQUE, impede edições manuais.
+ */
+function onEdit(e) {
+  var sheet = e.range.getSheet();
+  var sheetName = sheet.getName();
+  
+  if (sheetName === "EMBARQUES") {
+    var col = e.range.getColumn();
+    if (col === 1 || col === 2 || col === 5) {
+      atualizarTotalEmbarcado();
     }
-
-    .header .user-info span {
-      font-size: 0.9rem;
+    return;
+  }
+  
+  if (sheetName !== "ESTOQUE") return;
+  
+  var restoreEnabled = PropertiesService.getScriptProperties().getProperty("restoreEnabled");
+  if (restoreEnabled === "false") {
+    Logger.log("onEdit: Restauração desativada, nenhuma ação realizada.");
+    return;
+  }
+  
+  if (PropertiesService.getScriptProperties().getProperty("editingViaScript") === "true") {
+    return;
+  }
+  
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetBackup = ss.getSheetByName("BACKUP_ESTOQUE");
+  if (!sheetBackup) {
+    Logger.log("onEdit: Aba BACKUP_ESTOQUE não encontrada.");
+    return;
+  }
+  
+  var editedRange = e.range;
+  var numRows = editedRange.getNumRows();
+  var numCols = editedRange.getNumColumns();
+  var startRow = editedRange.getRow();
+  var startCol = editedRange.getColumn();
+  
+  var backupValues = sheetBackup.getRange(startRow, startCol, numRows, numCols).getValues();
+  var newValues = [];
+  for (var r = 0; r < numRows; r++) {
+    var row = [];
+    for (var c = 0; c < numCols; c++) {
+      row.push(backupValues[r][c] !== "" ? backupValues[r][c] : "");
     }
+    newValues.push(row);
+  }
+  
+  PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
+  editedRange.setValues(newValues);
+  PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
+  
+  SpreadsheetApp.getUi().alert("Edição manual não é permitida. Utilize o sidebar para inserir dados.");
+  Logger.log("onEdit: Edição manual detectada e revertida na faixa " + editedRange.getA1Notation());
+}
 
-    .header .logout-btn {
-      background: var(--danger-color);
-      color: var(--white);
-      border: none;
-      padding: 0.5rem 1rem;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 0.9rem;
-      transition: background 0.3s;
+/**
+ * toggleRestore: Alterna a restauração de dados para permitir edições manuais temporariamente.
+ */
+function toggleRestore() {
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.prompt("Digite a senha para alternar a restauração dos dados:");
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+  var senha = response.getResponseText();
+  if (senha !== "919633") {
+    ui.alert("Senha incorreta!");
+    return;
+  }
+  var restoreEnabled = PropertiesService.getScriptProperties().getProperty("restoreEnabled");
+  if (restoreEnabled === null || restoreEnabled === "true") {
+    PropertiesService.getScriptProperties().setProperty("restoreEnabled", "false");
+    ui.alert("Restauração desativada. Agora você poderá editar manualmente.");
+  } else {
+    PropertiesService.getScriptProperties().setProperty("restoreEnabled", "true");
+    ui.alert("Restauração ativada. As edições manuais serão revertidas automaticamente.");
+  }
+  updateMenus();
+}
+
+/**
+ * apagarUltimaLinha: Apaga a última linha preenchida da aba ESTOQUE.
+ */
+function apagarUltimaLinha() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) {
+    SpreadsheetApp.getUi().alert("A aba ESTOQUE não foi encontrada.");
+    return;
+  }
+  var lastRow = sheetEstoque.getLastRow();
+  if (lastRow < 2) {
+    SpreadsheetApp.getUi().alert("Não há dados para apagar.");
+    return;
+  }
+  PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
+  sheetEstoque.deleteRow(lastRow);
+  PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
+  backupEstoqueData();
+  SpreadsheetApp.getUi().alert("Última linha apagada com sucesso.");
+}
+
+/**
+ * showGrupoDialog: Abre o diálogo para inserir um novo grupo na aba DADOS.
+ */
+function showGrupoDialog() {
+  var template = HtmlService.createTemplateFromFile("DialogInserirGrupo");
+  template.groupList = JSON.stringify(getGroupList());
+  var htmlOutput = template.evaluate().setWidth(400).setHeight(250);
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, "INSERIR GRUPO");
+}
+
+/**
+ * inserirGrupo: Insere o grupo na aba DADOS.
+ */
+function inserirGrupo(formData) {
+  var group = formData.group;
+  if (!group || group.trim() === "") {
+    throw new Error("⚠️ Informe um grupo.");
+  }
+  group = group.trim();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (!sheetDados) throw new Error("A aba DADOS não foi encontrada.");
+  var existingGroups = getGroupList();
+  if (existingGroups.indexOf(group) !== -1) {
+    SpreadsheetApp.getUi().alert("Grupo já cadastrado.");
+    return "Grupo já cadastrado.";
+  }
+  var lastRow = sheetDados.getLastRow();
+  var newRow = lastRow < 2 ? 2 : lastRow + 1;
+  sheetDados.getRange(newRow, 4).setValue(group);
+  SpreadsheetApp.getUi().alert("Grupo inserido com sucesso.");
+  return "Grupo inserido com sucesso!";
+}
+
+/**
+ * atualizarTotalEmbarcado: Atualiza a aba TOTAL EMBARCADO com os cadastros exclusivos e seus totais.
+ * Os cadastros são gravados como texto para evitar formatação como data.
+ * Se na coluna E de EMBARQUES houver "CHEGOU", subtrai o valor (sem deixar negativo).
+ * Cria filtro na faixa A:B. (Mensagem de alerta removida)
+ */
+function atualizarTotalEmbarcado() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEmbarques = ss.getSheetByName("EMBARQUES");
+  if (!sheetEmbarques) throw new Error("A aba EMBARQUES não foi encontrada.");
+  
+  var lastRow = sheetEmbarques.getLastRow();
+  if (lastRow < 2) {
+    return "Sem dados na aba EMBARQUES.";
+  }
+  
+  var dataRange = sheetEmbarques.getRange(2, 1, lastRow - 1, sheetEmbarques.getLastColumn());
+  var dataValues = dataRange.getValues();
+  
+  var totais = {};
+  dataValues.forEach(function(row) {
+    var cadastro = row[0] ? row[0].toString().trim() : "";
+    if (cadastro === "") return;
+    var valor = parseFloat(row[1]) || 0;
+    var status = row[4] ? row[4].toString().trim().toLowerCase() : "";
+    if (!totais.hasOwnProperty(cadastro)) {
+      totais[cadastro] = 0;
     }
-
-    .header .logout-btn:hover {
-      background: #c0392b;
+    if (status === "chegou") {
+      totais[cadastro] = Math.max(totais[cadastro] - valor, 0);
+    } else {
+      totais[cadastro] += valor;
     }
-
-    /* Layout Container */
-    .container {
-      display: flex;
-      margin-top: 60px;
-      min-height: calc(100vh - 60px);
+  });
+  
+  var sheetTotal = ss.getSheetByName("TOTAL EMBARCADO");
+  if (!sheetTotal) {
+    sheetTotal = ss.insertSheet("TOTAL EMBARCADO");
+  }
+  sheetTotal.clearContents();
+  sheetTotal.getRange(1, 1, 1, 2).setValues([["CADASTRO", "TOTAL"]]);
+  
+  var output = [];
+  for (var cadastro in totais) {
+    if (totais.hasOwnProperty(cadastro)) {
+      output.push(["'" + cadastro, totais[cadastro]]);
     }
+  }
+  
+  if (output.length > 0) {
+    sheetTotal.getRange(2, 1, output.length, 2).setValues(output);
+    sheetTotal.getRange(2, 1, output.length, 1).setNumberFormat("@");
+  }
+  
+  if (sheetTotal.getFilter()) {
+    sheetTotal.getFilter().remove();
+  }
+  sheetTotal.getRange(1, 1, sheetTotal.getLastRow(), 2).createFilter();
+  
+  return "Total embarcado atualizado com sucesso!";
+}
 
-    /* Sidebar */
-    .sidebar {
-      width: var(--sidebar-width);
-      background: var(--white);
-      box-shadow: 2px 0 5px rgba(0,0,0,0.1);
-      overflow-y: auto;
-      position: fixed;
-      left: 0;
-      top: 60px;
-      bottom: 0;
-      transition: transform 0.3s;
+/**
+ * atualizarCompraDeFio: Atualiza a aba COMPRA DE FIO com os valores das abas RELATORIO e TOTAL EMBARCADO.
+ * Compara o Total Compra com o threshold definido em J1 para definir "URGENTE" ou "ESTOQUE".
+ */
+function atualizarCompraDeFio() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  var sheetCompra = ss.getSheetByName("COMPRA DE FIO");
+  if (!sheetCompra) {
+    throw new Error("A aba COMPRA DE FIO não foi encontrada.");
+  }
+  var compraData = sheetCompra.getDataRange().getValues();
+  if (compraData.length < 2) {
+    SpreadsheetApp.getUi().alert("Não há cadastros na aba COMPRA DE FIO para atualizar.");
+    return;
+  }
+  var cadastrosCompra = compraData.slice(1).map(function(row) {
+    return row[0] ? row[0].toString().replace(/^'/, "").trim() : "";
+  });
+  
+  var sheetRelatorio = ss.getSheetByName("RELATORIO");
+  if (!sheetRelatorio) {
+    throw new Error("A aba RELATORIO não foi encontrada.");
+  }
+  var relData = sheetRelatorio.getDataRange().getValues();
+  relData.shift();
+  var relMap = {};
+  relData.forEach(function(row) {
+    var cad = row[0] ? row[0].toString().trim() : "";
+    var valor = parseFloat(row[1]) || 0;
+    if (cad) {
+      relMap[cad] = valor;
     }
-
-    .sidebar.hidden {
-      transform: translateX(-100%);
+  });
+  
+  var sheetTotal = ss.getSheetByName("TOTAL EMBARCADO");
+  if (!sheetTotal) {
+    throw new Error("A aba TOTAL EMBARCADO não foi encontrada.");
+  }
+  var totalData = sheetTotal.getDataRange().getValues();
+  totalData.shift();
+  var totalMap = {};
+  totalData.forEach(function(row) {
+    var cad = row[0] ? row[0].toString().replace(/^'/, "").trim() : "";
+    var valor = parseFloat(row[1]) || 0;
+    if (cad) {
+      totalMap[cad] = valor;
     }
-
-    .sidebar-toggle {
-      display: block;
-      position: fixed;
-      top: 70px;
-      left: 10px;
-      z-index: 999;
-      background: var(--secondary-color);
-      color: var(--white);
-      border: none;
-      padding: 0.5rem 1rem;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: left 0.3s;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  });
+  
+  var notFound = [];
+  var totalCompra = [];
+  var breakdownRel = [];
+  var breakdownTot = [];
+  
+  cadastrosCompra.forEach(function(cad) {
+    if (!cad) return;
+    var valorRel = relMap.hasOwnProperty(cad) ? relMap[cad] : 0;
+    var valorTotal = totalMap.hasOwnProperty(cad) ? totalMap[cad] : 0;
+    var soma = valorRel + valorTotal;
+    if (!relMap.hasOwnProperty(cad)) {
+      notFound.push(cad);
     }
+    totalCompra.push([soma]);
+    breakdownRel.push([valorRel]);
+    breakdownTot.push([valorTotal]);
+  });
+  
+  var lastRowCompra = sheetCompra.getLastRow();
+  if (lastRowCompra >= 2) {
+    sheetCompra.getRange(2, 2, lastRowCompra - 1, 1).clearContent();
+    sheetCompra.getRange(2, 5, lastRowCompra - 1, 1).clearContent();
+    sheetCompra.getRange(2, 6, lastRowCompra - 1, 2).clearContent();
+  }
+  
+  var threshold = parseFloat(sheetCompra.getRange("J1").getValue());
+  if (isNaN(threshold)) {
+    threshold = 0;
+  }
+  
+  for (var i = 0; i < totalCompra.length; i++) {
+    var totalValue = totalCompra[i][0];
+    sheetCompra.getRange(i + 2, 2).setValue(totalValue);
+    var label = parseFloat(totalValue) < threshold ? "URGENTE" : "ESTOQUE";
+    sheetCompra.getRange(i + 2, 5).setValue(label);
+    sheetCompra.getRange(i + 2, 6).setValue(breakdownRel[i][0]);
+    sheetCompra.getRange(i + 2, 7).setValue(breakdownTot[i][0]);
+  }
+  
+  var existingFilter = sheetCompra.getFilter();
+  if (existingFilter) {
+    existingFilter.remove();
+  }
+  sheetCompra.getRange(1, 1, sheetCompra.getLastRow(), 7).createFilter();
+  
+  if (notFound.length > 0) {
+    SpreadsheetApp.getUi().alert("Os seguintes cadastros não foram encontrados no RELATORIO: " + notFound.join(", "));
+  } else {
+    SpreadsheetApp.getUi().alert("Compra de fio atualizada com sucesso!");
+  }
+  
+  return "Compra de fio atualizada com sucesso!";
+}
 
-    .sidebar-toggle:hover {
-      background: #2980b9;
-    }
+/**
+ * copyCompraToHistorico: Copia os dados da aba COMPRA DE FIO para a aba HISTORICO, adicionando a data/hora atual.
+ */
+function copyCompraToHistorico() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetCompra = ss.getSheetByName("COMPRA DE FIO");
+  var historicoSheet = ss.getSheetByName("HISTORICO");
+  if (!historicoSheet) {
+    historicoSheet = ss.insertSheet("HISTORICO");
+  }
+  
+  var numRowsToCopy = sheetCompra.getLastRow() - 1;
+  Logger.log("Número de linhas para copiar: " + numRowsToCopy);
+  if (numRowsToCopy > 0) {
+    var compData = sheetCompra.getRange(2, 1, numRowsToCopy, 7).getValues();
+    var now = new Date();
+    var historicoData = compData.map(function(row) {
+      return row.concat([now]);
+    });
+    var lastRowHistorico = historicoSheet.getLastRow();
+    var startRowHistorico = lastRowHistorico < 1 ? 1 : lastRowHistorico + 1;
+    historicoSheet.getRange(startRowHistorico, 1, historicoData.length, historicoData[0].length).setValues(historicoData);
+    Logger.log("Dados copiados para HISTORICO a partir da linha " + startRowHistorico);
+  } else {
+    Logger.log("Não há linhas para copiar na aba COMPRA DE FIO.");
+  }
+}
 
-    .sidebar-toggle.shifted {
-      left: 260px;
-    }
+/**
+ * atualizarCompraDeFioEHistorico: Executa atualizarCompraDeFio() e, em seguida, copyCompraToHistorico().
+ */
+function atualizarCompraDeFioEHistorico() {
+  atualizarCompraDeFio();
+  copyCompraToHistorico();
+}
 
-    .sidebar nav ul {
-      list-style: none;
-      padding: 1rem 0;
-    }
+/**
+ * showLoginDialog: Exibe o diálogo de login.
+ */
+function showLoginDialog() {
+  var html = HtmlService.createTemplateFromFile("DialogLogin")
+    .evaluate()
+    .setWidth(350)
+    .setHeight(320);
+  SpreadsheetApp.getUi().showModalDialog(html, "LOGIN");
+}
 
-    .sidebar nav li {
-      margin: 0;
-    }
-
-    .sidebar nav a {
-      display: flex;
-      align-items: center;
-      padding: 0.9rem 1.5rem;
-      color: var(--text-dark);
-      text-decoration: none;
-      transition: background 0.3s, color 0.3s;
-      border-left: 3px solid transparent;
-      gap: 0.8rem;
-    }
-
-    .sidebar nav a:hover {
-      background: var(--light-bg);
-      border-left-color: var(--secondary-color);
-    }
-
-    .sidebar nav a.active {
-      background: var(--light-bg);
-      border-left-color: var(--secondary-color);
-      color: var(--secondary-color);
-      font-weight: 600;
-    }
-
-    .sidebar nav .separator {
-      border-bottom: 1px solid var(--border-color);
-      margin: 0.5rem 1rem;
-    }
-
-    .sidebar nav .section-title {
-      padding: 1rem 1.5rem 0.5rem;
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      color: #7f8c8d;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-    }
-
-    /* Main Content */
-    .main-content {
-      flex: 1;
-      margin-left: var(--sidebar-width);
-      padding: 2rem;
-      transition: margin-left 0.3s;
-    }
-
-    .main-content.expanded {
-      margin-left: 0;
-    }
-
-    .content-card {
-      background: var(--white);
-      border-radius: 8px;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-      padding: 2rem;
-      margin-bottom: 2rem;
-    }
-
-    .content-card h2 {
-      margin-bottom: 1.5rem;
-      color: var(--primary-color);
-      font-size: 1.75rem;
-      border-bottom: 2px solid var(--secondary-color);
-      padding-bottom: 0.5rem;
-    }
-
-    /* Forms */
-    .form-group {
-      margin-bottom: 1.5rem;
-    }
-
-    .form-group label {
-      display: block;
-      margin-bottom: 0.5rem;
-      font-weight: 500;
-      color: var(--text-dark);
-    }
-
-    .form-group input,
-    .form-group select,
-    .form-group textarea {
-      width: 100%;
-      padding: 0.75rem;
-      border: 1px solid var(--border-color);
-      border-radius: 4px;
-      font-size: 1rem;
-      transition: border-color 0.3s;
-    }
-
-    .form-group input:focus,
-    .form-group select:focus,
-    .form-group textarea:focus {
-      outline: none;
-      border-color: var(--secondary-color);
-    }
-
-    .form-group textarea {
-      resize: vertical;
-      min-height: 100px;
-    }
-
-    /* Buttons */
-    .btn {
-      padding: 0.75rem 1.5rem;
-      border: none;
-      border-radius: 4px;
-      font-size: 1rem;
-      cursor: pointer;
-      transition: background 0.3s, transform 0.1s;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .btn:active {
-      transform: scale(0.98);
-    }
-
-    .btn-primary {
-      background: var(--secondary-color);
-      color: var(--white);
-    }
-
-    .btn-primary:hover {
-      background: #2980b9;
-    }
-
-    .btn-success {
-      background: var(--success-color);
-      color: var(--white);
-    }
-
-    .btn-success:hover {
-      background: #229954;
-    }
-
-    .btn-warning {
-      background: var(--warning-color);
-      color: var(--white);
-    }
-
-    .btn-warning:hover {
-      background: #e67e22;
-    }
-
-    .btn-danger {
-      background: var(--danger-color);
-      color: var(--white);
-    }
-
-    .btn-danger:hover {
-      background: #c0392b;
-    }
-
-    .btn-group {
-      display: flex;
-      gap: 1rem;
-      flex-wrap: wrap;
-    }
-
-    /* Tables */
-    .table-container {
-      overflow-x: auto;
-      margin-top: 1rem;
-      max-height: calc(100vh - 300px);
-      overflow-y: auto;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: var(--white);
-      table-layout: auto;
-      font-size: 0.85rem;
-    }
-
-    table th,
-    table td {
-      padding: 0.4rem 0.5rem;
-      text-align: left;
-      border-bottom: 1px solid var(--border-color);
-      white-space: nowrap;
-      min-width: 70px;
-      line-height: 1.3;
-    }
-
-    /* Larguras específicas para colunas - 13 colunas */
-    table th:nth-child(1), table td:nth-child(1) { min-width: 90px; } /* Grupo */
-    table th:nth-child(2), table td:nth-child(2) { min-width: 150px; } /* Item */
-    table th:nth-child(3), table td:nth-child(3) { min-width: 60px; text-align: center; font-size: 0.8rem; } /* Unidade */
-    table th:nth-child(4), table td:nth-child(4) { min-width: 85px; } /* Data */
-    table th:nth-child(5), table td:nth-child(5) { min-width: 70px; } /* NF */
-    table th:nth-child(6), table td:nth-child(6) { min-width: 120px; white-space: normal; } /* Obs */
-    table th:nth-child(7), table td:nth-child(7) { min-width: 70px; text-align: right; } /* Saldo Ant */
-    table th:nth-child(8), table td:nth-child(8) { min-width: 60px; text-align: right; } /* Entrada */
-    table th:nth-child(9), table td:nth-child(9) { min-width: 60px; text-align: right; } /* Saída */
-    table th:nth-child(10), table td:nth-child(10) {
-      min-width: 70px;
-      text-align: right;
-      font-weight: 700;
-      background-color: #e3f2fd;
-      font-size: 0.9rem;
-    } /* Saldo - DESTACADO */
-    table th:nth-child(11), table td:nth-child(11) { min-width: 75px; text-align: right; font-size: 0.8rem; } /* Valor */
-    table th:nth-child(12), table td:nth-child(12) { min-width: 110px; font-size: 0.8rem; } /* Alterado Em */
-    table th:nth-child(13), table td:nth-child(13) { min-width: 90px; } /* Alterado Por */
-
-    /* Destaque especial para cabeçalho da coluna SALDO */
-    table th:nth-child(10) {
-      background-color: #2196f3 !important;
-      color: white !important;
-    }
-
-    table th {
-      background: var(--light-bg);
-      font-weight: 600;
-      color: var(--primary-color);
-      position: sticky;
-      top: 0;
-      font-size: 0.85rem;
-      z-index: 10;
-    }
-
-    table tr:hover {
-      opacity: 0.9;
-    }
-
-    /* Cores das linhas (vermelho e amarelo) */
-    table tr.row-red {
-      background-color: #ff0000 !important;
-      color: white;
-    }
-
-    table tr.row-red:hover {
-      background-color: #cc0000 !important;
-    }
-
-    /* Mantém destaque na coluna SALDO mesmo em linhas vermelhas */
-    table tr.row-red td:nth-child(10) {
-      background-color: #d32f2f !important;
-      font-weight: 700;
-      border-left: 2px solid white;
-      border-right: 2px solid white;
-    }
-
-    table tr.row-yellow {
-      background-color: #ffff00 !important;
-      color: black;
-    }
-
-    table tr.row-yellow:hover {
-      background-color: #e6e600 !important;
-    }
-
-    /* Mantém destaque na coluna SALDO mesmo em linhas amarelas */
-    table tr.row-yellow td:nth-child(10) {
-      background-color: #fdd835 !important;
-      font-weight: 700;
-      border-left: 2px solid #f57f17;
-      border-right: 2px solid #f57f17;
-    }
-
-    /* Print styles */
-    @media print {
-      .header, .sidebar, .sidebar-toggle, .btn, .form-group, .content-card h2, #localizarMessage {
-        display: none !important;
+/**
+ * processLogin: Valida as credenciais na aba DADOS e, se bem-sucedido, define "loggedUser" e cria o menu.
+ */
+function processLogin(formData) {
+  Logger.log("processLogin: Dados recebidos: " + JSON.stringify(formData));
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (!sheetDados) {
+    throw new Error("A aba DADOS não foi encontrada.");
+  }
+  var lastRow = sheetDados.getLastRow();
+  if (lastRow < 1) {
+    throw new Error("Não há usuários cadastrados.");
+  }
+  var data = sheetDados.getRange(1, 2, lastRow, 2).getValues();
+  var valid = false;
+  for (var i = 0; i < data.length; i++) {
+    var username = data[i][0];
+    var password = data[i][1];
+    if (username && password) {
+      if (username.toString().trim() === formData.username.toString().trim() &&
+          password.toString().trim() === formData.password.toString().trim()) {
+        valid = true;
+        break;
       }
+    }
+  }
+  if (!valid) {
+    throw new Error("Credenciais inválidas.");
+  }
+  PropertiesService.getUserProperties().setProperty("loggedUser", formData.username.toString().trim());
+  Logger.log("processLogin: Login efetuado para " + formData.username);
+  updateMenus();
+  return "Login efetuado com sucesso!";
+}
 
-      .main-content {
-        margin-left: 0 !important;
-        padding: 0 !important;
-      }
+/**
+ * getLoggedUser: Retorna o usuário logado de forma robusta.
+ * Prioriza o usuário armazenado em UserProperties, mas usa Session como fallback.
+ */
+function getLoggedUser() {
+  // NOVO SISTEMA: Usa getLoggedUserSession() que gerencia sessões corretamente
+  var loggedUser = getLoggedUserSession();
 
-      .table-container {
-        overflow: visible !important;
-      }
+  // Se encontrou usuário na sessão, retorna
+  if (loggedUser && loggedUser.trim() !== "") {
+    Logger.log("getLoggedUser: Usuário logado (sessão): " + loggedUser);
+    return loggedUser;
+  }
 
-      table {
-        page-break-inside: auto;
-        font-size: 10pt;
-      }
-
-      table tr {
-        page-break-inside: avoid;
-        page-break-after: auto;
-      }
-
-      table th {
-        position: static;
-      }
+  // Fallback: tenta usar email do Google (para compatibilidade)
+  try {
+    // Tenta pegar o email do usuário ativo do Google Sheets
+    var activeUser = Session.getActiveUser().getEmail();
+    if (activeUser && activeUser !== "") {
+      Logger.log("getLoggedUser: Usando email do Session: " + activeUser);
+      return activeUser;
     }
 
-    /* Login Screen */
-    .login-container {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-      background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+    // Fallback: tenta getEffectiveUser
+    var effectiveUser = Session.getEffectiveUser().getEmail();
+    if (effectiveUser && effectiveUser !== "") {
+      Logger.log("getLoggedUser: Usando email do EffectiveUser: " + effectiveUser);
+      return effectiveUser;
+    }
+  } catch (e) {
+    Logger.log("getLoggedUser: Erro ao obter usuário via Session: " + e.message);
+  }
+
+  // Se ainda não conseguiu, retorna "Desconhecido"
+  Logger.log("getLoggedUser: AVISO - Nenhum usuário identificado!");
+  return "Usuário Desconhecido";
+}
+
+/**
+ * getUltimosLancamentos: Retorna os últimos 20 lançamentos de um item específico
+ * Ordenados por data (mais recente primeiro)
+ * @param {string} itemNome - Nome do item para filtrar (opcional)
+ * @returns {Array} - Array de objetos com os lançamentos do item
+ */
+function getUltimosLancamentos(itemNome) {
+  try {
+    // Se não passar item, não retorna nada
+    if (!itemNome || itemNome.trim() === '') {
+      Logger.log("getUltimosLancamentos: Nenhum item especificado, retornando vazio");
+      return [];
     }
 
-    .login-card {
-      background: var(--white);
-      border-radius: 12px;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-      padding: 3rem;
-      width: 100%;
-      max-width: 400px;
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      Logger.log("getUltimosLancamentos: Planilha ESTOQUE não encontrada");
+      return [];
     }
 
-    .login-card h2 {
-      text-align: center;
-      margin-bottom: 2rem;
-      color: var(--primary-color);
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow <= 1) {
+      return [];
     }
 
-    /* Loading Spinner */
-    .loading {
-      display: none;
-      text-align: center;
-      padding: 2rem;
-    }
+    // Busca TODAS as linhas da planilha (começando da linha 2, pois 1 é cabeçalho)
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
 
-    .loading.show {
-      display: block;
-    }
+    // Filtra apenas lançamentos do item especificado
+    var lancamentos = [];
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+      var itemRow = row[1]; // Coluna B (Item)
 
-    .spinner {
-      border: 4px solid var(--light-bg);
-      border-top: 4px solid var(--secondary-color);
-      border-radius: 50%;
-      width: 50px;
-      height: 50px;
-      animation: spin 1s linear infinite;
-      margin: 0 auto;
-    }
+      // Compara ignorando case e espaços
+      if (itemRow.trim().toUpperCase() === itemNome.trim().toUpperCase()) {
+        var dataStr = row[3]; // Coluna D (Data)
+        var dataObj = parseDateString(dataStr);
 
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-
-    /* Messages */
-    .message {
-      padding: 1rem 1.5rem;
-      border-radius: 4px;
-      margin-bottom: 1rem;
-      display: none;
-    }
-
-    .message.show {
-      display: block;
-    }
-
-    .message.success {
-      background: #d4edda;
-      color: #155724;
-      border: 1px solid #c3e6cb;
-    }
-
-    .message.error {
-      background: #f8d7da;
-      color: #721c24;
-      border: 1px solid #f5c6cb;
-    }
-
-    .message.warning {
-      background: #fff3cd;
-      color: #856404;
-      border: 1px solid #ffeaa7;
-    }
-
-    .message.info {
-      background: #d1ecf1;
-      color: #0c5460;
-      border: 1px solid #bee5eb;
-    }
-
-    /* Responsive Design */
-    @media (max-width: 768px) {
-      .header h1 {
-        font-size: 1.2rem;
-      }
-
-      .sidebar {
-        transform: translateX(-100%);
-      }
-
-      .sidebar:not(.hidden) {
-        transform: translateX(0);
-      }
-
-      .sidebar-toggle {
-        left: 10px !important;
-      }
-
-      .sidebar-toggle.shifted {
-        left: 10px !important;
-      }
-
-      .main-content {
-        margin-left: 0;
-        padding: 1rem;
-      }
-
-      .content-card {
-        padding: 1rem;
-      }
-
-      .btn-group {
-        flex-direction: column;
-      }
-
-      .btn {
-        width: 100%;
-        justify-content: center;
+        lancamentos.push({
+          grupo: row[0],
+          item: row[1],
+          unidade: row[2],
+          data: dataStr,
+          dataObj: dataObj || new Date(0),
+          nf: row[4],
+          obs: row[5],
+          pedido: row[6],
+          entrada: row[7],
+          saida: row[8],
+          saldo: row[9],
+          valorUnitario: row[10],
+          alteradoEm: row[11],
+          alteradoPor: row[12]
+        });
       }
     }
 
-    /* Module specific styles */
-    .module-container {
-      display: none;
-    }
+    // Ordena por data (mais recente primeiro)
+    lancamentos.sort(function(a, b) {
+      return b.dataObj.getTime() - a.dataObj.getTime();
+    });
 
-    .module-container.active {
-      display: block;
-    }
+    // Retorna apenas os últimos 20
+    var ultimos20 = lancamentos.slice(0, 20);
 
-    .dashboard-stats {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1rem;
-      margin-bottom: 2rem;
-    }
+    Logger.log("getUltimosLancamentos: Item '" + itemNome + "' - Encontrados " + lancamentos.length + " lançamentos, retornando " + ultimos20.length);
+    return ultimos20;
 
-    .stat-card {
-      background: var(--white);
-      padding: 1.5rem;
-      border-radius: 8px;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-      text-align: center;
-    }
+  } catch (e) {
+    Logger.log("getUltimosLancamentos: Erro - " + e.message);
+    return [];
+  }
+}
 
-    .stat-card h3 {
-      font-size: 2rem;
-      color: var(--secondary-color);
-      margin-bottom: 0.5rem;
-    }
+/**
+ * showEstoqueSidebar: Abre o formulário de cadastro de estoque na sidebar.
+ */
+function showEstoqueSidebar() {
+  var nextRow = updateUnprotectedRange();
+  Logger.log("showEstoqueSidebar: Próxima linha para cadastro: " + nextRow);
 
-    .stat-card p {
-      color: #7f8c8d;
-      font-size: 0.9rem;
-    }
+  // OTIMIZADO: 1 busca em vez de 4
+  var autocompleteData = getAllAutocompleteData();
 
-    /* Autocomplete customizado (busca do início) */
-    .autocomplete-wrapper {
-      position: relative;
-    }
-    .autocomplete-dropdown {
-      position: absolute;
-      top: 100%;
-      left: 0;
-      right: 0;
-      max-height: 200px;
-      overflow-y: auto;
-      background: white;
-      border: 1px solid var(--border-color);
-      border-top: none;
-      border-radius: 0 0 4px 4px;
-      z-index: 1000;
-      display: none;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .autocomplete-dropdown.show {
-      display: block;
-    }
-    .autocomplete-option {
-      padding: 8px 12px;
-      cursor: pointer;
-      border-bottom: 1px solid #eee;
-    }
-    .autocomplete-option:hover,
-    .autocomplete-option.selected {
-      background: var(--secondary-color);
-      color: white;
-    }
-    .autocomplete-option:last-child {
-      border-bottom: none;
-    }
+  var template = HtmlService.createTemplateFromFile("DialogEstoque");
+  template.itemList = JSON.stringify(autocompleteData.items);
+  template.groupList = JSON.stringify(autocompleteData.groups);
+  template.nfList = JSON.stringify(autocompleteData.nfs);
+  template.obsList = JSON.stringify(autocompleteData.obs);
+  template.currentRow = nextRow;
 
-    /* Modal de Confirmação NF */
-    .modal-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.7);
-      display: none;
-      justify-content: center;
-      align-items: center;
-      z-index: 2000;
-    }
-    .modal-overlay.show {
-      display: flex;
-    }
+  var htmlOutput = template.evaluate().setTitle("CADASTRO DE ESTOQUE");
+  SpreadsheetApp.getUi().showSidebar(htmlOutput);
+}
 
-    /* Loading Overlay */
-    #loadingOverlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.8);
-      display: none;
-      justify-content: center;
-      align-items: center;
-      z-index: 9999;
-      backdrop-filter: blur(3px);
-    }
+/**
+ * updateUnprotectedRange: Retorna a próxima linha livre na aba ESTOQUE.
+ */
+function updateUnprotectedRange() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  var nextRow = sheet.getLastRow() + 1;
+  return nextRow;
+}
 
-    #loadingOverlay.show {
-      display: flex;
-    }
+/**
+ * setActiveNextEmptyCell: Seleciona a célula da coluna A que está 15 linhas abaixo da última preenchida.
+ */
+function setActiveNextEmptyCell() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (sheet) {
+    var nextRow = sheet.getLastRow() + 15;
+    sheet.activate();
+    sheet.setActiveSelection("A" + nextRow);
+    Logger.log("setActiveNextEmptyCell: Célula A" + nextRow + " selecionada.");
+  }
+}
 
-    .loading-content {
-      background: white;
-      padding: 30px 40px;
-      border-radius: 12px;
-      text-align: center;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.4);
-      min-width: 300px;
-      max-width: 900px;
-      width: 90%;
-      max-height: 90vh;
-      overflow-y: auto;
-    }
+/**
+ * select4RowsBelow: Seleciona a célula da coluna A que está 4 linhas abaixo da última linha preenchida.
+ */
+function select4RowsBelow() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (sheet) {
+    var nextRow = sheet.getLastRow() + 4;
+    sheet.activate();
+    sheet.setActiveSelection("A" + nextRow);
+    Logger.log("select4RowsBelow: Célula A" + nextRow + " selecionada.");
+  }
+}
 
-    .loading-spinner {
-      width: 50px;
-      height: 50px;
-      border: 5px solid #f3f3f3;
-      border-top: 5px solid var(--secondary-color);
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin: 0 auto 15px;
-    }
+/**
+ * select10RowsBelow: Seleciona a célula da coluna A que está 10 linhas abaixo da última linha preenchida.
+ */
+function select10RowsBelow() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (sheet) {
+    var nextRow = sheet.getLastRow() + 10;
+    sheet.activate();
+    sheet.setActiveSelection("A" + nextRow);
+    Logger.log("select10RowsBelow: Célula A" + nextRow + " selecionada.");
+  }
+}
 
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
+/**
+ * getItemList: Retorna a lista única de itens da aba DADOS (Coluna A).
+ */
+function getItemList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (!sheetDados) return [];
+  var lastRow = sheetDados.getLastRow();
+  if (lastRow < 1) return [];
+  var values = sheetDados.getRange(1, 1, lastRow, 1).getValues().flat();
+  var items = [];
+  for (var i = 0; i < values.length; i++) {
+    if (values[i] && values[i].toString().trim() !== "") {
+      items.push(values[i].toString().trim());
     }
+  }
+  return Array.from(new Set(items));
+}
 
-    @keyframes pulse {
-      0%, 100% {
-        transform: scale(1);
-        opacity: 1;
+/**
+ * getGroupList: Retorna a lista única de grupos da aba DADOS (Coluna D).
+ */
+function getGroupList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (!sheetDados) return [];
+  var lastRow = sheetDados.getLastRow();
+  if (lastRow < 1) return [];
+  var values = sheetDados.getRange(1, 4, lastRow, 1).getValues().flat();
+  var groups = [];
+  for (var i = 0; i < values.length; i++) {
+    if (values[i] && values[i].toString().trim() !== "") {
+      groups.push(values[i].toString().trim());
+    }
+  }
+  return Array.from(new Set(groups));
+}
+
+/**
+ * getNfList: Retorna a lista única de valores da coluna D da aba ESTOQUE (Nota Fiscal/Pedido).
+ */
+function getNfList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (!sheet) return [];
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var values = sheet.getRange(2, 4, lastRow - 1, 1).getValues().flat();
+  var nfList = values.filter(function(v) {
+    return v.toString().trim() !== "";
+  });
+  return Array.from(new Set(nfList));
+}
+
+/**
+ * getObsList: Retorna a lista única de valores da coluna E da aba ESTOQUE (Cliente/Observações).
+ */
+function getObsList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (!sheet) return [];
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var values = sheet.getRange(2, 5, lastRow - 1, 1).getValues().flat();
+  var obsList = values.filter(function(v) {
+    return v.toString().trim() !== "";
+  });
+  return Array.from(new Set(obsList));
+}
+
+/**
+ * getMedidasList: Retorna a lista de unidades de medida.
+ * Combina opções da aba DADOS (coluna MEDIDAS) com opções já usadas na aba ESTOQUE (coluna C).
+ */
+function getMedidasList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var medidasSet = new Set();
+
+  // 1. Busca na aba DADOS (coluna MEDIDAS)
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (sheetDados) {
+    var headers = sheetDados.getRange(1, 1, 1, sheetDados.getLastColumn()).getValues()[0];
+    var medidasCol = -1;
+    for (var i = 0; i < headers.length; i++) {
+      var headerUpper = headers[i].toString().toUpperCase().trim();
+      if (headerUpper === "MEDIDAS" || headerUpper === "MEDIDA" || headerUpper === "UNIDADE" || headerUpper === "UNIDADES") {
+        medidasCol = i + 1;
+        break;
       }
-      50% {
-        transform: scale(1.2);
-        opacity: 0.8;
+    }
+
+    if (medidasCol !== -1) {
+      var lastRow = sheetDados.getLastRow();
+      if (lastRow >= 2) {
+        var values = sheetDados.getRange(2, medidasCol, lastRow - 1, 1).getValues().flat();
+        values.forEach(function(v) {
+          var val = v.toString().trim();
+          if (val !== "") medidasSet.add(val);
+        });
+      }
+    }
+  }
+
+  // 2. Busca na aba ESTOQUE (coluna C - Unidade) para incluir opções já usadas
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (sheetEstoque) {
+    var lastRowEstoque = sheetEstoque.getLastRow();
+    if (lastRowEstoque >= 2) {
+      var valuesEstoque = sheetEstoque.getRange(2, 3, lastRowEstoque - 1, 1).getValues().flat();
+      valuesEstoque.forEach(function(v) {
+        var val = v.toString().trim();
+        if (val !== "") medidasSet.add(val);
+      });
+    }
+  }
+
+  // Converte Set para Array e ordena
+  var medidasList = Array.from(medidasSet).sort();
+  return medidasList;
+}
+
+/**
+ * getObservacoesList: Retorna a lista de observações.
+ * Busca da aba DADOS, coluna F (OBSERVAÇÃO).
+ */
+function getObservacoesList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var obsSet = new Set();
+
+  // Busca na aba DADOS, coluna F (índice 6)
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (sheetDados) {
+    var lastRow = sheetDados.getLastRow();
+    if (lastRow >= 2) {
+      // Coluna F = índice 6
+      var values = sheetDados.getRange(2, 6, lastRow - 1, 1).getDisplayValues().flat();
+      values.forEach(function(v) {
+        var val = v.toString().trim();
+        if (val !== "") obsSet.add(val);
+      });
+    }
+  }
+
+  // Converte Set para Array e ordena
+  var obsList = Array.from(obsSet).sort();
+  return obsList;
+}
+
+/**
+ * normalize: Função auxiliar para normalizar texto.
+ */
+function normalize(text) {
+  if (!text) return "";
+  return text.toString().trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/* ================================
+   FUNÇÕES DE CACHE E AUTOCOMPLETE
+   ================================ */
+
+/**
+ * getCachedData: Busca dados no cache ou executa função e armazena no cache.
+ */
+function getCachedData(key, fetchFunction, ttl) {
+  ttl = ttl || 120; // 2 minutos padrão
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get(key);
+
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      Logger.log("Cache parse error: " + key);
+    }
+  }
+
+  var data = fetchFunction();
+  try {
+    var jsonData = JSON.stringify(data);
+    if (jsonData.length < 100000) {
+      cache.put(key, jsonData, ttl);
+    }
+  } catch (e) {
+    Logger.log("Cache save error: " + e.message);
+  }
+
+  return data;
+}
+
+/**
+ * invalidateCache: Invalida caches.
+ */
+function invalidateCache(keys) {
+  var cache = CacheService.getScriptCache();
+  var keysToInvalidate = typeof keys === 'string' ? [keys] : (keys || []);
+  keysToInvalidate.forEach(function(key) { cache.remove(key); });
+  cache.remove("autocompleteData");
+}
+
+/**
+ * invalidateAllAutocompleteCache: Invalida todos os caches de autocomplete.
+ */
+function invalidateAllAutocompleteCache() {
+  invalidateCache(["itemList", "groupList", "nfList", "obsList", "autocompleteData"]);
+}
+
+/**
+ * getAllAutocompleteData: Busca todos os dados de autocomplete em uma única operação.
+ * OTIMIZADO: Usa cache de 10 minutos
+ */
+function getAllAutocompleteData() {
+  return getCachedData("autocompleteData", function() {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // 1ª Leitura: DADOS (apenas grupos)
+    var sheetDados = ss.getSheetByName("DADOS");
+    var groups = [];
+    if (sheetDados) {
+      var lastRowDados = sheetDados.getLastRow();
+      if (lastRowDados >= 1) {
+        var dadosData = sheetDados.getRange(1, 4, lastRowDados, 1).getDisplayValues();
+        for (var i = 0; i < dadosData.length; i++) {
+          if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
+            groups.push(dadosData[i][0].toString().trim());
+          }
+        }
       }
     }
 
-    .loading-text {
-      font-size: 1.1rem;
-      color: var(--text-dark);
-      font-weight: 500;
-      margin-top: 10px;
+    // 2ª Leitura: ESTOQUE (itens da coluna B e NFs da coluna E)
+    // Estrutura: A=Grupo, B=Item, C=Unidade, D=Data, E=NF, F=Obs
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var items = [], nfs = [];
+    if (sheetEstoque) {
+      var lastRowEstoque = sheetEstoque.getLastRow();
+      if (lastRowEstoque >= 2) {
+        // Lê colunas B até E (4 colunas: B, C, D, E)
+        var estoqueData = sheetEstoque.getRange(2, 2, lastRowEstoque - 1, 4).getDisplayValues();
+        for (var j = 0; j < estoqueData.length; j++) {
+          // Coluna B (índice 0) = Item
+          if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
+            items.push(estoqueData[j][0].toString().trim());
+          }
+          // Coluna E (índice 3) = NF (já em formato texto com getDisplayValues)
+          if (estoqueData[j][3] && estoqueData[j][3].toString().trim() !== "") {
+            nfs.push(estoqueData[j][3].toString().trim());
+          }
+        }
+      }
     }
 
-    .loading-subtext {
-      font-size: 0.9rem;
-      color: #7f8c8d;
-      margin-top: 5px;
-    }
-
-    /* Lista de Últimos Lançamentos */
-    .ultimos-lancamentos {
-      margin-top: 25px;
-      padding-top: 20px;
-      border-top: 2px solid #e0e0e0;
-      max-width: 800px;
-      width: 100%;
-    }
-
-    .ultimos-lancamentos h4 {
-      font-size: 1rem;
-      color: var(--text-dark);
-      margin: 0 0 15px 0;
-      font-weight: 600;
-    }
-
-    .lancamentos-list {
-      max-height: 300px;
-      overflow-y: auto;
-      background: #f8f9fa;
-      border-radius: 8px;
-      padding: 10px;
-    }
-
-    .loading-lancamentos {
-      text-align: center;
-      color: #7f8c8d;
-      padding: 20px;
-      font-size: 0.9rem;
-    }
-
-    .lancamento-item {
-      background: white;
-      border-radius: 6px;
-      padding: 10px 12px;
-      margin-bottom: 8px;
-      border-left: 4px solid var(--primary-color);
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      transition: transform 0.2s;
-    }
-
-    .lancamento-item:hover {
-      transform: translateX(3px);
-    }
-
-    .lancamento-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 5px;
-    }
-
-    .lancamento-item-nome {
-      font-weight: 600;
-      color: var(--text-dark);
-      font-size: 0.95rem;
-    }
-
-    .lancamento-data {
-      font-size: 0.8rem;
-      color: #7f8c8d;
-    }
-
-    .lancamento-details {
-      display: flex;
-      gap: 15px;
-      font-size: 0.85rem;
-      color: #555;
-      flex-wrap: wrap;
-    }
-
-    .lancamento-detail {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .lancamento-detail strong {
-      font-weight: 600;
-    }
-
-    .lancamento-entrada {
-      color: #28a745;
-    }
-
-    .lancamento-saida {
-      color: #dc3545;
-    }
-
-    .lancamento-saldo {
-      color: var(--primary-color);
-    }
-
-    .modal-content {
-      background: white;
-      border-radius: 8px;
-      max-width: 95%;
-      max-height: 90vh;
-      width: 900px;
-      overflow: hidden;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-    }
-    .modal-header {
-      background: var(--primary-color);
-      color: white;
-      padding: 15px 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .modal-header h3 {
-      margin: 0;
-      font-size: 1.2rem;
-    }
-    .modal-close {
-      background: none;
-      border: none;
-      color: white;
-      font-size: 1.5rem;
-      cursor: pointer;
-      padding: 0 5px;
-    }
-    .modal-body {
-      padding: 20px;
-      max-height: calc(90vh - 140px);
-      overflow-y: auto;
-    }
-    .modal-footer {
-      padding: 15px 20px;
-      background: #f5f5f5;
-      display: flex;
-      gap: 10px;
-      justify-content: flex-end;
-      border-top: 1px solid #ddd;
-    }
-    .confirm-item-row {
-      display: grid;
-      grid-template-columns: 40px 2fr 1fr 1fr 1fr 1fr 60px;
-      gap: 10px;
-      padding: 12px;
-      border-bottom: 1px solid #eee;
-      align-items: center;
-      background: #fafafa;
-      margin-bottom: 5px;
-      border-radius: 4px;
-    }
-    .confirm-item-row.item-novo {
-      background: #fff3cd;
-      border: 1px solid #ffc107;
-    }
-    .confirm-item-row .item-index {
-      font-weight: bold;
-      color: #666;
-      text-align: center;
-    }
-    .confirm-item-row .item-nome {
-      font-weight: 600;
-    }
-    .confirm-item-row .item-novo-badge {
-      background: #dc3545;
-      color: white;
-      font-size: 0.7rem;
-      padding: 2px 6px;
-      border-radius: 3px;
-      margin-left: 5px;
-    }
-    .confirm-item-row .btn-ok-item {
-      background: #28a745;
-      color: white;
-      border: none;
-      padding: 8px 15px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 0.9rem;
-    }
-    .confirm-item-row .btn-ok-item:hover {
-      background: #218838;
-    }
-    .confirm-item-row .btn-ok-item.confirmed {
-      background: #6c757d;
-    }
-    .confirm-item-row .btn-ok-item.confirmed::after {
-      content: ' ✓';
-    }
-    .confirm-header-row {
-      display: grid;
-      grid-template-columns: 40px 2fr 1fr 1fr 1fr 1fr 60px;
-      gap: 10px;
-      padding: 10px 12px;
-      background: var(--primary-color);
-      color: white;
-      font-weight: 600;
-      font-size: 0.85rem;
-      border-radius: 4px;
-      margin-bottom: 10px;
-    }
-    .novo-item-warning {
-      background: #fff3cd;
-      border: 1px solid #ffc107;
-      color: #856404;
-      padding: 12px;
-      border-radius: 4px;
-      margin-bottom: 15px;
-    }
-    .novo-item-warning strong {
-      color: #dc3545;
-    }
-    .grupo-field-novo {
-      display: none;
-    }
-    .grupo-field-novo.show {
-      display: block;
-    }
-    /* Estilos do Modal de Confirmação Lote */
-    .confirm-header-row-lote {
-      display: grid;
-      grid-template-columns: 40px 2fr 80px 80px 100px 60px;
-      gap: 10px;
-      padding: 10px 12px;
-      background: var(--primary-color);
-      color: white;
-      font-weight: 600;
-      font-size: 0.85rem;
-      border-radius: 4px;
-      margin-bottom: 10px;
-    }
-    .confirm-item-row-lote {
-      display: grid;
-      grid-template-columns: 40px 2fr 80px 80px 100px 60px;
-      gap: 10px;
-      padding: 12px;
-      border-bottom: 1px solid #eee;
-      align-items: center;
-      background: #fafafa;
-      margin-bottom: 5px;
-      border-radius: 4px;
-    }
-    .confirm-item-row-lote.item-novo {
-      background: #fff3cd;
-      border: 1px solid #ffc107;
-    }
-    .confirm-item-row-lote .item-index {
-      font-weight: bold;
-      color: #666;
-      text-align: center;
-    }
-    .confirm-item-row-lote .item-nome {
-      font-weight: 600;
-    }
-    .confirm-item-row-lote .btn-ok-item {
-      background: #28a745;
-      color: white;
-      border: none;
-      padding: 8px 15px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 0.9rem;
-    }
-    .confirm-item-row-lote .btn-ok-item:hover {
-      background: #218838;
-    }
-    .confirm-item-row-lote .btn-ok-item.confirmed {
-      background: #6c757d;
-    }
-    .confirm-item-row-lote .btn-ok-item.confirmed::after {
-      content: ' ✓';
-    }
-    /* Item do Lote */
-    .lote-item-row {
-      display: grid;
-      grid-template-columns: 2fr 1fr auto;
-      gap: 8px;
-      margin-bottom: 10px;
-      padding: 10px;
-      background: white;
-      border-radius: 4px;
-      align-items: end;
-    }
-  </style>
-</head>
-<body>
-  <!-- Login Screen -->
-  <div id="loginScreen" class="login-container">
-    <div class="login-card">
-      <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="Logo Marfim" style="width: 120px; height: auto; margin-bottom: 15px; border-radius: 8px;">
-      <h2>🔐 Login</h2>
-      <div id="loginMessage" class="message"></div>
-      <form id="loginForm" onsubmit="return handleLogin(event)">
-        <div class="form-group">
-          <label for="loginUser">Usuário</label>
-          <input type="text" id="loginUser" required placeholder="Digite seu usuário">
-        </div>
-        <div class="form-group">
-          <label for="loginPassword">Senha</label>
-          <input type="password" id="loginPassword" required placeholder="Digite sua senha">
-        </div>
-        <button type="submit" class="btn btn-primary" style="width: 100%;">Entrar</button>
-      </form>
-      <div class="loading">
-        <div class="spinner"></div>
-        <p>Autenticando...</p>
-      </div>
-    </div>
-  </div>
-
-  <!-- Main App -->
-  <div id="mainApp" style="display: none;">
-    <!-- Header -->
-    <header class="header">
-      <div style="display: flex; align-items: center; gap: 12px;">
-        <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="Logo Marfim" style="height: 45px; width: auto; border-radius: 6px;">
-        <h1 style="margin: 0;">Sistema de Gestão de Estoque</h1>
-      </div>
-      <div class="user-info">
-        <span id="userName">Usuário</span>
-        <button class="logout-btn" onclick="handleLogout()">Sair</button>
-      </div>
-    </header>
-
-    <!-- Sidebar Toggle -->
-    <button class="sidebar-toggle shifted" onclick="toggleSidebar()">✕ Esconder Menu</button>
-
-    <!-- Container -->
-    <div class="container">
-      <!-- Sidebar -->
-      <aside class="sidebar" id="sidebar">
-        <nav>
-          <ul>
-            <li class="section-title">Principal</li>
-            <li><a href="#" onclick="showModule('dashboard')" data-module="dashboard" class="active">🏠 Início</a></li>
-
-            <li class="separator"></li>
-            <li class="section-title">Operações</li>
-            <li><a href="#" onclick="showModule('inserir-estoque')" data-module="inserir-estoque">📦 Inserir Estoque</a></li>
-            <li><a href="#" onclick="showModule('inserir-nf')" data-module="inserir-nf">📄 Inserir NF</a></li>
-            <li><a href="#" onclick="showModule('inserir-grupo')" data-module="inserir-grupo">📁 Inserir Grupo</a></li>
-            <li><a href="#" onclick="showModule('apagar-linha')" data-module="apagar-linha">🗑️ Apagar Última Linha</a></li>
-
-            <li class="separator"></li>
-            <li class="section-title">Consultas</li>
-            <li><a href="#" onclick="showModule('localizar-produto')" data-module="localizar-produto">🔍 Localizar Produto</a></li>
-            <li><a href="#" onclick="showModule('listagem-estoque')" data-module="listagem-estoque">📋 Listagem de Estoque</a></li>
-
-            <li class="separator"></li>
-            <li class="section-title">Relatórios</li>
-            <li><a href="#" onclick="showModule('relatorio-estoque')" data-module="relatorio-estoque">📊 Gerar Relatório</a></li>
-            <li><a href="#" onclick="showModule('estoque-3-meses')" data-module="estoque-3-meses">📦 Consumo em 3 Meses</a></li>
-
-            <li class="separator"></li>
-            <li class="section-title">Cores</li>
-            <li><a href="#" onclick="showModule('cores-desatualizadas')" data-module="cores-desatualizadas">🎨 Cores Desatualizadas</a></li>
-          </ul>
-        </nav>
-      </aside>
-
-      <!-- Main Content -->
-      <main class="main-content" id="mainContent">
-        <!-- Página Inicial Module -->
-        <div id="module-dashboard" class="module-container active">
-          <div class="content-card" style="text-align: center; padding: 40px 20px;">
-            <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="Logo Marfim" style="width: 180px; height: auto; border-radius: 12px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-            <h2 style="font-size: 1.8rem; color: #2c3e50; margin-bottom: 10px;">Sistema de Gestão de Estoque Inteligente</h2>
-            <h3 style="font-size: 1.4rem; color: #3498db; margin-bottom: 30px; font-weight: 500;">Marfim</h3>
-            <p style="color: #7f8c8d; margin-bottom: 30px;">Use o menu lateral para navegar pelas funcionalidades.</p>
-            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
-              <p style="font-size: 0.85rem; color: #95a5a6; margin: 0;">Autor: Johnny</p>
-              <p style="font-size: 0.85rem; color: #95a5a6; margin: 5px 0 0 0;">Versão: 2.9.7</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Inserir Estoque Module -->
-        <div id="module-inserir-estoque" class="module-container">
-          <div class="content-card">
-            <!-- FORMULÁRIO DE INSERÇÃO -->
-            <div id="estoqueFormArea">
-              <h2>📦 Inserir Estoque</h2>
-              <div id="estoqueMessage" class="message"></div>
-
-              <!-- Aviso de item novo -->
-              <div id="avisoItemNovoEstoque" class="novo-item-warning" style="display: none;">
-                <strong>⚠️ ATENÇÃO:</strong> Este item é <strong>NOVO</strong> e não existe na base de dados!
-                <br>Certifique-se de que digitou corretamente para evitar problemas futuros.
-              </div>
-
-              <form id="estoqueForm" onsubmit="return handleInserirEstoque(event)" novalidate>
-                <!-- Grid compacto 2 colunas -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                  <div class="form-group" style="margin-bottom: 8px;">
-                    <label for="estoqueItem" style="font-size: 0.85rem;">Produto *</label>
-                    <input type="text" id="estoqueItem" list="itemList" required style="padding: 6px;" onblur="verificarItemNovoEstoque()">
-                    <datalist id="itemList"></datalist>
-                    <small id="avisoItemNovoSmall" style="display: none; color: #dc3545; font-size: 0.75rem;">⚠️ Item NOVO - Verifique a digitação!</small>
-                  </div>
-                  <div class="form-group" style="margin-bottom: 8px;" id="estoqueGroupContainer">
-                    <label for="estoqueGroup" style="font-size: 0.85rem;">Grupo *</label>
-                    <input type="text" id="estoqueGroup" list="groupList" required style="padding: 6px;">
-                    <datalist id="groupList"></datalist>
-                  </div>
-                  <div class="form-group" style="margin-bottom: 8px;">
-                    <label for="estoqueUnidade" style="font-size: 0.85rem;">Unidade *</label>
-                    <select id="estoqueUnidade" required style="padding: 6px;">
-                      <option value="">Selecione...</option>
-                    </select>
-                  </div>
-                  <div class="form-group" style="margin-bottom: 8px;">
-                    <label for="estoqueNF" style="font-size: 0.85rem;">NF</label>
-                    <input type="text" id="estoqueNF" list="nfList" style="padding: 6px;">
-                    <datalist id="nfList"></datalist>
-                  </div>
-                  <div class="form-group" style="margin-bottom: 8px;">
-                    <label for="estoqueObs" style="font-size: 0.85rem;">Observação</label>
-                    <select id="estoqueObs" style="padding: 6px;" onchange="toggleValorUnitario()">
-                      <option value="">Selecione...</option>
-                    </select>
-                  </div>
-                  <div class="form-group" style="margin-bottom: 8px;">
-                    <label for="estoqueEntrada" style="font-size: 0.85rem;">Entrada</label>
-                    <input type="number" id="estoqueEntrada" step="0.01" value="0" onchange="toggleValorUnitario()" style="padding: 6px;">
-                  </div>
-                  <div class="form-group" style="margin-bottom: 8px;">
-                    <label for="estoqueSaida" style="font-size: 0.85rem;">Saída</label>
-                    <input type="number" id="estoqueSaida" step="0.01" value="0" onchange="toggleValorUnitario()" style="padding: 6px;">
-                  </div>
-                  <div class="form-group" id="valorUnitarioGroup" style="margin-bottom: 8px;">
-                    <label for="estoqueValorUnitario" style="font-size: 0.85rem;">Valor Unit. (R$) *</label>
-                    <input type="number" id="estoqueValorUnitario" step="0.01" min="0" required style="padding: 6px;">
-                  </div>
-                </div>
-                <div class="btn-group" style="margin-top: 10px;">
-                  <button type="submit" class="btn btn-success">✓ Confirmar</button>
-                  <button type="button" class="btn btn-warning" onclick="resetEstoqueForm()">↻ Limpar</button>
-                  <button type="button" class="btn btn-primary" onclick="abrirLancamentoLote()" title="Inserir múltiplos itens de uma vez">📦 Movimentação em Lote</button>
-                </div>
-              </form>
-
-              <!-- Histórico do Produto (durante digitação) -->
-              <div id="estoqueHistorico" style="display: none; margin-top: 15px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
-                <h3 style="margin: 0 0 10px 0; color: #666; font-size: 0.85rem;">📊 Histórico do Produto</h3>
-                <div id="estoqueHistoricoContent" class="table-container" style="max-height: 200px; overflow-y: auto;">
-                </div>
-              </div>
-            </div>
-
-            <!-- ÁREA DE RESULTADOS APÓS INSERÇÃO -->
-            <div id="estoqueResultArea" style="display: none;">
-              <h2>✅ Estoque Inserido com Sucesso!</h2>
-              <div id="estoqueResultMessage" style="background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 15px;"></div>
-              <h3 style="margin: 15px 0 10px 0; font-size: 0.9rem;">📋 Movimentações do Item:</h3>
-              <div id="estoqueResultTable" class="table-container" style="max-height: 400px; overflow-y: auto;">
-              </div>
-              <div class="btn-group" style="margin-top: 15px;">
-                <button type="button" class="btn btn-primary" onclick="voltarParaFormulario()">✓ OK - Inserir Novo</button>
-              </div>
-            </div>
-
-            <!-- ÁREA DE MOVIMENTAÇÃO EM LOTE -->
-            <div id="estoqueLoteArea" style="display: none;">
-              <h2>📦 Movimentação do Estoque em Lote</h2>
-              <p style="font-size: 0.85rem; color: #666; margin-bottom: 15px;">
-                Insira múltiplos itens de uma vez. Escolha o tipo de operação, grupo, unidade e observação uma única vez. Depois adicione os itens com suas quantidades.
-              </p>
-              <div id="estoqueLoteMessage" class="message"></div>
-
-              <!-- Campos Globais do Lote -->
-              <div style="background: #e8f5e9; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                <h4 style="margin: 0 0 10px 0; color: #2e7d32;">⚙️ Configurações Gerais</h4>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                  <div class="form-group" style="margin-bottom: 8px;">
-                    <label style="font-size: 0.85rem;">Tipo de Operação *</label>
-                    <div style="display: flex; gap: 15px; padding: 8px 0;">
-                      <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                        <input type="radio" name="loteOperacao" value="entrada" checked style="width: auto;">
-                        <span style="color: #28a745; font-weight: 600;">📥 Entrada</span>
-                      </label>
-                      <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                        <input type="radio" name="loteOperacao" value="saida" style="width: auto;">
-                        <span style="color: #dc3545; font-weight: 600;">📤 Saída</span>
-                      </label>
-                    </div>
-                  </div>
-                  <div class="form-group" style="margin-bottom: 8px;">
-                    <label style="font-size: 0.85rem;">Grupo *</label>
-                    <select id="loteGrupo" required style="padding: 6px;">
-                      <option value="">Selecione...</option>
-                    </select>
-                  </div>
-                  <div class="form-group" style="margin-bottom: 8px;">
-                    <label style="font-size: 0.85rem;">Unidade *</label>
-                    <select id="loteUnidade" required style="padding: 6px;">
-                      <option value="">Selecione...</option>
-                    </select>
-                  </div>
-                  <div class="form-group" style="margin-bottom: 8px;">
-                    <label style="font-size: 0.85rem;">Observação</label>
-                    <select id="loteObs" style="padding: 6px;">
-                      <option value="">Selecione...</option>
-                    </select>
-                  </div>
-                  <div class="form-group" style="margin-bottom: 8px;">
-                    <label style="font-size: 0.85rem;">Pedido/OC</label>
-                    <input type="text" id="loteNF" list="loteNFList" style="padding: 6px;" placeholder="Número do Pedido/OC">
-                    <datalist id="loteNFList"></datalist>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Lista de Itens do Lote -->
-              <div style="background: #fff8e1; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                <h4 style="margin: 0 0 10px 0; color: #f57c00;">📋 Itens do Lote</h4>
-                <div id="loteItensContainer">
-                  <!-- Itens serão adicionados aqui -->
-                </div>
-                <button type="button" class="btn btn-primary" onclick="adicionarItemLote()" style="margin-top: 10px;">
-                  + Adicionar Item
-                </button>
-              </div>
-
-              <div class="btn-group">
-                <button type="button" class="btn btn-success" onclick="handleInserirLote()">✓ Confirmar Inserção</button>
-                <button type="button" class="btn btn-warning" onclick="limparFormLote()">↻ Limpar</button>
-                <button type="button" class="btn btn-secondary" onclick="voltarParaEstoqueSimples()">← Voltar</button>
-              </div>
-            </div>
-
-            <!-- ÁREA DE RESULTADOS DO LOTE -->
-            <div id="estoqueLoteResultArea" style="display: none;">
-              <h2>✅ Movimentação em Lote Concluída!</h2>
-              <div id="estoqueLoteResultMessage" style="background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 15px;"></div>
-              <h3 style="margin: 15px 0 10px 0; font-size: 0.9rem;">📊 Saldos Atualizados:</h3>
-              <div id="estoqueLoteResultTable" class="table-container" style="max-height: 400px; overflow-y: auto;"></div>
-              <div class="btn-group" style="margin-top: 15px;">
-                <button type="button" class="btn btn-primary" onclick="voltarParaLote()">📦 Nova Movimentação em Lote</button>
-                <button type="button" class="btn btn-secondary" onclick="voltarParaEstoqueSimples()">← Inserção Simples</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Inserir NF Module (múltiplos itens) -->
-        <div id="module-inserir-nf" class="module-container">
-          <div class="content-card">
-            <div id="nfFormArea">
-              <h2>📄 Inserir NF (Múltiplos Itens)</h2>
-              <p style="font-size: 0.85rem; color: #666; margin-bottom: 15px;">Insira NF, Pedido, Unidade e Observação uma vez. Depois adicione os itens com seus respectivos preços, lotes e quantidades.</p>
-              <div id="nfMessage" class="message"></div>
-
-              <!-- Campos Globais -->
-              <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                <h4 style="margin: 0 0 10px 0; color: #1976d2;">Dados Gerais</h4>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                  <div class="form-group" style="margin-bottom: 8px;">
-                    <label style="font-size: 0.85rem;">NF *</label>
-                    <input type="text" id="nfNumero" required style="padding: 6px;" placeholder="Número da NF">
-                  </div>
-                  <div class="form-group" style="margin-bottom: 8px;">
-                    <label style="font-size: 0.85rem;">Pedido</label>
-                    <input type="text" id="nfPedido" style="padding: 6px;" placeholder="Número do Pedido">
-                  </div>
-                  <div class="form-group" style="margin-bottom: 8px;">
-                    <label style="font-size: 0.85rem;">Unidade *</label>
-                    <select id="nfUnidade" required style="padding: 6px;">
-                      <option value="">Selecione...</option>
-                    </select>
-                  </div>
-                  <div class="form-group" style="margin-bottom: 8px;">
-                    <label style="font-size: 0.85rem;">Observação</label>
-                    <select id="nfObs" style="padding: 6px;">
-                      <option value="">Selecione...</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Lista de Itens -->
-              <div style="background: #fff8e1; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                <h4 style="margin: 0 0 10px 0; color: #f57c00;">Itens da NF</h4>
-                <div id="nfItensContainer">
-                  <!-- Itens serão adicionados aqui -->
-                </div>
-                <button type="button" class="btn btn-primary" onclick="adicionarItemNF()" style="margin-top: 10px;">
-                  + Adicionar Item
-                </button>
-              </div>
-
-              <div class="btn-group">
-                <button type="button" class="btn btn-success" onclick="handleInserirNF()">✓ Confirmar Inserção</button>
-                <button type="button" class="btn btn-warning" onclick="limparFormNF()">↻ Limpar</button>
-              </div>
-            </div>
-
-            <!-- Área de Resultados -->
-            <div id="nfResultArea" style="display: none;">
-              <h2>✅ Itens Inseridos com Sucesso!</h2>
-              <div id="nfResultMessage" style="background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 15px;"></div>
-              <div id="nfResultTable" class="table-container" style="max-height: 400px; overflow-y: auto;"></div>
-              <div class="btn-group" style="margin-top: 15px;">
-                <button type="button" class="btn btn-primary" onclick="voltarParaNF()">✓ OK - Inserir Nova NF</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Inserir Grupo Module -->
-        <div id="module-inserir-grupo" class="module-container">
-          <div class="content-card">
-            <h2>📁 Inserir Grupo</h2>
-            <div id="grupoMessage" class="message"></div>
-            <form id="grupoForm" onsubmit="return handleInserirGrupo(event)">
-              <div class="form-group">
-                <label for="grupoNome">Nome do Grupo *</label>
-                <input type="text" id="grupoNome" required style="text-transform: uppercase;"
-                       oninput="this.value = this.value.toUpperCase(); validarGrupoDuplicado();"
-                       placeholder="Digite o nome do grupo">
-                <small id="grupoValidation" style="display:none; color: #e74c3c; margin-top: 5px;"></small>
-              </div>
-              <div class="btn-group">
-                <button type="submit" id="btnAdicionarGrupo" class="btn btn-success">✓ Adicionar Grupo</button>
-              </div>
-            </form>
-
-            <!-- Lista de grupos existentes -->
-            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd;">
-              <h3 style="font-size: 1rem; color: #666; margin-bottom: 10px;">📋 Grupos Existentes (<span id="totalGrupos">0</span>)</h3>
-              <div id="listaGruposExistentes" style="max-height: 300px; overflow-y: auto; background: #f9f9f9; padding: 10px; border-radius: 4px;">
-                <p style="color: #999;">Carregando grupos...</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Localizar Produto Module -->
-        <div id="module-localizar-produto" class="module-container">
-          <div class="content-card">
-            <h2>🔍 Localizar Produto</h2>
-            <div id="localizarMessage" class="message"></div>
-            <form id="localizarForm" onsubmit="return handleBuscaRapida(event)">
-              <div class="form-group">
-                <label for="localizarItem">Nome do Produto *</label>
-                <input type="text" id="localizarItem" list="localizarItemList" required>
-                <datalist id="localizarItemList"></datalist>
-              </div>
-              <div class="btn-group" style="flex-wrap: wrap;">
-                <button type="submit" class="btn btn-primary">⚡ Busca Rápida (últimos 20)</button>
-                <button type="button" class="btn btn-success" onclick="handleHistoricoCompleto()">📜 Histórico Completo</button>
-                <button type="button" class="btn btn-warning" onclick="showAllProducts()">📋 Mostrar Todos</button>
-              </div>
-              <small style="color: #666; margin-top: 8px; display: block;">
-                <strong>Busca Rápida:</strong> Instantânea, últimos 20 registros (cache) |
-                <strong>Histórico Completo:</strong> Todos os registros do item (servidor)
-              </small>
-            </form>
-            <div id="localizarResults" class="table-container" style="display: none;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 1rem;">
-                <h3 style="margin: 0;">Resultados da Busca (<span id="totalResults">0</span> registros)</h3>
-                <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-                  <label for="printDataInicio" style="margin: 0;">Período:</label>
-                  <input type="date" id="printDataInicio" style="padding: 0.5rem;">
-                  <span>até</span>
-                  <input type="date" id="printDataFim" style="padding: 0.5rem;">
-                  <button class="btn btn-success" onclick="printResults(true)" style="padding: 0.5rem 1rem;">🖨️ Imprimir Período</button>
-                  <button class="btn btn-primary" onclick="printResults(false)" style="padding: 0.5rem 1rem;">🖨️ Imprimir Tudo</button>
-                </div>
-              </div>
-              <div id="localizarTableContainer"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Listagem de Estoque Module -->
-        <div id="module-listagem-estoque" class="module-container">
-          <div class="content-card">
-            <h2>📋 Listagem de Estoque</h2>
-            <div id="listagemMessage" class="message"></div>
-
-            <!-- Opção 1: Busca por Grupo -->
-            <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-              <h3 style="margin: 0 0 10px 0; font-size: 1rem; color: #1565c0;">📁 Buscar por Grupo</h3>
-              <p style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">Mostra o último lançamento de cada item do grupo selecionado</p>
-              <div class="form-group" style="margin-bottom: 10px;">
-                <label for="listagemGroup">Selecione o Grupo</label>
-                <select id="listagemGroup" style="width: 100%; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
-                  <option value="">-- Selecione um grupo --</option>
-                </select>
-              </div>
-              <button type="button" class="btn btn-primary" onclick="handleBuscaPorGrupo()">📊 Buscar Itens do Grupo</button>
-            </div>
-
-            <!-- Opção 2: Busca por Lista de Itens -->
-            <div style="background: #e8f5e9; padding: 15px; border-radius: 8px;">
-              <h3 style="margin: 0 0 10px 0; font-size: 1rem; color: #2e7d32;">📝 Buscar Lista de Itens</h3>
-              <p style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">Selecione os itens que deseja buscar (use autocomplete)</p>
-
-              <div id="listagemItensContainer">
-                <!-- Primeiro item (sempre visível) -->
-                <div class="listagem-item-row" style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center;">
-                  <input type="text" class="listagem-item-input" list="listagemItemDatalist" placeholder="Digite o nome do item..." style="flex: 1; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
-                  <button type="button" class="btn-remove-item" onclick="removerItemListagem(this)" style="background: #f44336; color: white; border: none; border-radius: 4px; width: 36px; height: 36px; cursor: pointer; font-size: 1.2rem;" title="Remover item">×</button>
-                </div>
-              </div>
-              <datalist id="listagemItemDatalist"></datalist>
-
-              <div style="display: flex; gap: 10px; margin-top: 10px;">
-                <button type="button" class="btn btn-secondary" onclick="adicionarItemListagem()" style="background: #607d8b; flex: 1;">➕ Adicionar Mais Item</button>
-                <button type="button" class="btn btn-success" onclick="handleBuscaPorListaItens()" style="flex: 1;">🔍 Buscar Itens</button>
-              </div>
-            </div>
-
-            <div id="listagemResults" class="table-container" style="display: none; margin-top: 20px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <h3 style="margin: 0;">Resultado (<span id="listagemTotal">0</span> itens)</h3>
-                <button class="btn btn-primary" onclick="printListagem()" style="padding: 0.5rem 1rem;">🖨️ Imprimir</button>
-              </div>
-              <div id="listagemTableContainer"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Gerar Relatório Module -->
-        <div id="module-relatorio-estoque" class="module-container">
-          <div class="content-card">
-            <h2>📊 Gerar Relatório</h2>
-            <div id="relatorioMessage" class="message"></div>
-            <form id="relatorioForm" onsubmit="return handleRelatorioEstoque(event)">
-              <div class="form-group">
-                <label for="relatorioDataInicio">Data Início *</label>
-                <input type="date" id="relatorioDataInicio" required>
-              </div>
-              <div class="form-group">
-                <label for="relatorioDataFim">Data Fim *</label>
-                <input type="date" id="relatorioDataFim" required>
-              </div>
-              <div class="btn-group">
-                <button type="submit" class="btn btn-primary">📊 Gerar Relatório</button>
-              </div>
-            </form>
-            <div id="relatorioResults" class="table-container" style="display: none;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <h3 style="margin: 0;">Relatório de Estoque - <span id="relatorioTotal">0</span> lançamentos</h3>
-                <button class="btn btn-primary" onclick="printRelatorio()" style="padding: 0.5rem 1rem;">🖨️ Imprimir</button>
-              </div>
-              <div id="relatorioTableContainer"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Consumo em 3 Meses Module -->
-        <div id="module-estoque-3-meses" class="module-container">
-          <div class="content-card">
-            <h2>📦 Consumo em 3 Meses</h2>
-            <p style="font-size: 0.9rem; color: #666; margin-bottom: 15px;">Calcula o total de saídas de cada item nos últimos 3 meses</p>
-            <div id="estoque3MesesMessage" class="message"></div>
-
-            <div style="background: #fff3e0; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-              <h3 style="margin: 0 0 10px 0; font-size: 1rem; color: #e65100;">📝 Selecione os Itens</h3>
-              <div id="estoque3MesesItensContainer">
-                <div class="estoque3m-item-row" style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center;">
-                  <input type="text" class="estoque3m-item-input" list="estoque3MesesItemDatalist" placeholder="Digite o nome do item..." style="flex: 1; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
-                  <button type="button" onclick="removerItemEstoque3M(this)" style="background: #f44336; color: white; border: none; border-radius: 4px; width: 36px; height: 36px; cursor: pointer; font-size: 1.2rem;" title="Remover item">×</button>
-                </div>
-              </div>
-              <datalist id="estoque3MesesItemDatalist"></datalist>
-
-              <div style="display: flex; gap: 10px; margin-top: 10px;">
-                <button type="button" class="btn btn-secondary" onclick="adicionarItemEstoque3M()" style="background: #607d8b; flex: 1;">➕ Adicionar Mais Item</button>
-                <button type="button" class="btn btn-primary" onclick="handleEstoque3Meses()" style="flex: 1;">📊 Calcular Saídas</button>
-              </div>
-            </div>
-
-            <div id="estoque3MesesResults" class="table-container" style="display: none;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <h3 style="margin: 0;">Total de Saídas (Últimos 3 Meses) - <span id="estoque3MesesTotal">0</span> itens</h3>
-                <button class="btn btn-primary" onclick="printEstoque3Meses()" style="padding: 0.5rem 1rem;">🖨️ Imprimir</button>
-              </div>
-              <div id="estoque3MesesTableContainer"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Cores Desatualizadas Module -->
-        <div id="module-cores-desatualizadas" class="module-container">
-          <div class="content-card">
-            <h2>🎨 Cores Desatualizadas</h2>
-            <p style="font-size: 0.9rem; color: #666; margin-bottom: 15px;">Lista itens sem lançamento há mais de 15 dias e sem "ATUALIZAÇÃO" na observação</p>
-            <div id="coresMessage" class="message"></div>
-            <div class="btn-group">
-              <button class="btn btn-primary" onclick="handleCoresDesatualizadas()">🔍 Buscar Cores Desatualizadas</button>
-            </div>
-            <div id="coresResults" class="table-container" style="display: none;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <h3 style="margin: 0;">Cores Desatualizadas - <span id="coresTotal">0</span> itens</h3>
-                <button class="btn btn-primary" onclick="printCores()" style="padding: 0.5rem 1rem;">🖨️ Imprimir</button>
-              </div>
-              <div id="coresTableContainer"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Apagar Última Linha Module -->
-        <div id="module-apagar-linha" class="module-container">
-          <div class="content-card">
-            <h2>🗑️ Apagar Última Linha</h2>
-            <p style="font-size: 0.9rem; color: #666; margin-bottom: 15px;">Visualize as últimas entradas e corrija lançamentos errados</p>
-            <div id="apagarLinhaMessage" class="message"></div>
-
-            <div class="btn-group" style="margin-bottom: 15px;">
-              <button class="btn btn-primary" onclick="carregarUltimasEntradas()">🔄 Carregar Últimas 20 Entradas</button>
-            </div>
-
-            <div id="ultimasEntradasArea" style="display: none;">
-              <div style="background: #ffebee; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                <p style="color: #c62828; font-weight: bold; margin: 0 0 10px 0;">⚠️ A última entrada será apagada. Esta ação não pode ser desfeita!</p>
-                <div id="ultimaEntradaInfo" style="background: white; padding: 10px; border-radius: 4px; margin-bottom: 10px; font-size: 0.9rem;"></div>
-                <button class="btn btn-danger" onclick="confirmarApagarLinha()" style="width: 100%;">🗑️ CONFIRMAR EXCLUSÃO DA ÚLTIMA ENTRADA</button>
-              </div>
-
-              <h3>Últimas 20 Entradas</h3>
-              <div id="ultimasEntradasTableContainer"></div>
-            </div>
-          </div>
-        </div>
-
-      </main>
-    </div>
-  </div>
-
-  <script>
-    // Global variables
-    let currentUser = null;
-    let autocompleteData = null;
-    let allEstoqueData = null; // Armazena TODOS os dados do estoque para filtros instantâneos
-    let estoqueHeaders = null;
-
-    // ========================================
-    // INDEXEDDB - Banco de dados local para acesso instantâneo
-    // ========================================
-    const DB_CONFIG = {
-      name: 'EstoqueDB',
-      version: 1,
-      storeName: 'registros',
-      syncInterval: 10000, // 10 segundos
-      metaStore: 'meta'
+    return {
+      items: Array.from(new Set(items)),
+      groups: Array.from(new Set(groups)),
+      nfs: Array.from(new Set(nfs)),
+      medidas: getMedidasList(),
+      observacoes: getObservacoesList()
     };
+  }, 120); // 2 minutos
+}
 
-    let db = null;
-    let syncTimer = null;
+/**
+ * getLastRegistration: Retorna o último registro de um item (data, estoque e grupo).
+ * OTIMIZADO: Lê apenas as últimas 2000 linhas da planilha ESTOQUE
+ */
+function getLastRegistration(item, currentRow) {
+  Logger.log("=== getLastRegistration INICIADO ===");
+  Logger.log("Item buscado: '" + item + "'");
+  Logger.log("CurrentRow: " + currentRow);
 
-    /**
-     * Inicializa o IndexedDB
-     */
-    function initIndexedDB() {
-      return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_CONFIG.name, DB_CONFIG.version);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) {
+    Logger.log("ERRO: Aba ESTOQUE não encontrada!");
+    return { lastDate: null, lastStock: 0, lastGroup: null };
+  }
 
-        request.onerror = () => {
-          console.error('Erro ao abrir IndexedDB:', request.error);
-          reject(request.error);
-        };
+  var lastRow = sheetEstoque.getLastRow();
+  Logger.log("Última linha da planilha: " + lastRow);
+  if (lastRow < 2) {
+    Logger.log("Planilha vazia - sem dados");
+    return { lastDate: null, lastStock: 0, lastGroup: null };
+  }
 
-        request.onsuccess = () => {
-          db = request.result;
-          console.log('IndexedDB inicializado');
-          resolve(db);
-        };
+  // Lê TODA a planilha como TEXTO (getDisplayValues) para evitar problemas de formato
+  var startRow = 2;
+  var numRows = lastRow - startRow + 1;
+  Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow + " (" + numRows + " linhas)");
 
-        request.onupgradeneeded = (event) => {
-          const database = event.target.result;
+  // USA getDisplayValues() para forçar conversão para texto
+  // Lê 10 colunas (A-J) para incluir o Saldo que está na coluna J
+  var data = sheetEstoque.getRange(startRow, 1, numRows, 10).getDisplayValues();
+  Logger.log("Usando getDisplayValues() para forçar formato de TEXTO");
 
-          // Store principal: registros de estoque
-          if (!database.objectStoreNames.contains(DB_CONFIG.storeName)) {
-            const store = database.createObjectStore(DB_CONFIG.storeName, { keyPath: 'id', autoIncrement: true });
-            store.createIndex('item', 'item', { unique: false });
-            store.createIndex('date', 'date', { unique: false });
-            store.createIndex('itemDate', ['item', 'date'], { unique: false });
-          }
+  var result = { lastDate: null, lastStock: 0, lastGroup: null };
+  var itemUpper = item.toString().trim().toUpperCase();
+  Logger.log("Item buscado (maiúsculas): '" + itemUpper + "'");
 
-          // Store de metadados (última sincronização, etc)
-          if (!database.objectStoreNames.contains(DB_CONFIG.metaStore)) {
-            database.createObjectStore(DB_CONFIG.metaStore, { keyPath: 'key' });
-          }
+  var encontrados = 0;
+  for (var i = data.length - 1; i >= 0; i--) {
+    var rowNum = startRow + i;
+    if (rowNum >= currentRow) continue;
 
-          console.log('IndexedDB estrutura criada');
-        };
-      });
-    }
+    var currentItem = data[i][1]; // Coluna B (Item) - agora em formato TEXTO
+    if (currentItem && currentItem.toString().trim() !== "") {
+      var currentItemUpper = currentItem.toString().trim().toUpperCase();
 
-    /**
-     * Salva registros no IndexedDB
-     */
-    async function saveToIndexedDB(records) {
-      if (!db) return;
-
-      return new Promise((resolve, reject) => {
-        const transaction = db.transaction([DB_CONFIG.storeName], 'readwrite');
-        const store = transaction.objectStore(DB_CONFIG.storeName);
-
-        records.forEach(record => {
-          store.put(record);
-        });
-
-        transaction.oncomplete = () => {
-          console.log('IndexedDB: ' + records.length + ' registros salvos');
-          resolve();
-        };
-
-        transaction.onerror = () => {
-          console.error('Erro ao salvar no IndexedDB:', transaction.error);
-          reject(transaction.error);
-        };
-      });
-    }
-
-    /**
-     * Limpa e recarrega todos os dados no IndexedDB
-     */
-    async function reloadIndexedDB(serverData) {
-      if (!db) return;
-
-      return new Promise((resolve, reject) => {
-        const transaction = db.transaction([DB_CONFIG.storeName, DB_CONFIG.metaStore], 'readwrite');
-        const store = transaction.objectStore(DB_CONFIG.storeName);
-        const metaStore = transaction.objectStore(DB_CONFIG.metaStore);
-
-        // Limpa dados antigos
-        store.clear();
-
-        // Adiciona novos dados
-        serverData.forEach((record, index) => {
-          store.put({
-            id: index + 1,
-            row: record.row,
-            item: record.row[1] ? record.row[1].toString().trim().toLowerCase() : '',
-            date: record.date,
-            background: record.background
-          });
-        });
-
-        // Salva timestamp da última sincronização
-        metaStore.put({ key: 'lastSync', value: Date.now() });
-        metaStore.put({ key: 'recordCount', value: serverData.length });
-
-        transaction.oncomplete = () => {
-          console.log('IndexedDB recarregado: ' + serverData.length + ' registros');
-          resolve();
-        };
-
-        transaction.onerror = () => reject(transaction.error);
-      });
-    }
-
-    /**
-     * Busca registros de um item no IndexedDB (INSTANTÂNEO!)
-     */
-    async function getFromIndexedDB(itemName, limit) {
-      if (!db) return null;
-
-      limit = limit || 20;
-      const itemKey = itemName ? itemName.toString().trim().toLowerCase() : '';
-
-      return new Promise((resolve, reject) => {
-        const transaction = db.transaction([DB_CONFIG.storeName], 'readonly');
-        const store = transaction.objectStore(DB_CONFIG.storeName);
-        const index = store.index('item');
-        const results = [];
-
-        const request = index.openCursor(IDBKeyRange.only(itemKey));
-
-        request.onsuccess = (event) => {
-          const cursor = event.target.result;
-          if (cursor) {
-            results.push(cursor.value);
-            cursor.continue();
-          } else {
-            // Ordena por data (mais novo primeiro) e limita
-            results.sort((a, b) => b.date - a.date);
-            resolve(results.slice(0, limit));
-          }
-        };
-
-        request.onerror = () => reject(request.error);
-      });
-    }
-
-    /**
-     * Busca todos os registros do IndexedDB
-     */
-    async function getAllFromIndexedDB() {
-      if (!db) return [];
-
-      return new Promise((resolve, reject) => {
-        const transaction = db.transaction([DB_CONFIG.storeName], 'readonly');
-        const store = transaction.objectStore(DB_CONFIG.storeName);
-        const request = store.getAll();
-
-        request.onsuccess = () => resolve(request.result || []);
-        request.onerror = () => reject(request.error);
-      });
-    }
-
-    /**
-     * Obtém timestamp da última sincronização
-     */
-    async function getLastSyncTime() {
-      if (!db) return 0;
-
-      return new Promise((resolve) => {
-        const transaction = db.transaction([DB_CONFIG.metaStore], 'readonly');
-        const store = transaction.objectStore(DB_CONFIG.metaStore);
-        const request = store.get('lastSync');
-
-        request.onsuccess = () => resolve(request.result ? request.result.value : 0);
-        request.onerror = () => resolve(0);
-      });
-    }
-
-    /**
-     * Sincronização inicial - carrega TODOS os dados do servidor (PAGINADO)
-     * Carrega 2000 registros por vez até completar todos os dados
-     */
-    async function initialSync() {
-      console.log('Sincronização inicial (paginada)...');
-
-      let totalRecords = 0;
-      let currentPage = 0;
-      let totalPages = 1;
-      let totalRows = 0;
-
-      // Limpa IndexedDB antes de carregar tudo
-      if (db) {
-        try {
-          const transaction = db.transaction([DB_CONFIG.storeName], 'readwrite');
-          transaction.objectStore(DB_CONFIG.storeName).clear();
-        } catch (e) {
-          console.log('Erro ao limpar IndexedDB:', e);
-        }
-      }
-
-      // Carrega página por página
-      while (currentPage < totalPages) {
-        showSyncStatus('Carregando ' + (currentPage + 1) + '/' + totalPages + '...', 'info');
-
-        try {
-          const result = await loadSyncPage(currentPage);
-
-          if (result && result.success) {
-            totalPages = result.totalPages || 1;
-            totalRows = result.totalRows || 0;
-
-            if (result.data && result.data.length > 0) {
-              // Salva esta página no IndexedDB
-              await savePageToIndexedDB(result.data, currentPage);
-              totalRecords += result.data.length;
-              console.log('Página ' + (currentPage + 1) + '/' + totalPages + ': ' + result.data.length + ' registros (total: ' + totalRecords + ')');
-            }
-
-            if (result.done) {
-              break;
-            }
-
-            currentPage++;
-          } else {
-            console.error('Erro na página ' + currentPage + ':', result);
-            break;
-          }
-        } catch (e) {
-          console.error('Erro ao carregar página ' + currentPage + ':', e);
-          break;
-        }
-      }
-
-      // Salva timestamp da sincronização
-      if (db) {
-        try {
-          const metaTransaction = db.transaction([DB_CONFIG.metaStore], 'readwrite');
-          const metaStore = metaTransaction.objectStore(DB_CONFIG.metaStore);
-          metaStore.put({ key: 'lastSync', value: Date.now() });
-          metaStore.put({ key: 'recordCount', value: totalRecords });
-        } catch (e) {
-          console.log('Erro ao salvar meta:', e);
-        }
-      }
-
-      // Constrói índice em memória
-      await buildMemoryIndexFromIDB();
-
-      showSyncStatus('Sincronizado! (' + totalRecords + '/' + totalRows + ')', 'success');
-      setTimeout(() => hideSyncStatus(), 3000);
-
-      console.log('Sincronização completa: ' + totalRecords + ' registros carregados');
-    }
-
-    /**
-     * Carrega uma página de dados do servidor
-     */
-    function loadSyncPage(page) {
-      return new Promise((resolve, reject) => {
-        google.script.run
-          .withSuccessHandler(resolve)
-          .withFailureHandler(reject)
-          .getAllDataForSync(page);
-      });
-    }
-
-    /**
-     * Salva uma página de dados no IndexedDB
-     * Formato compacto do servidor: [[row, timestamp], ...]
-     */
-    async function savePageToIndexedDB(records, pageNum) {
-      if (!db || !records || records.length === 0) return;
-
-      return new Promise((resolve, reject) => {
-        const transaction = db.transaction([DB_CONFIG.storeName], 'readwrite');
-        const store = transaction.objectStore(DB_CONFIG.storeName);
-
-        records.forEach((record, idx) => {
-          // Suporta formato compacto [row, timestamp] e formato antigo {row, date}
-          const row = Array.isArray(record) ? record[0] : record.row;
-          const date = Array.isArray(record) ? record[1] : record.date;
-
-          const id = (pageNum * 10000) + idx + 1;
-          store.put({
-            id: id,
-            row: row,
-            item: row[1] ? row[1].toString().trim().toLowerCase() : '',
-            date: date,
-            background: null
-          });
-        });
-
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error);
-      });
-    }
-
-    /**
-     * Sincronização incremental - busca apenas novos registros (a cada 10 segundos)
-     */
-    async function incrementalSync() {
-      if (!db) return;
-
-      const lastSync = await getLastSyncTime();
-      console.log('Sync incremental desde:', new Date(lastSync).toLocaleString());
-
-      google.script.run
-        .withSuccessHandler(async function(result) {
-          if (result && result.success && result.newRecords && result.newRecords.length > 0) {
-            console.log('Novos registros encontrados:', result.newRecords.length);
-
-            // Adiciona novos registros ao IndexedDB
-            const records = result.newRecords.map((record, idx) => ({
-              id: Date.now() + idx, // ID único
-              row: record.row,
-              item: record.row[1] ? record.row[1].toString().trim().toLowerCase() : '',
-              date: record.date,
-              background: record.background
-            }));
-
-            await saveToIndexedDB(records);
-
-            // Atualiza timestamp
-            const transaction = db.transaction([DB_CONFIG.metaStore], 'readwrite');
-            transaction.objectStore(DB_CONFIG.metaStore).put({ key: 'lastSync', value: Date.now() });
-
-            // Atualiza índice em memória
-            buildMemoryIndexFromIDB();
-
-            // Mostra indicador discreto
-            showSyncStatus('+' + result.newRecords.length + ' novos', 'success');
-            setTimeout(() => hideSyncStatus(), 1500);
-          }
-        })
-        .withFailureHandler(function(error) {
-          console.log('Erro sync incremental:', error.message);
-        })
-        .getNewRecordsSince(lastSync);
-    }
-
-    /**
-     * Inicia sincronização automática a cada 10 segundos
-     */
-    function startAutoSync() {
-      if (syncTimer) clearInterval(syncTimer);
-
-      syncTimer = setInterval(() => {
-        incrementalSync();
-      }, DB_CONFIG.syncInterval);
-
-      console.log('Auto-sync iniciado: a cada ' + (DB_CONFIG.syncInterval/1000) + ' segundos');
-    }
-
-    /**
-     * Para sincronização automática
-     */
-    function stopAutoSync() {
-      if (syncTimer) {
-        clearInterval(syncTimer);
-        syncTimer = null;
+      // CORRESPONDÊNCIA EXATA: compara strings em maiúsculas
+      if (currentItemUpper === itemUpper) {
+        encontrados++;
+        result.lastGroup = data[i][0];  // Coluna A (Grupo)
+        result.lastDate = data[i][3];   // Coluna D (Data) - como texto
+        result.lastStock = data[i][9];  // Coluna J (Saldo) - como texto
+        Logger.log("✓ ENCONTRADO na linha " + rowNum);
+        Logger.log("  Grupo: '" + result.lastGroup + "'");
+        Logger.log("  Data: " + result.lastDate);
+        Logger.log("  Estoque: " + result.lastStock);
+        Logger.log("  Item raw: '" + currentItem + "'");
+        Logger.log("  Correspondência EXATA com: '" + itemUpper + "'");
+        break;
       }
     }
+  }
 
-    /**
-     * Constrói índice em memória a partir do IndexedDB
-     */
-    async function buildMemoryIndexFromIDB() {
-      const allRecords = await getAllFromIndexedDB();
-      const index = {};
+  if (encontrados === 0) {
+    Logger.log("✗ NENHUM REGISTRO ENCONTRADO para o item '" + item + "'");
+  }
 
-      allRecords.forEach(record => {
-        const itemKey = record.item;
-        if (!itemKey) return;
+  Logger.log("=== getLastRegistration FINALIZADO ===");
+  return result;
+}
 
-        if (!index[itemKey]) {
-          index[itemKey] = {
-            info: {
-              item: record.row[1],
-              group: record.row[0],
-              lastDate: record.row[3],
-              lastStock: record.row[9],
-              unidade: record.row[2]
-            },
-            history: []
-          };
-        }
+/**
+ * hasAtualizacaoInPreviousEntries: Verifica se há alguma entrada com "ATUALIZAÇÃO"
+ * nas últimas entradas do item dentro do período especificado (últimos 20 dias antes do novo lançamento).
+ * @param {string} item - Nome do item
+ * @param {Date} startDate - Data inicial (20 dias antes do novo lançamento)
+ * @param {Date} endDate - Data final (data do último registro antes do novo lançamento)
+ * @param {number} currentRow - Linha atual para excluir da busca
+ * @return {boolean} - true se encontrou "ATUALIZAÇÃO" ou "ACERTO", false caso contrário
+ */
+function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
+  Logger.log("=== hasAtualizacaoInPreviousEntries INICIADO ===");
+  Logger.log("Item: '" + item + "'");
+  Logger.log("Data inicial: " + startDate);
+  Logger.log("Data final: " + endDate);
+  Logger.log("CurrentRow: " + currentRow);
 
-        index[itemKey].history.push({
-          row: record.row,
-          date: record.date,
-          background: record.background
-        });
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) {
+    Logger.log("ERRO: Aba ESTOQUE não encontrada!");
+    return false;
+  }
 
-        // Atualiza info se mais recente
-        if (record.date > new Date(index[itemKey].info.lastDate).getTime()) {
-          index[itemKey].info.lastDate = record.row[3];
-          index[itemKey].info.lastStock = record.row[9];
-          index[itemKey].info.group = record.row[0];
-        }
-      });
+  var lastRow = sheetEstoque.getLastRow();
+  Logger.log("Última linha da planilha: " + lastRow);
+  if (lastRow < 2) {
+    Logger.log("Planilha vazia - sem dados");
+    return false;
+  }
 
-      // Ordena histórico de cada item
-      for (const key in index) {
-        index[key].history.sort((a, b) => b.date - a.date);
-        index[key].history = index[key].history.slice(0, 20); // Mantém últimos 20
-      }
+  // Lê TODA a planilha
+  var startRow = 2;
+  var numRows = lastRow - startRow + 1;
+  Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow);
 
-      itemHistoryIndex = index;
-      console.log('Índice em memória atualizado: ' + Object.keys(index).length + ' itens');
-    }
+  // Lê 6 colunas (A-F): Grupo, Item, Unidade, Data, NF, Obs
+  var data = sheetEstoque.getRange(startRow, 1, numRows, 6).getDisplayValues();
 
-    /**
-     * Mostra status de sincronização
-     */
-    function showSyncStatus(message, type) {
-      let statusEl = document.getElementById('syncStatus');
-      if (!statusEl) {
-        statusEl = document.createElement('div');
-        statusEl.id = 'syncStatus';
-        statusEl.style.cssText = 'position:fixed;bottom:20px;right:20px;padding:8px 16px;border-radius:4px;font-size:12px;z-index:9999;transition:opacity 0.3s;';
-        document.body.appendChild(statusEl);
-      }
+  var itemUpper = item.toString().trim().toUpperCase();
+  Logger.log("Item buscado (maiúsculas): '" + itemUpper + "'");
 
-      statusEl.textContent = message;
-      statusEl.style.opacity = '1';
+  var encontrados = 0;
+  // Percorre de trás para frente (mais recentes primeiro)
+  for (var i = data.length - 1; i >= 0; i--) {
+    var rowNum = startRow + i;
 
-      if (type === 'success') {
-        statusEl.style.background = '#4CAF50';
-        statusEl.style.color = 'white';
-      } else if (type === 'error') {
-        statusEl.style.background = '#f44336';
-        statusEl.style.color = 'white';
-      } else {
-        statusEl.style.background = '#2196F3';
-        statusEl.style.color = 'white';
-      }
-    }
+    // Pula a linha atual (novo registro)
+    if (rowNum >= currentRow) continue;
 
-    function hideSyncStatus() {
-      const statusEl = document.getElementById('syncStatus');
-      if (statusEl) {
-        statusEl.style.opacity = '0';
-      }
-    }
+    var currentItem = data[i][1]; // Coluna B (Item)
+    if (!currentItem || currentItem.toString().trim() === "") continue;
 
-    // ========================================
-    // CACHE NO CLIENTE - localStorage
-    // ========================================
-    const CLIENT_CACHE = {
-      AUTOCOMPLETE_KEY: 'estoque_autocomplete',
-      HISTORY_INDEX_KEY: 'estoque_history_index',
-      AUTOCOMPLETE_TTL: 600000, // 10 minutos em ms
-      HISTORY_INDEX_TTL: 300000, // 5 minutos em ms
-      TIMESTAMP_KEY: 'estoque_cache_timestamp'
-    };
+    var currentItemUpper = currentItem.toString().trim().toUpperCase();
 
-    // Índice de histórico em memória (cache RAM para acesso instantâneo)
-    let itemHistoryIndex = null;
+    // Verifica se é o mesmo item
+    if (currentItemUpper === itemUpper) {
+      // Verifica a data do registro
+      var dataRegistroStr = data[i][3]; // Coluna D (Data)
+      if (!dataRegistroStr || dataRegistroStr === "") continue;
 
-    function getClientCache(key) {
-      try {
-        const timestamp = localStorage.getItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + key);
-        const data = localStorage.getItem(key);
+      // Converte string para Date
+      var dataRegistro = parseDateString(dataRegistroStr);
+      if (!dataRegistro) continue;
 
-        if (timestamp && data) {
-          const age = Date.now() - parseInt(timestamp);
-          if (age < CLIENT_CACHE.AUTOCOMPLETE_TTL) {
-            console.log('Cache HIT (cliente): ' + key + ' (idade: ' + Math.round(age/1000) + 's)');
-            return JSON.parse(data);
+      // Verifica se está dentro do período de 20 dias
+      if (dataRegistro >= startDate && dataRegistro <= endDate) {
+        encontrados++;
+        var obs = data[i][5]; // Coluna F (Obs)
+        Logger.log("Analisando linha " + rowNum + " - Data: " + dataRegistroStr + " - Obs: '" + obs + "'");
+
+        // Verifica se contém "ATUALIZAÇÃO" ou "ACERTO"
+        if (obs && obs.toString().trim() !== "") {
+          var obsLower = obs.toString().toLowerCase();
+          var temKeyword = /acerto|atualiz/i.test(obsLower);
+          if (temKeyword) {
+            Logger.log("✓ ENCONTRADO 'ATUALIZAÇÃO' na linha " + rowNum);
+            Logger.log("=== hasAtualizacaoInPreviousEntries FINALIZADO: true ===");
+            return true;
           }
         }
-      } catch (e) {
-        console.log('Erro ao ler cache cliente:', e);
-      }
-      return null;
-    }
-
-    function setClientCache(key, data) {
-      try {
-        localStorage.setItem(key, JSON.stringify(data));
-        localStorage.setItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + key, Date.now().toString());
-        console.log('Cache salvo (cliente): ' + key);
-      } catch (e) {
-        console.log('Erro ao salvar cache cliente:', e);
       }
     }
+  }
 
-    function clearClientCache() {
-      try {
-        localStorage.removeItem(CLIENT_CACHE.AUTOCOMPLETE_KEY);
-        localStorage.removeItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + CLIENT_CACHE.AUTOCOMPLETE_KEY);
-        localStorage.removeItem(CLIENT_CACHE.HISTORY_INDEX_KEY);
-        localStorage.removeItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + CLIENT_CACHE.HISTORY_INDEX_KEY);
-        itemHistoryIndex = null; // Limpa cache em memória também
-        console.log('Cache cliente limpo');
-      } catch (e) {
-        console.log('Erro ao limpar cache:', e);
-      }
+  Logger.log("Total de entradas analisadas no período: " + encontrados);
+  Logger.log("=== hasAtualizacaoInPreviousEntries FINALIZADO: false ===");
+  return false;
+}
+
+/**
+ * parseDateString: Converte string dd/mm/yyyy ou formato de data para objeto Date
+ */
+function parseDateString(dateStr) {
+  if (!dateStr) return null;
+
+  var str = dateStr.toString().trim();
+
+  // Se já é um formato de data completo (ex: "25/11/2025 14:30:00"), extrai apenas a parte da data
+  if (str.includes(" ")) {
+    str = str.split(" ")[0];
+  }
+
+  // Formato dd/mm/yyyy ou d/m/yyyy
+  var parts = str.split("/");
+  if (parts.length !== 3) return null;
+
+  var day = parseInt(parts[0], 10);
+  var month = parseInt(parts[1], 10) - 1; // Meses em JS são 0-11
+  var year = parseInt(parts[2], 10);
+
+  if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
+
+  return new Date(year, month, day);
+}
+
+/**
+ * getLastInfoFromDados: Retorna a última informação não vazia da coluna C da aba DADOS para um produto.
+ */
+function getLastInfoFromDados(product) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (!sheetDados) return "";
+  var lastRow = sheetDados.getLastRow();
+  if (lastRow < 2) return "";
+  var data = sheetDados.getRange(2, 1, lastRow - 1, sheetDados.getLastColumn()).getValues();
+  var lastInfo = "";
+  for (var i = 0; i < data.length; i++) {
+    if (data[i][0].toString().trim() === product && data[i][2].toString().trim() !== "") {
+      lastInfo = data[i][2];
     }
+  }
+  return lastInfo;
+}
 
-    // ========================================
-    // ÍNDICE DE HISTÓRICO - Últimos 20 registros por item
-    // ========================================
+/**
+ * showCustomDialog: Exibe um diálogo HTML customizado com uma mensagem.
+ */
+function showCustomDialog(message) {
+  var template = HtmlService.createTemplateFromFile("CustomDialog");
+  template.message = message;
+  var html = template.evaluate().setWidth(400).setHeight(200);
+  SpreadsheetApp.getUi().showModalDialog(html, "AVISO");
+}
 
-    /**
-     * Carrega o índice de histórico (cache localStorage -> cache memória -> servidor)
-     * Este índice contém os últimos 20 registros de cada item para acesso INSTANTÂNEO
-     */
-    function loadItemHistoryIndex() {
-      // 1. Tenta cache em memória (mais rápido)
-      if (itemHistoryIndex && Object.keys(itemHistoryIndex).length > 0) {
-        console.log('Índice histórico: usando cache em memória');
-        return;
-      }
+/**
+ * localizarProduto: Abre o diálogo para localizar um produto.
+ */
+function localizarProduto() {
+  var template = HtmlService.createTemplateFromFile("DialogLocalizarProduto");
+  template.produtos = JSON.stringify(getProdutosEstoque());
+  var htmlOutput = template.evaluate().setWidth(400).setHeight(300);
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, "LOCALIZAR PRODUTO");
+}
 
-      // 2. Tenta localStorage
-      try {
-        const timestamp = localStorage.getItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + CLIENT_CACHE.HISTORY_INDEX_KEY);
-        const data = localStorage.getItem(CLIENT_CACHE.HISTORY_INDEX_KEY);
+/**
+ * getProdutosEstoque: Retorna a lista única de produtos da aba ESTOQUE (Coluna B).
+ */
+function getProdutosEstoque() {
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get("produtosEstoque");
+  if (cached) {
+    return JSON.parse(cached);
+  }
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (!sheet) return [];
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var range = sheet.getRange("B2:B" + lastRow);
+  var values = range.getDisplayValues().flat();
+  var produtos = values.filter(function(v) {
+    return v.toString().trim() !== "";
+  });
+  var unique = Array.from(new Set(produtos));
+  cache.put("produtosEstoque", JSON.stringify(unique), 300);
+  return unique;
+}
 
-        if (timestamp && data) {
-          const age = Date.now() - parseInt(timestamp);
-          if (age < CLIENT_CACHE.HISTORY_INDEX_TTL) {
-            itemHistoryIndex = JSON.parse(data);
-            console.log('Índice histórico: carregado do localStorage (' + Object.keys(itemHistoryIndex).length + ' itens)');
+/**
+ * filtrarProduto: Aplica um filtro na aba ESTOQUE para exibir apenas as linhas cujo valor da coluna B seja igual ao produto.
+ */
+function filtrarProduto(produto) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (sheet.getFilter()) {
+    sheet.getFilter().remove();
+  }
+  var range = sheet.getDataRange();
+  var filter = range.createFilter();
+  var criteria = SpreadsheetApp.newFilterCriteria().whenTextEqualTo(produto).build();
+  filter.setColumnFilterCriteria(2, criteria);
+}
 
-            // Atualiza em background
-            refreshHistoryIndexInBackground();
-            return;
-          }
-        }
-      } catch (e) {
-        console.log('Erro ao ler índice do localStorage:', e);
-      }
+/**
+ * mostrarTodos: Remove o filtro, ordena a aba ESTOQUE pela data (Coluna C) e seleciona uma célula.
+ */
+function mostrarTodos() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (sheet.getFilter()) {
+    sheet.getFilter().remove();
+  }
+  var lastRow = sheet.getLastRow();
+  var lastColumn = sheet.getLastColumn();
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, lastColumn).sort({ column: 3, ascending: true });
+  }
+  setActiveNextEmptyCell();
+}
 
-      // 3. Busca do servidor
-      console.log('Índice histórico: buscando do servidor...');
-      fetchHistoryIndexFromServer();
-    }
+/**
+ * abrirDialogRelatorioEstoque: Abre o diálogo para definir a faixa de data do relatório.
+ */
+function abrirDialogRelatorioEstoque() {
+  var html = HtmlService.createTemplateFromFile("DialogRelatorioEstoque")
+      .evaluate()
+      .setWidth(400)
+      .setHeight(300);
+  SpreadsheetApp.getUi().showModalDialog(html, "RELATÓRIO DE ESTOQUE");
+}
 
-    /**
-     * Busca o índice de histórico do servidor
-     */
-    function fetchHistoryIndexFromServer() {
-      google.script.run
-        .withSuccessHandler(function(index) {
-          if (index && Object.keys(index).length > 0) {
-            itemHistoryIndex = index;
-            saveHistoryIndexToLocalStorage(index);
-            console.log('Índice histórico carregado do servidor: ' + Object.keys(index).length + ' itens');
-          }
-        })
-        .withFailureHandler(function(error) {
-          console.error('Erro ao carregar índice de histórico:', error);
-        })
-        .getItemHistoryIndex();
-    }
+/**
+ * gerarRelatorioEstoque: Gera o relatório geral para o período definido.
+ */
+function gerarRelatorioEstoque(dataInicio, dataFim) {
+  Logger.log("gerarRelatorioEstoque: Início " + dataInicio + " - Fim " + dataFim);
+  var partsInicio = dataInicio.split("/");
+  var partsFim = dataFim.split("/");
+  var startDate = new Date(partsInicio[2], partsInicio[1] - 1, partsInicio[0], 0, 0, 0);
+  var endDate = new Date(partsFim[2], partsFim[1] - 1, partsFim[0], 23, 59, 59);
 
-    /**
-     * Atualiza o índice em background (não bloqueia a UI)
-     */
-    function refreshHistoryIndexInBackground() {
-      google.script.run
-        .withSuccessHandler(function(index) {
-          if (index && Object.keys(index).length > 0) {
-            itemHistoryIndex = index;
-            saveHistoryIndexToLocalStorage(index);
-            console.log('Índice histórico atualizado em background');
-          }
-        })
-        .withFailureHandler(function(error) {
-          console.log('Falha ao atualizar índice em background:', error);
-        })
-        .getItemHistoryIndex();
-    }
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) throw new Error("A aba ESTOQUE não foi encontrada.");
 
-    /**
-     * Salva o índice no localStorage
-     */
-    function saveHistoryIndexToLocalStorage(index) {
-      try {
-        const jsonData = JSON.stringify(index);
-        // localStorage tem limite de ~5MB, verificamos se cabe
-        if (jsonData.length < 4000000) { // 4MB limite seguro
-          localStorage.setItem(CLIENT_CACHE.HISTORY_INDEX_KEY, jsonData);
-          localStorage.setItem(CLIENT_CACHE.TIMESTAMP_KEY + '_' + CLIENT_CACHE.HISTORY_INDEX_KEY, Date.now().toString());
-          console.log('Índice histórico salvo no localStorage (' + Math.round(jsonData.length/1024) + 'KB)');
-        } else {
-          console.log('Índice muito grande para localStorage, usando apenas memória');
-        }
-      } catch (e) {
-        console.log('Erro ao salvar índice no localStorage:', e);
-      }
-    }
+  var lastRow = sheetEstoque.getLastRow();
+  if (lastRow < 2) throw new Error("Não há dados na aba ESTOQUE.");
 
-    /**
-     * Busca histórico de um item no índice local (INSTANTÂNEO!)
-     * @param {string} item - Nome do item
-     * @returns {object|null} - Dados do histórico ou null se não encontrado
-     */
-    function getItemHistoryFromIndex(item) {
-      if (!item || !itemHistoryIndex) return null;
+  var lastColumn = sheetEstoque.getLastColumn();
+  var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, lastColumn);
+  var dataValues = dataRange.getValues();
+  var dataBackgrounds = dataRange.getBackgrounds();
 
-      const itemKey = item.toString().trim().toLowerCase();
-
-      // Busca exata primeiro
-      if (itemHistoryIndex[itemKey]) {
-        return itemHistoryIndex[itemKey];
-      }
-
-      // Busca parcial (para autocomplete)
-      for (const key in itemHistoryIndex) {
-        if (key.indexOf(itemKey) >= 0 || itemKey.indexOf(key) >= 0) {
-          return itemHistoryIndex[key];
-        }
-      }
-
-      return null;
-    }
-
-    /**
-     * Formata dados do índice para exibição na tabela
-     * Garante ordenação do mais novo para o mais antigo
-     */
-    function formatHistoryForDisplay(historyData, maxRecords) {
-      if (!historyData || !historyData.history) return null;
-
-      maxRecords = maxRecords || 10;
-
-      // Cria cópia e ordena por data (mais novo primeiro)
-      const sortedHistory = historyData.history.slice().sort(function(a, b) {
-        return b.date - a.date;
+  var filtered = [];
+  for (var i = 0; i < dataValues.length; i++) {
+    var dt = new Date(dataValues[i][2]);
+    if (dt >= startDate && dt <= endDate) {
+      filtered.push({
+        row: dataValues[i],
+        background: dataBackgrounds[i][0] || "#ffffff"
       });
+    }
+  }
 
-      const limitedHistory = sortedHistory.slice(0, maxRecords);
-
-      const rows = [];
-      const colors = [];
-
-      for (let i = 0; i < limitedHistory.length; i++) {
-        rows.push(limitedHistory[i].row);
-        colors.push(limitedHistory[i].background);
+  var grupos = {};
+  for (var j = 0; j < filtered.length; j++) {
+    var item = filtered[j];
+    var prod = item.row[1];
+    if (!grupos[prod]) {
+      grupos[prod] = item;
+    } else {
+      var currentDate = new Date(item.row[2]);
+      var storedDate = new Date(grupos[prod].row[2]);
+      if (currentDate > storedDate) {
+        grupos[prod] = item;
       }
+    }
+  }
 
-      return {
-        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
-        rows: rows,
-        colors: colors
+  var reportData = [];
+  var reportBackgrounds = [];
+  for (var prod in grupos) {
+    var item = grupos[prod];
+    var row = item.row;
+    var bg = item.background.toLowerCase();
+
+    // Determina o motivo baseado na cor
+    var motivo = "";
+    if (bg.indexOf("yellow") >= 0 || bg === "#ffff00" || bg === "#ffff") {
+      motivo = "⚠️ ENTRADA - Atualizar estoque";
+    } else if (bg.indexOf("red") >= 0 || bg === "#ff0000" || bg.indexOf("#f00") >= 0) {
+      motivo = "🔴 DESATUALIZADO (+20 dias)";
+    } else {
+      motivo = "OK";
+    }
+
+    reportData.push([prod, row[8], row[4], row[2], motivo]);
+    reportBackgrounds.push(item.background);
+  }
+
+  reportData.sort(function(a, b) {
+    return new Date(a[3]) - new Date(b[3]);
+  });
+
+  var sheetRelatorio = ss.getSheetByName("RELATORIO");
+  if (!sheetRelatorio) {
+    sheetRelatorio = ss.insertSheet("RELATORIO");
+    sheetRelatorio.getRange("J1").setValue(0);
+  }
+  var threshold = parseFloat(sheetRelatorio.getRange("J1").getValue());
+  if (isNaN(threshold)) {
+    threshold = 0;
+  }
+
+  for (var k = 0; k < reportData.length; k++) {
+    var novoSaldo = parseFloat(reportData[k][1]);
+    if (novoSaldo < threshold) {
+      reportData[k].push("URGENTE");
+    } else {
+      reportData[k].push("ESTOQUE");
+    }
+  }
+
+  sheetRelatorio.clearContents();
+  sheetRelatorio.getRange("J1").setValue(threshold);
+  sheetRelatorio.getRange(1, 1, 1, 6).setValues([["PRODUTO", "NOVO SALDO", "OBS", "DATA/HORA", "MOTIVO", "STATUS"]]);
+  if (reportData.length > 0) {
+    var reportRange = sheetRelatorio.getRange(2, 1, reportData.length, 6);
+    reportRange.setValues(reportData);
+
+    // Aplica as cores de fundo nas linhas do relatório
+    for (var m = 0; m < reportBackgrounds.length; m++) {
+      var bgColor = reportBackgrounds[m];
+      if (bgColor && bgColor !== "#ffffff" && bgColor !== "white") {
+        sheetRelatorio.getRange(m + 2, 1, 1, 6).setBackground(bgColor);
+      }
+    }
+  }
+
+  var relFilter = sheetRelatorio.getFilter();
+  if (relFilter) {
+    relFilter.remove();
+  }
+  sheetRelatorio.getRange(1, 1, sheetRelatorio.getLastRow(), 6).createFilter();
+
+  Logger.log("gerarRelatorioEstoque: Relatório gerado com " + reportData.length + " registros.");
+  return "Relatório gerado com sucesso!";
+}
+
+/**
+ * abrirDialogRelatorioPorGrupo: Abre o diálogo para definir o grupo do relatório.
+ */
+function abrirDialogRelatorioPorGrupo() {
+  var template = HtmlService.createTemplateFromFile("DialogRelatorioPorGrupo");
+  template.grupos = JSON.stringify(getGruposEstoque());
+  var htmlOutput = template.evaluate().setWidth(400).setHeight(300);
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, "RELATÓRIO POR GRUPO");
+}
+
+/**
+ * getGruposEstoque: Retorna os grupos únicos da aba ESTOQUE (Coluna A).
+ */
+function getGruposEstoque() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (!sheet) return [];
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var values = sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat();
+  var grupos = values.filter(function(v) {
+    return v.toString().trim() !== "";
+  });
+  return Array.from(new Set(grupos));
+}
+
+/**
+ * gerarRelatorioPorGrupo: Gera o relatório para um grupo específico.
+ */
+function gerarRelatorioPorGrupo(grupoSelecionado) {
+  Logger.log("gerarRelatorioPorGrupo: Grupo selecionado: " + grupoSelecionado);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) throw new Error("A aba ESTOQUE não foi encontrada.");
+  
+  var lastRow = sheetEstoque.getLastRow();
+  if (lastRow < 2) throw new Error("Não há dados na aba ESTOQUE.");
+  
+  var lastColumn = sheetEstoque.getLastColumn();
+  var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, lastColumn);
+  var dataValues = dataRange.getValues();
+  
+  var filtered = dataValues.filter(function(row) {
+    return row[0].toString().trim() === grupoSelecionado;
+  });
+  
+  var gruposItens = {};
+  filtered.forEach(function(row) {
+    var item = row[1];
+    if (!gruposItens[item]) {
+      gruposItens[item] = row;
+    } else {
+      var currentDate = new Date(row[2]);
+      var storedDate = new Date(gruposItens[item][2]);
+      if (currentDate > storedDate) {
+        gruposItens[item] = row;
+      }
+    }
+  });
+  
+  var reportData = [];
+  for (var item in gruposItens) {
+    var row = gruposItens[item];
+    reportData.push([row[0], row[1], row[8], row[2]]);
+  }
+  
+  reportData.sort(function(a, b) {
+    return new Date(a[3]) - new Date(b[3]);
+  });
+  
+  var sheetRelatorio = ss.getSheetByName("RELATORIO POR GRUPO DE ITEM");
+  if (!sheetRelatorio) {
+    sheetRelatorio = ss.insertSheet("RELATORIO POR GRUPO DE ITEM");
+  }
+  sheetRelatorio.clearContents();
+  sheetRelatorio.getRange(1, 1, 1, 4).setValues([["GRUPO", "ITEM", "NOVO SALDO", "DATA/HORA"]]);
+  if (reportData.length > 0) {
+    sheetRelatorio.getRange(2, 1, reportData.length, 4).setValues(reportData);
+  }
+  
+  Logger.log("gerarRelatorioPorGrupo: Relatório gerado com " + reportData.length + " registros.");
+  return "Relatório por grupo gerado com sucesso!";
+}
+
+/**
+ * showListagemEstoqueSidebar: Abre a sidebar para a listagem de estoque.
+ */
+function showListagemEstoqueSidebar() {
+  var template = HtmlService.createTemplateFromFile('DialogListagemEstoque');
+  template.produtos = JSON.stringify(getProdutosEstoque());
+  var html = template.evaluate()
+    .setTitle('Listagem de Estoque')
+    .setWidth(350);
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+/**
+ * gerarListagemEstoque: Processa os itens da sidebar e gera/atualiza a aba "LISTAGEM DE ESTOQUE".
+ */
+function gerarListagemEstoque(formData) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // 1) coleta até 20 itens
+  var items = [];
+  for (var i = 1; i <= 20; i++) {
+    var v = formData['item' + i];
+    if (v) items.push(v.toString().trim().toLowerCase());
+  }
+  if (items.length === 0) throw new Error("⚠️ Informe pelo menos um item.");
+
+  // 2) lê dados da aba ESTOQUE - OTIMIZADO: lê apenas colunas necessárias
+  var sheetEst = ss.getSheetByName('ESTOQUE');
+  var lastRow = sheetEst.getLastRow();
+  if (lastRow < 2) throw new Error("Não há dados na aba ESTOQUE.");
+  // Lê apenas colunas B (item), C (data), I (novo saldo)
+  var dados = sheetEst.getRange(2, 1, lastRow - 1, 9).getValues();
+
+  // 3) OTIMIZADO: Cria índice de últimos registros (1 passada em vez de N*M)
+  var itemIndex = {};
+  for (var j = dados.length - 1; j >= 0; j--) {
+    var prod = dados[j][1] ? dados[j][1].toString().trim().toLowerCase() : '';
+    if (prod && !itemIndex[prod]) {
+      itemIndex[prod] = {
+        saldo: dados[j][8],
+        data: dados[j][2]
       };
     }
+  }
 
-    // Initialize app
-    window.onload = function() {
-      // Check if user is already logged in (for development)
-      // In production, this would check a session
-    };
+  // 4) monta listagem (item, último saldo e data)
+  var listagemData = items.map(function(item) {
+    var key = item.toLowerCase();
+    var registro = itemIndex[key];
+    if (registro) {
+      return [item, registro.saldo, registro.data];
+    }
+    return [item, '', ''];
+  });
 
-    // Login handler
-    function handleLogin(event) {
-      event.preventDefault();
-      const username = document.getElementById('loginUser').value;
-      const password = document.getElementById('loginPassword').value;
+  // 4) grava na aba LISTAGEM DE ESTOQUE
+  var sheetL = ss.getSheetByName('LISTAGEM DE ESTOQUE')
+             || ss.insertSheet('LISTAGEM DE ESTOQUE');
 
-      showLoading('Autenticando...');
+  // remove filtro antigo, se houver
+  if (sheetL.getFilter()) sheetL.getFilter().remove();
+  sheetL.clearContents();
 
-      google.script.run
-        .withSuccessHandler(async function(result) {
-          hideLoading();
-          if (result.success) {
-            currentUser = result.user;
-            document.getElementById('userName').textContent = currentUser;
-            document.getElementById('loginScreen').style.display = 'none';
-            document.getElementById('mainApp').style.display = 'block';
+  // escreve cabeçalho e dados
+  sheetL.getRange(1, 1, 1, 3)
+        .setValues([['ITEM','ÚLTIMO SALDO','DATA/HORA']]);
+  if (listagemData.length) {
+    sheetL.getRange(2, 1, listagemData.length, 3)
+          .setValues(listagemData);
+  }
+  sheetL.getRange(1, 1, sheetL.getLastRow(), 3).createFilter();
 
-            // Carrega dados básicos
-            loadDashboardData();
-            loadAutocompleteData();
+  // 5) monta e retorna o HTML para a sidebar, com data formatada
+  var tz = Session.getScriptTimeZone();
+  var html = '<table style="width:100%;border-collapse:collapse;">'
+           + '<tr><th>ITEM</th><th>ÚLTIMO SALDO</th><th>DATA</th></tr>';
+  listagemData.forEach(function(r) {
+    // formata só a data como dd/MM/yyyy
+    var dataStr = '';
+    if (r[2] instanceof Date) {
+      dataStr = Utilities.formatDate(r[2], tz, 'dd/MM/yyyy');
+    } else {
+      dataStr = r[2] || '';
+    }
+    html += '<tr>'
+         +   '<td>'+r[0]+'</td>'
+         +   '<td>'+r[1]+'</td>'
+         +   '<td>'+dataStr+'</td>'
+         + '</tr>';
+  });
+  html += '</table>';
+  return html;
+}
 
-            // Carrega índice de histórico (últimos 20 registros por item)
-            // O índice usa cache do servidor (5 min) + cache localStorage
-            loadItemHistoryIndex();
-          } else {
-            showMessage('loginMessage', result.message || 'Login falhou', 'error');
-          }
-        })
-        .withFailureHandler(function(error) {
-          hideLoading();
-          showMessage('loginMessage', 'Erro ao fazer login: ' + error.message, 'error');
-        })
-        .loginUser(username, password);
+/**
+ * testarCadastro: Função de teste para simular um cadastro.
+ */
+function testarCadastro() {
+  processEstoque({
+    group: "Grupo Teste",
+    item: "Produto Teste",
+    nf: "NF123",
+    obs: "Observação Teste",
+    entrada: 10,
+    saida: 3
+  });
+  Logger.log("testarCadastro: Cadastro de teste executado.");
+}
 
-      return false;
+/**
+ * processEstoque: Processa os dados do cadastro inserido via formulário.
+ */
+/**
+ * processEstoque: Processa os dados do cadastro inserido via formulário.
+ * Atualizado para não pintar de vermelho se a coluna E conter 'ACERTO' ou 'ATUALIZAÇÃO' (variações).
+ */
+function processEstoque(formData) {
+  Logger.log("processEstoque: Dados inseridos: " + JSON.stringify(formData));
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  var now = new Date();
+  var nextRow = sheetEstoque.getLastRow() + 1;
+
+  PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
+
+  // Recupera o usuário que está fazendo a ação
+  var usuario = getLoggedUser();
+  Logger.log("processEstoque: Usuário identificado: " + usuario + " | Item: " + formData.item);
+
+  // Recupera último registro para cálculo de saldo e data
+  var lastReg = getLastRegistration(formData.item, nextRow);
+  var previousSaldo = parseFloat(lastReg.lastStock) || 0;
+  var newSaldo = previousSaldo + parseFloat(formData.entrada) - parseFloat(formData.saida);
+  var rowData = [
+    formData.group,
+    formData.item,
+    now,
+    formData.nf,
+    formData.obs,
+    previousSaldo,
+    formData.entrada,
+    formData.saida,
+    newSaldo,
+    now,
+    usuario
+  ];
+  
+  try {
+    sheetEstoque.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
+    Logger.log("processEstoque: Dados inseridos na linha " + nextRow);
+
+    // Registra auditoria
+    var detalhesAuditoria = "E:" + formData.entrada + " | S:" + formData.saida + " | Saldo:" + newSaldo + " | NF:" + formData.nf;
+    registrarAuditoria("Inserir Estoque", formData.item, detalhesAuditoria);
+  } catch (err) {
+    Logger.log("processEstoque: Erro ao inserir dados: " + err);
+    showCustomDialog("Erro ao inserir os dados. Por favor, contate o administrador.");
+    PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
+    return;
+  }
+
+  PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
+  backupEstoqueData();
+
+  // Variável para controlar o tipo de aviso
+  var avisoTipo = null;
+  var avisoMensagem = "";
+
+  // Verifica se passou mais de 20 dias desde a última data de registro
+  if (lastReg.lastDate) {
+    // CORREÇÃO: Usa parseDateString para converter corretamente datas em formato brasileiro
+    var lastDate = parseDateString(lastReg.lastDate);
+
+    // Se a conversão falhar, tenta criar um Date object direto
+    if (!lastDate || isNaN(lastDate.getTime())) {
+      Logger.log("processEstoque: AVISO - Conversão de data falhou, tentando new Date()");
+      lastDate = new Date(lastReg.lastDate);
     }
 
-    // Logout handler
-    function handleLogout() {
-      if (confirm('Deseja realmente sair?')) {
-        stopAutoSync(); // Para sincronização automática
-        google.script.run
-          .withSuccessHandler(function() {
-            location.reload();
-          })
-          .logoutUser();
-      }
-    }
+    var diffDays = (now.getTime() - lastDate.getTime()) / (1000 * 3600 * 24);
+    Logger.log("processEstoque: Diferença de dias desde último registro: " + diffDays + " dias");
 
-    // Show message
-    function showMessage(elementId, message, type) {
-      const msgElement = document.getElementById(elementId);
-      if (!msgElement) {
-        console.warn('Elemento de mensagem não encontrado:', elementId);
-        return;
-      }
-      msgElement.textContent = message;
-      msgElement.className = 'message ' + type + ' show';
-      setTimeout(() => msgElement.classList.remove('show'), 5000);
-    }
+    if (diffDays > 20) {
+      // NOVA LÓGICA: Verifica se ALGUMA entrada ANTERIOR nos últimos 20 dias contém "ATUALIZAÇÃO"
+      // Calcula a data inicial (20 dias antes do novo lançamento)
+      var startDate = new Date(now.getTime() - (20 * 24 * 60 * 60 * 1000));
 
-    // Hide message
-    function hideMessage(elementId) {
-      const msgElement = document.getElementById(elementId);
-      if (!msgElement) {
-        console.warn('Elemento de mensagem não encontrado:', elementId);
-        return;
-      }
-      msgElement.textContent = '';
-      msgElement.className = 'message';
-    }
+      Logger.log("processEstoque: Verificando entradas anteriores entre " + startDate + " e " + now);
 
-    // Show loading overlay
-    function showLoading(message = 'Processando...', itemNome = null) {
-      const overlay = document.getElementById('loadingOverlay');
-      const loadingText = document.getElementById('loadingText');
-      const ultimosLancamentosSection = document.getElementById('ultimosLancamentos');
+      // Busca por "ATUALIZAÇÃO" nas entradas ANTERIORES dentro do período de 20 dias
+      var temAtualizacaoAnterior = hasAtualizacaoInPreviousEntries(formData.item, startDate, now, nextRow);
+      Logger.log("processEstoque: Encontrou 'ATUALIZAÇÃO' em entradas anteriores? " + temAtualizacaoAnterior);
 
-      if (overlay && loadingText) {
-        loadingText.textContent = message;
-        overlay.classList.add('show');
-        // Disable scrolling
-        document.body.style.overflow = 'hidden';
-
-        // Se houver um item especificado, carrega e mostra os lançamentos desse item
-        if (itemNome && itemNome.trim() !== '') {
-          if (ultimosLancamentosSection) {
-            ultimosLancamentosSection.style.display = 'block';
-          }
-          carregarUltimosLancamentos(itemNome);
-        } else {
-          // Sem item, oculta a seção de lançamentos
-          if (ultimosLancamentosSection) {
-            ultimosLancamentosSection.style.display = 'none';
-          }
-        }
-      }
-    }
-
-    // Carrega e exibe os últimos 20 lançamentos de um item específico
-    function carregarUltimosLancamentos(itemNome) {
-      const lancamentosList = document.getElementById('lancamentosList');
-      if (!lancamentosList) return;
-
-      // Mostra loading
-      lancamentosList.innerHTML = '<div class="loading-lancamentos">Carregando lançamentos...</div>';
-
-      // Busca os lançamentos do servidor
-      google.script.run
-        .withSuccessHandler(function(lancamentos) {
-          if (!lancamentos || lancamentos.length === 0) {
-            lancamentosList.innerHTML = '<div class="loading-lancamentos">Nenhum lançamento anterior encontrado para este item</div>';
-            return;
-          }
-
-          // Renderiza os lançamentos
-          let html = '';
-          for (let i = 0; i < lancamentos.length; i++) {
-            const lanc = lancamentos[i];
-
-            // Formata entrada/saída
-            const entradaHtml = parseFloat(lanc.entrada) > 0
-              ? `<span class="lancamento-detail lancamento-entrada">↑ ${lanc.entrada}</span>`
-              : '';
-            const saidaHtml = parseFloat(lanc.saida) > 0
-              ? `<span class="lancamento-detail lancamento-saida">↓ ${lanc.saida}</span>`
-              : '';
-
-            html += `
-              <div class="lancamento-item">
-                <div class="lancamento-header">
-                  <div class="lancamento-item-nome">${lanc.item}</div>
-                  <div class="lancamento-data">${lanc.data}</div>
-                </div>
-                <div class="lancamento-details">
-                  <span class="lancamento-detail"><strong>Grupo:</strong> ${lanc.grupo}</span>
-                  ${entradaHtml}
-                  ${saidaHtml}
-                  <span class="lancamento-detail lancamento-saldo"><strong>Saldo:</strong> ${lanc.saldo}</span>
-                  ${lanc.nf ? `<span class="lancamento-detail"><strong>NF:</strong> ${lanc.nf}</span>` : ''}
-                </div>
-              </div>
-            `;
-          }
-
-          lancamentosList.innerHTML = html;
-        })
-        .withFailureHandler(function(error) {
-          console.error('Erro ao carregar lançamentos:', error);
-          lancamentosList.innerHTML = '<div class="loading-lancamentos">Erro ao carregar lançamentos</div>';
-        })
-        .getUltimosLancamentos(itemNome);
-    }
-
-    // Hide loading overlay
-    function hideLoading() {
-      const overlay = document.getElementById('loadingOverlay');
-      if (overlay) {
-        overlay.classList.remove('show');
-        // Re-enable scrolling
-        document.body.style.overflow = '';
-      }
-    }
-
-    // Toggle sidebar
-    function toggleSidebar() {
-      const sidebar = document.getElementById('sidebar');
-      const mainContent = document.getElementById('mainContent');
-      const toggleBtn = document.querySelector('.sidebar-toggle');
-
-      sidebar.classList.toggle('hidden');
-      mainContent.classList.toggle('expanded');
-      toggleBtn.classList.toggle('shifted');
-
-      // Altera o texto do botão
-      if (sidebar.classList.contains('hidden')) {
-        toggleBtn.innerHTML = '☰ Mostrar Menu';
+      // Se NÃO houver "ATUALIZAÇÃO" em NENHUMA entrada anterior nos últimos 20 dias, pinta de vermelho
+      if (!temAtualizacaoAnterior) {
+        var lastColumn = sheetEstoque.getLastColumn();
+        sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("red");
+        avisoTipo = "DESATUALIZADO";
+        avisoMensagem = "⚠️ PRODUTO DESATUALIZADO (ÚLTIMA ATUALIZAÇÃO HÁ MAIS DE 20 DIAS). POR FAVOR, ATUALIZAR URGENTE.";
+        Logger.log("processEstoque: Linha pintada de VERMELHO - produto desatualizado (sem ATUALIZAÇÃO nas entradas anteriores dos últimos 20 dias)");
       } else {
-        toggleBtn.innerHTML = '✕ Esconder Menu';
+        Logger.log("processEstoque: Linha NÃO pintada de vermelho - há ATUALIZAÇÃO em entradas anteriores");
+      }
+    } else {
+      Logger.log("processEstoque: Produto dentro dos 20 dias - NÃO verifica keyword");
+    }
+  } else {
+    Logger.log("processEstoque: Primeiro registro do item - sem verificação de dias");
+  }
+
+  // Verifica se houve ENTRADA de estoque - aviso para atualização (sobrescreve vermelho)
+  if (parseFloat(formData.entrada) > 0) {
+    var lastColumn = sheetEstoque.getLastColumn();
+    sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("yellow");
+    avisoTipo = "ENTRADA";
+    avisoMensagem = "⚠️ ENTRADA DE ESTOQUE REGISTRADA!\n\nÉ NECESSÁRIO ATUALIZAR O ESTOQUE DESTE ITEM PARA EVITAR FUROS DE ESTOQUE.\n\nRealize uma contagem física e registre uma atualização completa do saldo.";
+    Logger.log("processEstoque: Linha pintada de AMARELO - entrada de estoque");
+  }
+
+  // Invalida caches para garantir atualização
+  invalidateCache();
+  invalidateCacheOpt();
+
+  // Prepara mensagem de retorno
+  var mensagemRetorno = "";
+  if (avisoMensagem !== "") {
+    mensagemRetorno = avisoMensagem + "\n\n✅ REGISTRO SALVO COM SUCESSO!\nSaldo Anterior: " + previousSaldo + "\nNovo Saldo: " + newSaldo;
+  } else {
+    mensagemRetorno = "✅ REGISTRO SALVO COM SUCESSO!\n\nItem: " + formData.item + "\nSaldo Anterior: " + previousSaldo + "\nNovo Saldo: " + newSaldo;
+  }
+
+  Logger.log("processEstoque: Mensagem de retorno: " + mensagemRetorno);
+
+  // Retorna a mensagem para o callback do DialogEstoque.html
+  return mensagemRetorno;
+}
+
+/* ================================
+   NOVAS FUNÇÕES: Estoque por Período e Limpar Filtro
+   ================================ */
+
+/**
+ * abrirDialogEstoquePorPeriodo: Abre um diálogo para que o usuário informe as datas de início e fim.
+ */
+function abrirDialogEstoquePorPeriodo() {
+  var html = HtmlService.createTemplateFromFile("DialogEstoquePorPeriodo")
+    .evaluate()
+    .setWidth(350)
+    .setHeight(250);
+  SpreadsheetApp.getUi().showModalDialog(html, "Filtrar Estoque por Período");
+}
+
+/**
+ * filtrarEstoquePorPeriodo: Copia as linhas da aba ESTOQUE, cuja data na coluna C
+ * esteja entre dataInicio e dataFim (formato dd/mm/yyyy), e as cola na aba "FILTRO POR PERIODO".
+ * Antes de colar, apaga o conteúdo anterior da aba.
+ */
+function filtrarEstoquePorPeriodo(dataInicio, dataFim) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) throw new Error("A aba ESTOQUE não foi encontrada.");
+  
+  var lastRow = sheetEstoque.getLastRow();
+  if (lastRow < 2) throw new Error("Não há dados na aba ESTOQUE.");
+  
+  // Divide as datas informadas (formato dd/mm/yyyy) em partes e cria objetos Date.
+  var partsInicio = dataInicio.split("/");
+  var partsFim = dataFim.split("/");
+  if (partsInicio.length !== 3 || partsFim.length !== 3) {
+    throw new Error("Formato de data inválido. Use dd/mm/yyyy");
+  }
+  
+  var startDate = new Date(
+    parseInt(partsInicio[2], 10), 
+    parseInt(partsInicio[1], 10) - 1, 
+    parseInt(partsInicio[0], 10)
+  );
+  
+  var endDate = new Date(
+    parseInt(partsFim[2], 10), 
+    parseInt(partsFim[1], 10) - 1, 
+    parseInt(partsFim[0], 10),
+    23, 59, 59, 999
+  );
+  
+  // Obtém os dados da aba ESTOQUE (assumindo que a primeira linha é o cabeçalho)
+  var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, sheetEstoque.getLastColumn());
+  var dataValues = dataRange.getValues();
+  
+  // Prepara a aba de destino "FILTRO POR PERIODO"
+  var sheetFiltro = ss.getSheetByName("FILTRO POR PERIODO");
+  if (!sheetFiltro) {
+    sheetFiltro = ss.insertSheet("FILTRO POR PERIODO");
+  } else {
+    sheetFiltro.clear();
+  }
+  
+  // Copia o cabeçalho da aba ESTOQUE para a aba "FILTRO POR PERIODO"
+  var header = sheetEstoque.getRange(1, 1, 1, sheetEstoque.getLastColumn()).getValues();
+  sheetFiltro.getRange(1, 1, 1, header[0].length).setValues(header);
+  
+  var targetData = [];
+  
+  // Percorre cada linha e copia as que tiverem data na coluna C (índice 2) dentro do período
+  for (var i = 0; i < dataValues.length; i++) {
+    var row = dataValues[i];
+    var dateValue = row[2];
+    if (!(dateValue instanceof Date)) continue;
+    if (dateValue >= startDate && dateValue <= endDate) {
+      targetData.push(row);
+    }
+  }
+  
+  if (targetData.length > 0) {
+    sheetFiltro.getRange(2, 1, targetData.length, targetData[0].length).setValues(targetData);
+  }
+  
+  var targetLastRow = sheetFiltro.getLastRow();
+  if (targetLastRow > 1) {
+    sheetFiltro.getRange(2, 1, targetLastRow - 1, sheetFiltro.getLastColumn())
+              .sort({ column: 3, ascending: true });
+  }
+  
+  return "Dados do período de " + dataInicio + " a " + dataFim + " foram copiados para a aba 'FILTRO POR PERIODO'.";
+}
+
+/**
+ * limparFiltroEstoque: Remove o filtro da aba ESTOQUE, ordena pela coluna C (datas) de forma ascendente
+ * e seleciona a célula 4 linhas abaixo da última linha preenchida.
+ */
+function limparFiltroEstoque() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (!sheet) throw new Error("A aba ESTOQUE não foi encontrada.");
+  
+  if (sheet.getFilter()) {
+    sheet.getFilter().remove();
+  }
+  
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).sort({ column: 3, ascending: true });
+  }
+  
+  select4RowsBelow();
+  
+  return "Filtro removido e planilha ordenada por data.";
+}
+
+/**
+ * convertDateFormat: Converte uma data do formato dd/mm/yyyy para mm/dd/yyyy.
+ */
+function convertDateFormat(dateStr) {
+  var parts = dateStr.split("/");
+  if (parts.length !== 3) throw new Error("Data inválida: " + dateStr);
+  return parts[1] + "/" + parts[0] + "/" + parts[2];
+}
+
+/* ================================
+   NOVAS FUNÇÕES: Estoque 3 Meses
+   ================================ */
+
+function showEstoque3MesesSidebar() {
+  var template = HtmlService.createTemplateFromFile("DialogEstoque3Meses");
+  template.itemList = JSON.stringify(getItemList());
+  template.evaluate()
+          .setTitle("Estoque 3 Meses")
+          .setWidth(350)
+          .setHeight(400);
+  SpreadsheetApp.getUi().showSidebar(template);
+}
+
+
+/* ================================
+   NOVAS FUNÇÕES: Cores Desatualizadas
+   ================================ */
+// ==============================
+// Code.gs
+// ==============================
+
+/**
+ * updateMenus: Cria o menu customizado na interface do Google Sheets.
+ * O menu inclui agora as opções "Estoque por Período", "Limpar Filtro", "Estoque 3 Meses" e "Cores Desatualizadas".
+ */
+function updateMenus() {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu("GESTÃO DO ESTOQUE")
+    .addItem("Inserir Estoque", "showEstoqueSidebar")
+    .addItem("Inserir Grupo", "showGrupoDialog")
+    .addSeparator()
+    .addItem("Localizar Produto", "localizarProduto")
+    .addItem("Mostrar Todos", "mostrarTodos")
+    .addSeparator()
+    .addItem("Gerar Relatório", "abrirDialogRelatorioEstoque")
+    .addItem("Relatório por Grupo", "abrirDialogRelatorioPorGrupo")
+    .addItem("Listagem de Estoque", "showListagemEstoqueSidebar")
+    .addItem("Atualizar Compra de Fio e Histórico", "atualizarCompraDeFioEHistorico")
+    .addSeparator()
+    .addItem("Atualizar Total Embarcado", "atualizarTotalEmbarcado")
+    .addItem("Alternar Restauração", "toggleRestore")
+    .addItem("Apagar Última Linha", "apagarUltimaLinha")
+    .addSeparator()
+    .addItem("ÚLTIMA LINHA", "select10RowsBelow")
+    .addSeparator()
+    .addItem("Estoque por Período", "abrirDialogEstoquePorPeriodo")
+    .addItem("Limpar Filtro", "limparFiltroEstoque")
+    .addSeparator()
+    .addItem("Estoque 3 Meses", "showEstoque3MesesSidebar")
+    .addSeparator()
+    .addItem("Cores Desatualizadas", "showCoresDesatualizadasDialog")
+    .addToUi();
+}
+
+/**
+ * onOpen: Executada quando a planilha é aberta.
+ * Apaga a propriedade "loggedUser", remove filtros na aba "ESTOQUE" e faz backup dos dados.
+ * Exibe o diálogo de login (o menu só é criado após um login bem-sucedido).
+ */
+function onOpen() {
+  PropertiesService.getUserProperties().deleteProperty("loggedUser");
+  Logger.log("onOpen: Propriedade 'loggedUser' apagada.");
+  
+  backupEstoqueData();
+  removeFilterOnOpen();
+  showLoginDialog();
+  // updateMenus() não é chamado aqui para restringir acesso sem login.
+}
+
+/**
+ * removeFilterOnOpen: Remove o filtro ativo na aba "ESTOQUE", se existir.
+ */
+function removeFilterOnOpen() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (sheetEstoque && sheetEstoque.getFilter()) {
+    sheetEstoque.getFilter().remove();
+    Logger.log("removeFilterOnOpen: Filtro removido na aba ESTOQUE.");
+  }
+}
+
+/**
+ * backupEstoqueData: Copia as últimas 500 linhas da aba "ESTOQUE" para a aba "BACKUP_ESTOQUE".
+ */
+function backupEstoqueData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) return;
+  
+  var lastRow = sheetEstoque.getLastRow();
+  var startRow = Math.max(1, lastRow - 500 + 1);
+  var numRows = lastRow - startRow + 1;
+  var lastColumn = sheetEstoque.getLastColumn();
+  var values = sheetEstoque.getRange(startRow, 1, numRows, lastColumn).getValues();
+  
+  var sheetBackup = ss.getSheetByName("BACKUP_ESTOQUE");
+  if (!sheetBackup) {
+    sheetBackup = ss.insertSheet("BACKUP_ESTOQUE");
+  }
+  if (sheetBackup.getMaxRows() < lastRow) {
+    sheetBackup.insertRowsAfter(sheetBackup.getMaxRows(), lastRow - sheetBackup.getMaxRows());
+  }
+  sheetBackup.getRange(startRow, 1, numRows, lastColumn).clearContent();
+  sheetBackup.getRange(startRow, 1, numRows, lastColumn).setValues(values);
+  sheetBackup.hideSheet();
+  Logger.log("backupEstoqueData: Backup das linhas de " + startRow + " até " + lastRow + " realizado.");
+}
+
+/**
+ * onEdit: Se a edição ocorrer na aba EMBARQUES (colunas A, B ou E), chama atualizarTotalEmbarcado;
+ * se ocorrer na aba ESTOQUE, impede edições manuais.
+ */
+function onEdit(e) {
+  var sheet = e.range.getSheet();
+  var sheetName = sheet.getName();
+  
+  if (sheetName === "EMBARQUES") {
+    var col = e.range.getColumn();
+    if (col === 1 || col === 2 || col === 5) {
+      atualizarTotalEmbarcado();
+    }
+    return;
+  }
+  
+  if (sheetName !== "ESTOQUE") return;
+  
+  var restoreEnabled = PropertiesService.getScriptProperties().getProperty("restoreEnabled");
+  if (restoreEnabled === "false") {
+    Logger.log("onEdit: Restauração desativada, nenhuma ação realizada.");
+    return;
+  }
+  
+  if (PropertiesService.getScriptProperties().getProperty("editingViaScript") === "true") {
+    return;
+  }
+  
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetBackup = ss.getSheetByName("BACKUP_ESTOQUE");
+  if (!sheetBackup) {
+    Logger.log("onEdit: Aba BACKUP_ESTOQUE não encontrada.");
+    return;
+  }
+  
+  var editedRange = e.range;
+  var numRows = editedRange.getNumRows();
+  var numCols = editedRange.getNumColumns();
+  var startRow = editedRange.getRow();
+  var startCol = editedRange.getColumn();
+  
+  var backupValues = sheetBackup.getRange(startRow, startCol, numRows, numCols).getValues();
+  var newValues = [];
+  for (var r = 0; r < numRows; r++) {
+    var row = [];
+    for (var c = 0; c < numCols; c++) {
+      row.push(backupValues[r][c] !== "" ? backupValues[r][c] : "");
+    }
+    newValues.push(row);
+  }
+  
+  PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
+  editedRange.setValues(newValues);
+  PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
+  
+  SpreadsheetApp.getUi().alert("Edição manual não é permitida. Utilize o sidebar para inserir dados.");
+  Logger.log("onEdit: Edição manual detectada e revertida na faixa " + editedRange.getA1Notation());
+}
+
+/**
+ * toggleRestore: Alterna a restauração de dados para permitir edições manuais temporariamente.
+ */
+function toggleRestore() {
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.prompt("Digite a senha para alternar a restauração dos dados:");
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+  var senha = response.getResponseText();
+  if (senha !== "919633") {
+    ui.alert("Senha incorreta!");
+    return;
+  }
+  var restoreEnabled = PropertiesService.getScriptProperties().getProperty("restoreEnabled");
+  if (restoreEnabled === null || restoreEnabled === "true") {
+    PropertiesService.getScriptProperties().setProperty("restoreEnabled", "false");
+    ui.alert("Restauração desativada. Agora você poderá editar manualmente.");
+  } else {
+    PropertiesService.getScriptProperties().setProperty("restoreEnabled", "true");
+    ui.alert("Restauração ativada. As edições manuais serão revertidas automaticamente.");
+  }
+  updateMenus();
+}
+
+/**
+ * apagarUltimaLinha: Apaga a última linha preenchida da aba ESTOQUE.
+ */
+function apagarUltimaLinha() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) {
+    SpreadsheetApp.getUi().alert("A aba ESTOQUE não foi encontrada.");
+    return;
+  }
+  var lastRow = sheetEstoque.getLastRow();
+  if (lastRow < 2) {
+    SpreadsheetApp.getUi().alert("Não há dados para apagar.");
+    return;
+  }
+  PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
+  sheetEstoque.deleteRow(lastRow);
+  PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
+  backupEstoqueData();
+  SpreadsheetApp.getUi().alert("Última linha apagada com sucesso.");
+}
+
+/**
+ * showGrupoDialog: Abre o diálogo para inserir um novo grupo na aba DADOS.
+ */
+function showGrupoDialog() {
+  var template = HtmlService.createTemplateFromFile("DialogInserirGrupo");
+  template.groupList = JSON.stringify(getGroupList());
+  var htmlOutput = template.evaluate().setWidth(400).setHeight(250);
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, "INSERIR GRUPO");
+}
+
+/**
+ * inserirGrupo: Insere o grupo na aba DADOS.
+ */
+function inserirGrupo(formData) {
+  var group = formData.group;
+  if (!group || group.trim() === "") {
+    throw new Error("⚠️ Informe um grupo.");
+  }
+  group = group.trim();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (!sheetDados) throw new Error("A aba DADOS não foi encontrada.");
+  var existingGroups = getGroupList();
+  if (existingGroups.indexOf(group) !== -1) {
+    SpreadsheetApp.getUi().alert("Grupo já cadastrado.");
+    return "Grupo já cadastrado.";
+  }
+  var lastRow = sheetDados.getLastRow();
+  var newRow = lastRow < 2 ? 2 : lastRow + 1;
+  sheetDados.getRange(newRow, 4).setValue(group);
+  SpreadsheetApp.getUi().alert("Grupo inserido com sucesso.");
+  return "Grupo inserido com sucesso!";
+}
+
+/**
+ * atualizarTotalEmbarcado: Atualiza a aba TOTAL EMBARCADO com os cadastros exclusivos e seus totais.
+ * Os cadastros são gravados como texto para evitar formatação como data.
+ * Se na coluna E de EMBARQUES houver "CHEGOU", subtrai o valor (sem deixar negativo).
+ * Cria filtro na faixa A:B. (Mensagem de alerta removida)
+ */
+function atualizarTotalEmbarcado() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEmbarques = ss.getSheetByName("EMBARQUES");
+  if (!sheetEmbarques) throw new Error("A aba EMBARQUES não foi encontrada.");
+  
+  var lastRow = sheetEmbarques.getLastRow();
+  if (lastRow < 2) {
+    return "Sem dados na aba EMBARQUES.";
+  }
+  
+  var dataRange = sheetEmbarques.getRange(2, 1, lastRow - 1, sheetEmbarques.getLastColumn());
+  var dataValues = dataRange.getValues();
+  
+  var totais = {};
+  dataValues.forEach(function(row) {
+    var cadastro = row[0] ? row[0].toString().trim() : "";
+    if (cadastro === "") return;
+    var valor = parseFloat(row[1]) || 0;
+    var status = row[4] ? row[4].toString().trim().toLowerCase() : "";
+    if (!totais.hasOwnProperty(cadastro)) {
+      totais[cadastro] = 0;
+    }
+    if (status === "chegou") {
+      totais[cadastro] = Math.max(totais[cadastro] - valor, 0);
+    } else {
+      totais[cadastro] += valor;
+    }
+  });
+  
+  var sheetTotal = ss.getSheetByName("TOTAL EMBARCADO");
+  if (!sheetTotal) {
+    sheetTotal = ss.insertSheet("TOTAL EMBARCADO");
+  }
+  sheetTotal.clearContents();
+  sheetTotal.getRange(1, 1, 1, 2).setValues([["CADASTRO", "TOTAL"]]);
+  
+  var output = [];
+  for (var cadastro in totais) {
+    if (totais.hasOwnProperty(cadastro)) {
+      output.push(["'" + cadastro, totais[cadastro]]);
+    }
+  }
+  
+  if (output.length > 0) {
+    sheetTotal.getRange(2, 1, output.length, 2).setValues(output);
+    sheetTotal.getRange(2, 1, output.length, 1).setNumberFormat("@");
+  }
+  
+  if (sheetTotal.getFilter()) {
+    sheetTotal.getFilter().remove();
+  }
+  sheetTotal.getRange(1, 1, sheetTotal.getLastRow(), 2).createFilter();
+  
+  return "Total embarcado atualizado com sucesso!";
+}
+
+/**
+ * atualizarCompraDeFio: Atualiza a aba COMPRA DE FIO com os valores das abas RELATORIO e TOTAL EMBARCADO.
+ * Compara o Total Compra com o threshold definido em J1 para definir "URGENTE" ou "ESTOQUE".
+ */
+function atualizarCompraDeFio() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  var sheetCompra = ss.getSheetByName("COMPRA DE FIO");
+  if (!sheetCompra) {
+    throw new Error("A aba COMPRA DE FIO não foi encontrada.");
+  }
+  var compraData = sheetCompra.getDataRange().getValues();
+  if (compraData.length < 2) {
+    SpreadsheetApp.getUi().alert("Não há cadastros na aba COMPRA DE FIO para atualizar.");
+    return;
+  }
+  var cadastrosCompra = compraData.slice(1).map(function(row) {
+    return row[0] ? row[0].toString().replace(/^'/, "").trim() : "";
+  });
+  
+  var sheetRelatorio = ss.getSheetByName("RELATORIO");
+  if (!sheetRelatorio) {
+    throw new Error("A aba RELATORIO não foi encontrada.");
+  }
+  var relData = sheetRelatorio.getDataRange().getValues();
+  relData.shift();
+  var relMap = {};
+  relData.forEach(function(row) {
+    var cad = row[0] ? row[0].toString().trim() : "";
+    var valor = parseFloat(row[1]) || 0;
+    if (cad) {
+      relMap[cad] = valor;
+    }
+  });
+  
+  var sheetTotal = ss.getSheetByName("TOTAL EMBARCADO");
+  if (!sheetTotal) {
+    throw new Error("A aba TOTAL EMBARCADO não foi encontrada.");
+  }
+  var totalData = sheetTotal.getDataRange().getValues();
+  totalData.shift();
+  var totalMap = {};
+  totalData.forEach(function(row) {
+    var cad = row[0] ? row[0].toString().replace(/^'/, "").trim() : "";
+    var valor = parseFloat(row[1]) || 0;
+    if (cad) {
+      totalMap[cad] = valor;
+    }
+  });
+  
+  var notFound = [];
+  var totalCompra = [];
+  var breakdownRel = [];
+  var breakdownTot = [];
+  
+  cadastrosCompra.forEach(function(cad) {
+    if (!cad) return;
+    var valorRel = relMap.hasOwnProperty(cad) ? relMap[cad] : 0;
+    var valorTotal = totalMap.hasOwnProperty(cad) ? totalMap[cad] : 0;
+    var soma = valorRel + valorTotal;
+    if (!relMap.hasOwnProperty(cad)) {
+      notFound.push(cad);
+    }
+    totalCompra.push([soma]);
+    breakdownRel.push([valorRel]);
+    breakdownTot.push([valorTotal]);
+  });
+  
+  var lastRowCompra = sheetCompra.getLastRow();
+  if (lastRowCompra >= 2) {
+    sheetCompra.getRange(2, 2, lastRowCompra - 1, 1).clearContent();
+    sheetCompra.getRange(2, 5, lastRowCompra - 1, 1).clearContent();
+    sheetCompra.getRange(2, 6, lastRowCompra - 1, 2).clearContent();
+  }
+  
+  var threshold = parseFloat(sheetCompra.getRange("J1").getValue());
+  if (isNaN(threshold)) {
+    threshold = 0;
+  }
+  
+  for (var i = 0; i < totalCompra.length; i++) {
+    var totalValue = totalCompra[i][0];
+    sheetCompra.getRange(i + 2, 2).setValue(totalValue);
+    var label = parseFloat(totalValue) < threshold ? "URGENTE" : "ESTOQUE";
+    sheetCompra.getRange(i + 2, 5).setValue(label);
+    sheetCompra.getRange(i + 2, 6).setValue(breakdownRel[i][0]);
+    sheetCompra.getRange(i + 2, 7).setValue(breakdownTot[i][0]);
+  }
+  
+  var existingFilter = sheetCompra.getFilter();
+  if (existingFilter) {
+    existingFilter.remove();
+  }
+  sheetCompra.getRange(1, 1, sheetCompra.getLastRow(), 7).createFilter();
+  
+  if (notFound.length > 0) {
+    SpreadsheetApp.getUi().alert("Os seguintes cadastros não foram encontrados no RELATORIO: " + notFound.join(", "));
+  } else {
+    SpreadsheetApp.getUi().alert("Compra de fio atualizada com sucesso!");
+  }
+  
+  return "Compra de fio atualizada com sucesso!";
+}
+
+/**
+ * copyCompraToHistorico: Copia os dados da aba COMPRA DE FIO para a aba HISTORICO, adicionando a data/hora atual.
+ */
+function copyCompraToHistorico() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetCompra = ss.getSheetByName("COMPRA DE FIO");
+  var historicoSheet = ss.getSheetByName("HISTORICO");
+  if (!historicoSheet) {
+    historicoSheet = ss.insertSheet("HISTORICO");
+  }
+  
+  var numRowsToCopy = sheetCompra.getLastRow() - 1;
+  Logger.log("Número de linhas para copiar: " + numRowsToCopy);
+  if (numRowsToCopy > 0) {
+    var compData = sheetCompra.getRange(2, 1, numRowsToCopy, 7).getValues();
+    var now = new Date();
+    var historicoData = compData.map(function(row) {
+      return row.concat([now]);
+    });
+    var lastRowHistorico = historicoSheet.getLastRow();
+    var startRowHistorico = lastRowHistorico < 1 ? 1 : lastRowHistorico + 1;
+    historicoSheet.getRange(startRowHistorico, 1, historicoData.length, historicoData[0].length).setValues(historicoData);
+    Logger.log("Dados copiados para HISTORICO a partir da linha " + startRowHistorico);
+  } else {
+    Logger.log("Não há linhas para copiar na aba COMPRA DE FIO.");
+  }
+}
+
+/**
+ * atualizarCompraDeFioEHistorico: Executa atualizarCompraDeFio() e, em seguida, copyCompraToHistorico().
+ */
+function atualizarCompraDeFioEHistorico() {
+  atualizarCompraDeFio();
+  copyCompraToHistorico();
+}
+
+/**
+ * showLoginDialog: Exibe o diálogo de login.
+ */
+function showLoginDialog() {
+  var html = HtmlService.createTemplateFromFile("DialogLogin")
+    .evaluate()
+    .setWidth(350)
+    .setHeight(320);
+  SpreadsheetApp.getUi().showModalDialog(html, "LOGIN");
+}
+
+/**
+ * processLogin: Valida as credenciais na aba DADOS e, se bem-sucedido, define "loggedUser" e cria o menu.
+ */
+function processLogin(formData) {
+  Logger.log("processLogin: Dados recebidos: " + JSON.stringify(formData));
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (!sheetDados) {
+    throw new Error("A aba DADOS não foi encontrada.");
+  }
+  var lastRow = sheetDados.getLastRow();
+  if (lastRow < 1) {
+    throw new Error("Não há usuários cadastrados.");
+  }
+  var data = sheetDados.getRange(1, 2, lastRow, 2).getValues();
+  var valid = false;
+  for (var i = 0; i < data.length; i++) {
+    var username = data[i][0];
+    var password = data[i][1];
+    if (username && password) {
+      if (username.toString().trim() === formData.username.toString().trim() &&
+          password.toString().trim() === formData.password.toString().trim()) {
+        valid = true;
+        break;
+      }
+    }
+  }
+  if (!valid) {
+    throw new Error("Credenciais inválidas.");
+  }
+  PropertiesService.getUserProperties().setProperty("loggedUser", formData.username.toString().trim());
+  Logger.log("processLogin: Login efetuado para " + formData.username);
+  updateMenus();
+  return "Login efetuado com sucesso!";
+}
+
+/**
+ * getLoggedUser: Retorna o usuário logado de forma robusta.
+ * Prioriza o usuário armazenado em UserProperties, mas usa Session como fallback.
+ */
+function getLoggedUser() {
+  // NOVO SISTEMA: Usa getLoggedUserSession() que gerencia sessões corretamente
+  var loggedUser = getLoggedUserSession();
+
+  // Se encontrou usuário na sessão, retorna
+  if (loggedUser && loggedUser.trim() !== "") {
+    Logger.log("getLoggedUser: Usuário logado (sessão): " + loggedUser);
+    return loggedUser;
+  }
+
+  // Fallback: tenta usar email do Google (para compatibilidade)
+  try {
+    // Tenta pegar o email do usuário ativo do Google Sheets
+    var activeUser = Session.getActiveUser().getEmail();
+    if (activeUser && activeUser !== "") {
+      Logger.log("getLoggedUser: Usando email do Session: " + activeUser);
+      return activeUser;
+    }
+
+    // Fallback: tenta getEffectiveUser
+    var effectiveUser = Session.getEffectiveUser().getEmail();
+    if (effectiveUser && effectiveUser !== "") {
+      Logger.log("getLoggedUser: Usando email do EffectiveUser: " + effectiveUser);
+      return effectiveUser;
+    }
+  } catch (e) {
+    Logger.log("getLoggedUser: Erro ao obter usuário via Session: " + e.message);
+  }
+
+  // Se ainda não conseguiu, retorna "Desconhecido"
+  Logger.log("getLoggedUser: AVISO - Nenhum usuário identificado!");
+  return "Usuário Desconhecido";
+}
+
+/**
+ * getUltimosLancamentos: Retorna os últimos 20 lançamentos de um item específico
+ * Ordenados por data (mais recente primeiro)
+ * @param {string} itemNome - Nome do item para filtrar (opcional)
+ * @returns {Array} - Array de objetos com os lançamentos do item
+ */
+function getUltimosLancamentos(itemNome) {
+  try {
+    // Se não passar item, não retorna nada
+    if (!itemNome || itemNome.trim() === '') {
+      Logger.log("getUltimosLancamentos: Nenhum item especificado, retornando vazio");
+      return [];
+    }
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      Logger.log("getUltimosLancamentos: Planilha ESTOQUE não encontrada");
+      return [];
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow <= 1) {
+      return [];
+    }
+
+    // Busca TODAS as linhas da planilha (começando da linha 2, pois 1 é cabeçalho)
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
+
+    // Filtra apenas lançamentos do item especificado
+    var lancamentos = [];
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+      var itemRow = row[1]; // Coluna B (Item)
+
+      // Compara ignorando case e espaços
+      if (itemRow.trim().toUpperCase() === itemNome.trim().toUpperCase()) {
+        var dataStr = row[3]; // Coluna D (Data)
+        var dataObj = parseDateString(dataStr);
+
+        lancamentos.push({
+          grupo: row[0],
+          item: row[1],
+          unidade: row[2],
+          data: dataStr,
+          dataObj: dataObj || new Date(0),
+          nf: row[4],
+          obs: row[5],
+          pedido: row[6],
+          entrada: row[7],
+          saida: row[8],
+          saldo: row[9],
+          valorUnitario: row[10],
+          alteradoEm: row[11],
+          alteradoPor: row[12]
+        });
       }
     }
 
-    // Show module
-    function showModule(moduleName) {
-      // Hide all modules
-      document.querySelectorAll('.module-container').forEach(module => {
-        module.classList.remove('active');
+    // Ordena por data (mais recente primeiro)
+    lancamentos.sort(function(a, b) {
+      return b.dataObj.getTime() - a.dataObj.getTime();
+    });
+
+    // Retorna apenas os últimos 20
+    var ultimos20 = lancamentos.slice(0, 20);
+
+    Logger.log("getUltimosLancamentos: Item '" + itemNome + "' - Encontrados " + lancamentos.length + " lançamentos, retornando " + ultimos20.length);
+    return ultimos20;
+
+  } catch (e) {
+    Logger.log("getUltimosLancamentos: Erro - " + e.message);
+    return [];
+  }
+}
+
+/**
+ * showEstoqueSidebar: Abre o formulário de cadastro de estoque na sidebar.
+ */
+function showEstoqueSidebar() {
+  var nextRow = updateUnprotectedRange();
+  Logger.log("showEstoqueSidebar: Próxima linha para cadastro: " + nextRow);
+
+  // OTIMIZADO: 1 busca em vez de 4
+  var autocompleteData = getAllAutocompleteData();
+
+  var template = HtmlService.createTemplateFromFile("DialogEstoque");
+  template.itemList = JSON.stringify(autocompleteData.items);
+  template.groupList = JSON.stringify(autocompleteData.groups);
+  template.nfList = JSON.stringify(autocompleteData.nfs);
+  template.obsList = JSON.stringify(autocompleteData.obs);
+  template.currentRow = nextRow;
+
+  var htmlOutput = template.evaluate().setTitle("CADASTRO DE ESTOQUE");
+  SpreadsheetApp.getUi().showSidebar(htmlOutput);
+}
+
+/**
+ * updateUnprotectedRange: Retorna a próxima linha livre na aba ESTOQUE.
+ */
+function updateUnprotectedRange() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  var nextRow = sheet.getLastRow() + 1;
+  return nextRow;
+}
+
+/**
+ * setActiveNextEmptyCell: Seleciona a célula da coluna A que está 15 linhas abaixo da última preenchida.
+ */
+function setActiveNextEmptyCell() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (sheet) {
+    var nextRow = sheet.getLastRow() + 15;
+    sheet.activate();
+    sheet.setActiveSelection("A" + nextRow);
+    Logger.log("setActiveNextEmptyCell: Célula A" + nextRow + " selecionada.");
+  }
+}
+
+/**
+ * select4RowsBelow: Seleciona a célula da coluna A que está 4 linhas abaixo da última linha preenchida.
+ */
+function select4RowsBelow() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (sheet) {
+    var nextRow = sheet.getLastRow() + 4;
+    sheet.activate();
+    sheet.setActiveSelection("A" + nextRow);
+    Logger.log("select4RowsBelow: Célula A" + nextRow + " selecionada.");
+  }
+}
+
+/**
+ * select10RowsBelow: Seleciona a célula da coluna A que está 10 linhas abaixo da última linha preenchida.
+ */
+function select10RowsBelow() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (sheet) {
+    var nextRow = sheet.getLastRow() + 10;
+    sheet.activate();
+    sheet.setActiveSelection("A" + nextRow);
+    Logger.log("select10RowsBelow: Célula A" + nextRow + " selecionada.");
+  }
+}
+
+/**
+ * getItemList: Retorna a lista única de itens da aba DADOS (Coluna A).
+ */
+function getItemList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (!sheetDados) return [];
+  var lastRow = sheetDados.getLastRow();
+  if (lastRow < 1) return [];
+  var values = sheetDados.getRange(1, 1, lastRow, 1).getValues().flat();
+  var items = [];
+  for (var i = 0; i < values.length; i++) {
+    if (values[i] && values[i].toString().trim() !== "") {
+      items.push(values[i].toString().trim());
+    }
+  }
+  return Array.from(new Set(items));
+}
+
+/**
+ * getGroupList: Retorna a lista única de grupos da aba DADOS (Coluna D).
+ */
+function getGroupList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (!sheetDados) return [];
+  var lastRow = sheetDados.getLastRow();
+  if (lastRow < 1) return [];
+  var values = sheetDados.getRange(1, 4, lastRow, 1).getValues().flat();
+  var groups = [];
+  for (var i = 0; i < values.length; i++) {
+    if (values[i] && values[i].toString().trim() !== "") {
+      groups.push(values[i].toString().trim());
+    }
+  }
+  return Array.from(new Set(groups));
+}
+
+/**
+ * getNfList: Retorna a lista única de valores da coluna D da aba ESTOQUE (Nota Fiscal/Pedido).
+ */
+function getNfList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (!sheet) return [];
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var values = sheet.getRange(2, 4, lastRow - 1, 1).getValues().flat();
+  var nfList = values.filter(function(v) {
+    return v.toString().trim() !== "";
+  });
+  return Array.from(new Set(nfList));
+}
+
+/**
+ * getObsList: Retorna a lista única de valores da coluna E da aba ESTOQUE (Cliente/Observações).
+ */
+function getObsList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (!sheet) return [];
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var values = sheet.getRange(2, 5, lastRow - 1, 1).getValues().flat();
+  var obsList = values.filter(function(v) {
+    return v.toString().trim() !== "";
+  });
+  return Array.from(new Set(obsList));
+}
+
+/**
+ * getMedidasList: Retorna a lista de unidades de medida.
+ * Combina opções da aba DADOS (coluna MEDIDAS) com opções já usadas na aba ESTOQUE (coluna C).
+ */
+function getMedidasList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var medidasSet = new Set();
+
+  // 1. Busca na aba DADOS (coluna MEDIDAS)
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (sheetDados) {
+    var headers = sheetDados.getRange(1, 1, 1, sheetDados.getLastColumn()).getValues()[0];
+    var medidasCol = -1;
+    for (var i = 0; i < headers.length; i++) {
+      var headerUpper = headers[i].toString().toUpperCase().trim();
+      if (headerUpper === "MEDIDAS" || headerUpper === "MEDIDA" || headerUpper === "UNIDADE" || headerUpper === "UNIDADES") {
+        medidasCol = i + 1;
+        break;
+      }
+    }
+
+    if (medidasCol !== -1) {
+      var lastRow = sheetDados.getLastRow();
+      if (lastRow >= 2) {
+        var values = sheetDados.getRange(2, medidasCol, lastRow - 1, 1).getValues().flat();
+        values.forEach(function(v) {
+          var val = v.toString().trim();
+          if (val !== "") medidasSet.add(val);
+        });
+      }
+    }
+  }
+
+  // 2. Busca na aba ESTOQUE (coluna C - Unidade) para incluir opções já usadas
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (sheetEstoque) {
+    var lastRowEstoque = sheetEstoque.getLastRow();
+    if (lastRowEstoque >= 2) {
+      var valuesEstoque = sheetEstoque.getRange(2, 3, lastRowEstoque - 1, 1).getValues().flat();
+      valuesEstoque.forEach(function(v) {
+        var val = v.toString().trim();
+        if (val !== "") medidasSet.add(val);
       });
+    }
+  }
 
-      // Show selected module
-      document.getElementById('module-' + moduleName).classList.add('active');
+  // Converte Set para Array e ordena
+  var medidasList = Array.from(medidasSet).sort();
+  return medidasList;
+}
 
-      // Update sidebar active state
-      document.querySelectorAll('.sidebar nav a').forEach(link => {
-        link.classList.remove('active');
+/**
+ * getObservacoesList: Retorna a lista de observações.
+ * Busca da aba DADOS, coluna F (OBSERVAÇÃO).
+ */
+function getObservacoesList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var obsSet = new Set();
+
+  // Busca na aba DADOS, coluna F (índice 6)
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (sheetDados) {
+    var lastRow = sheetDados.getLastRow();
+    if (lastRow >= 2) {
+      // Coluna F = índice 6
+      var values = sheetDados.getRange(2, 6, lastRow - 1, 1).getDisplayValues().flat();
+      values.forEach(function(v) {
+        var val = v.toString().trim();
+        if (val !== "") obsSet.add(val);
       });
-      document.querySelector('[data-module="' + moduleName + '"]').classList.add('active');
-
-      // Ações específicas por módulo
-      if (moduleName === 'inserir-grupo') {
-        atualizarListaGrupos();
-      }
-
-      // Fecha o sidebar automaticamente após selecionar um módulo
-      const sidebar = document.getElementById('sidebar');
-      const mainContent = document.getElementById('mainContent');
-      const toggleBtn = document.querySelector('.sidebar-toggle');
-
-      sidebar.classList.add('hidden');
-      mainContent.classList.add('expanded');
-      if (toggleBtn) {
-        toggleBtn.innerHTML = '☰ Menu';
-      }
     }
+  }
 
-    // Load dashboard data
-    function loadDashboardData() {
-      google.script.run
-        .withSuccessHandler(function(data) {
-          const totalItemsEl = document.getElementById('totalItems');
-          const totalGroupsEl = document.getElementById('totalGroups');
-          const recentEntriesEl = document.getElementById('recentEntries');
-          const recentExitsEl = document.getElementById('recentExits');
+  // Converte Set para Array e ordena
+  var obsList = Array.from(obsSet).sort();
+  return obsList;
+}
 
-          if (totalItemsEl) totalItemsEl.textContent = data.totalItems || '-';
-          if (totalGroupsEl) totalGroupsEl.textContent = data.totalGroups || '-';
-          if (recentEntriesEl) recentEntriesEl.textContent = data.recentEntries || '-';
-          if (recentExitsEl) recentExitsEl.textContent = data.recentExits || '-';
-        })
-        .withFailureHandler(function(error) {
-          console.error('Erro ao carregar dashboard:', error);
-        })
-        .getDashboardData();
+/**
+ * normalize: Função auxiliar para normalizar texto.
+ */
+function normalize(text) {
+  if (!text) return "";
+  return text.toString().trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/* ================================
+   FUNÇÕES DE CACHE E AUTOCOMPLETE
+   ================================ */
+
+/**
+ * getCachedData: Busca dados no cache ou executa função e armazena no cache.
+ */
+function getCachedData(key, fetchFunction, ttl) {
+  ttl = ttl || 120; // 2 minutos padrão
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get(key);
+
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      Logger.log("Cache parse error: " + key);
     }
+  }
 
-    // Load autocomplete data - OTIMIZADO com cache cliente
-    function loadAutocompleteData() {
-      // Tenta usar cache do cliente primeiro (resposta instantânea)
-      const cachedData = getClientCache(CLIENT_CACHE.AUTOCOMPLETE_KEY);
+  var data = fetchFunction();
+  try {
+    var jsonData = JSON.stringify(data);
+    if (jsonData.length < 100000) {
+      cache.put(key, jsonData, ttl);
+    }
+  } catch (e) {
+    Logger.log("Cache save error: " + e.message);
+  }
 
-      if (cachedData && cachedData.items && cachedData.items.length > 0) {
-        console.log('Usando autocomplete do cache cliente (' + cachedData.items.length + ' itens)');
-        applyAutocompleteData(cachedData);
+  return data;
+}
 
-        // Atualiza em background para próxima vez
-        google.script.run
-          .withSuccessHandler(function(data) {
-            if (data && data.items) {
-              setClientCache(CLIENT_CACHE.AUTOCOMPLETE_KEY, data);
-              // Também atualiza na tela para manter sincronizado
-              applyAutocompleteData(data);
-            }
-          })
-          .withFailureHandler(function(error) {
-            console.error('Erro ao atualizar autocomplete em background:', error);
-          })
-          .getAllAutocompleteData();
-        return;
-      }
+/**
+ * invalidateCache: Invalida caches.
+ */
+function invalidateCache(keys) {
+  var cache = CacheService.getScriptCache();
+  var keysToInvalidate = typeof keys === 'string' ? [keys] : (keys || []);
+  keysToInvalidate.forEach(function(key) { cache.remove(key); });
+  cache.remove("autocompleteData");
+}
 
-      // Sem cache válido - busca do servidor
-      console.log('Buscando autocomplete do servidor...');
-      google.script.run
-        .withSuccessHandler(function(data) {
-          if (data && data.items) {
-            autocompleteData = data;
-            applyAutocompleteData(data);
-            setClientCache(CLIENT_CACHE.AUTOCOMPLETE_KEY, data);
-            console.log('Autocomplete carregado: ' + data.items.length + ' itens');
-          } else {
-            console.error('Dados de autocomplete inválidos:', data);
+/**
+ * invalidateAllAutocompleteCache: Invalida todos os caches de autocomplete.
+ */
+function invalidateAllAutocompleteCache() {
+  invalidateCache(["itemList", "groupList", "nfList", "obsList", "autocompleteData"]);
+}
+
+/**
+ * getAllAutocompleteData: Busca todos os dados de autocomplete em uma única operação.
+ * OTIMIZADO: Usa cache de 10 minutos
+ */
+function getAllAutocompleteData() {
+  return getCachedData("autocompleteData", function() {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // 1ª Leitura: DADOS (apenas grupos)
+    var sheetDados = ss.getSheetByName("DADOS");
+    var groups = [];
+    if (sheetDados) {
+      var lastRowDados = sheetDados.getLastRow();
+      if (lastRowDados >= 1) {
+        var dadosData = sheetDados.getRange(1, 4, lastRowDados, 1).getDisplayValues();
+        for (var i = 0; i < dadosData.length; i++) {
+          if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
+            groups.push(dadosData[i][0].toString().trim());
           }
-        })
-        .withFailureHandler(function(error) {
-          console.error('Erro ao carregar autocomplete:', error);
-        })
-        .getAllAutocompleteData();
-    }
-
-    // Aplica dados de autocomplete nos campos
-    function applyAutocompleteData(data) {
-      if (!data) {
-        console.error('applyAutocompleteData: dados vazios');
-        return;
-      }
-
-      autocompleteData = data;
-      populateAutocomplete('itemList', data.items || []);
-      populateAutocomplete('groupList', data.groups || []);
-      populateAutocomplete('nfList', data.nfs || []);
-      populateAutocomplete('localizarItemList', data.items || []);
-      populateAutocomplete('listagemGroupList', data.groups || []);
-      populateAutocomplete('listagemItemList', data.items || []);
-      populateAutocomplete('listagemItemDatalist', data.items || []);
-      populateAutocomplete('estoque3MesesItemDatalist', data.items || []);
-      populateSelect('listagemGroup', data.groups || []);
-      populateSelect('estoqueUnidade', data.medidas || []);
-      populateSelect('estoqueObs', data.observacoes || []);
-      populateSelect('nfUnidade', data.medidas || []);
-      populateSelect('nfObs', data.observacoes || []);
-
-      // Popula selects do Lançamento em Lote
-      populateSelect('loteGrupo', data.groups || []);
-      populateSelect('loteUnidade', data.medidas || []);
-      populateSelect('loteObs', data.observacoes || []);
-      populateAutocomplete('loteNFList', data.nfs || []);
-
-      // Inicializa autocompletes customizados (apenas uma vez)
-      if (!window.customAutocompletesInitialized) {
-        initCustomAutocompletes();
-        window.customAutocompletesInitialized = true;
-      }
-
-      console.log('Autocomplete aplicado - itens:', (data.items || []).length, ', grupos:', (data.groups || []).length);
-    }
-
-    // Toggle valor unitário visibility based on rules
-    function toggleValorUnitario() {
-      const obs = document.getElementById('estoqueObs').value.toUpperCase();
-      const valorGroup = document.getElementById('valorUnitarioGroup');
-      const valorInput = document.getElementById('estoqueValorUnitario');
-
-      // Regra: Valor unitário obrigatório SE obs ≠ "ATUALIZAÇÃO"
-      if (obs !== 'ATUALIZAÇÃO') {
-        valorGroup.style.display = 'block';
-        valorInput.required = true;
-      } else {
-        valorGroup.style.display = 'none';
-        valorInput.required = false;
-        valorInput.value = ''; // Limpa o valor
+        }
       }
     }
 
-    // Timeout para verificação de item novo (evita disparar durante seleção do autocomplete)
-    let verificarItemNovoTimeout;
+    // 2ª Leitura: ESTOQUE (itens da coluna B e NFs da coluna E)
+    // Estrutura: A=Grupo, B=Item, C=Unidade, D=Data, E=NF, F=Obs
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var items = [], nfs = [];
+    if (sheetEstoque) {
+      var lastRowEstoque = sheetEstoque.getLastRow();
+      if (lastRowEstoque >= 2) {
+        // Lê colunas B até E (4 colunas: B, C, D, E)
+        var estoqueData = sheetEstoque.getRange(2, 2, lastRowEstoque - 1, 4).getDisplayValues();
+        for (var j = 0; j < estoqueData.length; j++) {
+          // Coluna B (índice 0) = Item
+          if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
+            items.push(estoqueData[j][0].toString().trim());
+          }
+          // Coluna E (índice 3) = NF (já em formato texto com getDisplayValues)
+          if (estoqueData[j][3] && estoqueData[j][3].toString().trim() !== "") {
+            nfs.push(estoqueData[j][3].toString().trim());
+          }
+        }
+      }
+    }
 
-    // Cache de saldo pré-carregado para acelerar exibição do resultado
-    let saldoPreCarregado = {
-      item: null,
-      saldo: 0,
-      carregando: false
+    return {
+      items: Array.from(new Set(items)),
+      groups: Array.from(new Set(groups)),
+      nfs: Array.from(new Set(nfs)),
+      medidas: getMedidasList(),
+      observacoes: getObservacoesList()
     };
+  }, 120); // 2 minutos
+}
 
-    // Pré-carrega o saldo do item em background
-    function preCarregarSaldo(itemName) {
-      if (!itemName || itemName.trim() === '') return;
+/**
+ * getLastRegistration: Retorna o último registro de um item (data, estoque e grupo).
+ * OTIMIZADO: Lê apenas as últimas 2000 linhas da planilha ESTOQUE
+ */
+function getLastRegistration(item, currentRow) {
+  Logger.log("=== getLastRegistration INICIADO ===");
+  Logger.log("Item buscado: '" + item + "'");
+  Logger.log("CurrentRow: " + currentRow);
 
-      const itemNormalizado = itemName.trim();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) {
+    Logger.log("ERRO: Aba ESTOQUE não encontrada!");
+    return { lastDate: null, lastStock: 0, lastGroup: null };
+  }
 
-      // Se já está carregando o mesmo item, não faz nada
-      if (saldoPreCarregado.item === itemNormalizado && saldoPreCarregado.carregando) return;
+  var lastRow = sheetEstoque.getLastRow();
+  Logger.log("Última linha da planilha: " + lastRow);
+  if (lastRow < 2) {
+    Logger.log("Planilha vazia - sem dados");
+    return { lastDate: null, lastStock: 0, lastGroup: null };
+  }
 
-      // Se já tem o saldo deste item, não precisa buscar
-      if (saldoPreCarregado.item === itemNormalizado && !saldoPreCarregado.carregando) return;
+  // Lê TODA a planilha como TEXTO (getDisplayValues) para evitar problemas de formato
+  var startRow = 2;
+  var numRows = lastRow - startRow + 1;
+  Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow + " (" + numRows + " linhas)");
 
-      saldoPreCarregado.item = itemNormalizado;
-      saldoPreCarregado.carregando = true;
-      saldoPreCarregado.saldo = 0;
+  // USA getDisplayValues() para forçar conversão para texto
+  // Lê 10 colunas (A-J) para incluir o Saldo que está na coluna J
+  var data = sheetEstoque.getRange(startRow, 1, numRows, 10).getDisplayValues();
+  Logger.log("Usando getDisplayValues() para forçar formato de TEXTO");
 
-      console.log('Pré-carregando saldo para:', itemNormalizado);
+  var result = { lastDate: null, lastStock: 0, lastGroup: null };
+  var itemUpper = item.toString().trim().toUpperCase();
+  Logger.log("Item buscado (maiúsculas): '" + itemUpper + "'");
 
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result && saldoPreCarregado.item === itemNormalizado) {
-            saldoPreCarregado.saldo = parseFloat(result.lastStock) || 0;
-            saldoPreCarregado.carregando = false;
-            console.log('Saldo pré-carregado:', saldoPreCarregado.saldo);
-          }
-        })
-        .withFailureHandler(function(error) {
-          console.log('Erro ao pré-carregar saldo:', error);
-          saldoPreCarregado.carregando = false;
-        })
-        .getLastRegistrationOpt(itemNormalizado);
-    }
+  var encontrados = 0;
+  for (var i = data.length - 1; i >= 0; i--) {
+    var rowNum = startRow + i;
+    if (rowNum >= currentRow) continue;
 
-    // Verifica se o item é novo no módulo Inserir Estoque
-    // Usa delay para aguardar o usuário terminar de selecionar do autocomplete
-    function verificarItemNovoEstoque() {
-      // Limpa timeout anterior
-      clearTimeout(verificarItemNovoTimeout);
+    var currentItem = data[i][1]; // Coluna B (Item) - agora em formato TEXTO
+    if (currentItem && currentItem.toString().trim() !== "") {
+      var currentItemUpper = currentItem.toString().trim().toUpperCase();
 
-      // Aguarda 400ms após o blur para verificar (tempo para selecionar do datalist)
-      verificarItemNovoTimeout = setTimeout(function() {
-        const itemInput = document.getElementById('estoqueItem');
-        const nomeItem = itemInput.value.trim().toUpperCase();
-        const avisoGrande = document.getElementById('avisoItemNovoEstoque');
-        const avisoPequeno = document.getElementById('avisoItemNovoSmall');
-        const grupoContainer = document.getElementById('estoqueGroupContainer');
-
-        if (!nomeItem) {
-          avisoGrande.style.display = 'none';
-          avisoPequeno.style.display = 'none';
-          grupoContainer.style.background = '';
-          grupoContainer.style.padding = '';
-          grupoContainer.style.border = '';
-          return;
-        }
-
-        // Pré-carrega o saldo do item em background (para acelerar resultado)
-        preCarregarSaldo(itemInput.value.trim());
-
-        // Verifica se item existe na lista de autocomplete
-        const itemExiste = autocompleteData && autocompleteData.items &&
-          autocompleteData.items.some(item => item.toUpperCase() === nomeItem);
-
-        if (!itemExiste) {
-          avisoGrande.style.display = 'block';
-          avisoPequeno.style.display = 'block';
-          grupoContainer.style.background = '#fff3cd';
-          grupoContainer.style.padding = '8px';
-          grupoContainer.style.borderRadius = '4px';
-          grupoContainer.style.border = '1px solid #ffc107';
-        } else {
-          avisoGrande.style.display = 'none';
-          avisoPequeno.style.display = 'none';
-          grupoContainer.style.background = '';
-          grupoContainer.style.padding = '';
-          grupoContainer.style.border = '';
-        }
-      }, 400);
-    }
-
-    // Show product history when item is typed (OTIMIZADO: índice local primeiro, servidor como fallback)
-    let historyTimeout;
-    function showProductHistory(item) {
-      if (!item || item.trim() === '') {
-        document.getElementById('estoqueHistorico').style.display = 'none';
-        return;
+      // CORRESPONDÊNCIA EXATA: compara strings em maiúsculas
+      if (currentItemUpper === itemUpper) {
+        encontrados++;
+        result.lastGroup = data[i][0];  // Coluna A (Grupo)
+        result.lastDate = data[i][3];   // Coluna D (Data) - como texto
+        result.lastStock = data[i][9];  // Coluna J (Saldo) - como texto
+        Logger.log("✓ ENCONTRADO na linha " + rowNum);
+        Logger.log("  Grupo: '" + result.lastGroup + "'");
+        Logger.log("  Data: " + result.lastDate);
+        Logger.log("  Estoque: " + result.lastStock);
+        Logger.log("  Item raw: '" + currentItem + "'");
+        Logger.log("  Correspondência EXATA com: '" + itemUpper + "'");
+        break;
       }
+    }
+  }
 
-      // Debounce reduzido para 300ms (antes era 800ms) - agora é mais rápido!
-      clearTimeout(historyTimeout);
-      historyTimeout = setTimeout(function() {
-        // 1. TENTA ÍNDICE LOCAL PRIMEIRO (INSTANTÂNEO!)
-        const localHistory = getItemHistoryFromIndex(item);
-        if (localHistory) {
-          const displayData = formatHistoryForDisplay(localHistory, 10);
-          if (displayData && displayData.rows.length > 0) {
-            // Adiciona info do item acima da tabela
-            const infoHtml = '<div style="margin-bottom:8px;font-size:0.8rem;color:#333;">' +
-              '<strong>Saldo Atual:</strong> ' + (localHistory.info.lastStock || '0') +
-              ' | <strong>Última Atualização:</strong> ' + (localHistory.info.lastDate || '-') +
-              ' | <strong>Grupo:</strong> ' + (localHistory.info.group || '-') +
-              '</div>';
+  if (encontrados === 0) {
+    Logger.log("✗ NENHUM REGISTRO ENCONTRADO para o item '" + item + "'");
+  }
 
-            document.getElementById('estoqueHistoricoContent').innerHTML = infoHtml;
-            displayTable('estoqueHistoricoContent', displayData);
-            document.getElementById('estoqueHistorico').style.display = 'block';
-            console.log('Histórico carregado do índice local (instantâneo)');
-            return;
+  Logger.log("=== getLastRegistration FINALIZADO ===");
+  return result;
+}
+
+/**
+ * hasAtualizacaoInPreviousEntries: Verifica se há alguma entrada com "ATUALIZAÇÃO"
+ * nas últimas entradas do item dentro do período especificado (últimos 20 dias antes do novo lançamento).
+ * @param {string} item - Nome do item
+ * @param {Date} startDate - Data inicial (20 dias antes do novo lançamento)
+ * @param {Date} endDate - Data final (data do último registro antes do novo lançamento)
+ * @param {number} currentRow - Linha atual para excluir da busca
+ * @return {boolean} - true se encontrou "ATUALIZAÇÃO" ou "ACERTO", false caso contrário
+ */
+function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
+  Logger.log("=== hasAtualizacaoInPreviousEntries INICIADO ===");
+  Logger.log("Item: '" + item + "'");
+  Logger.log("Data inicial: " + startDate);
+  Logger.log("Data final: " + endDate);
+  Logger.log("CurrentRow: " + currentRow);
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) {
+    Logger.log("ERRO: Aba ESTOQUE não encontrada!");
+    return false;
+  }
+
+  var lastRow = sheetEstoque.getLastRow();
+  Logger.log("Última linha da planilha: " + lastRow);
+  if (lastRow < 2) {
+    Logger.log("Planilha vazia - sem dados");
+    return false;
+  }
+
+  // Lê TODA a planilha
+  var startRow = 2;
+  var numRows = lastRow - startRow + 1;
+  Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow);
+
+  // Lê 6 colunas (A-F): Grupo, Item, Unidade, Data, NF, Obs
+  var data = sheetEstoque.getRange(startRow, 1, numRows, 6).getDisplayValues();
+
+  var itemUpper = item.toString().trim().toUpperCase();
+  Logger.log("Item buscado (maiúsculas): '" + itemUpper + "'");
+
+  var encontrados = 0;
+  // Percorre de trás para frente (mais recentes primeiro)
+  for (var i = data.length - 1; i >= 0; i--) {
+    var rowNum = startRow + i;
+
+    // Pula a linha atual (novo registro)
+    if (rowNum >= currentRow) continue;
+
+    var currentItem = data[i][1]; // Coluna B (Item)
+    if (!currentItem || currentItem.toString().trim() === "") continue;
+
+    var currentItemUpper = currentItem.toString().trim().toUpperCase();
+
+    // Verifica se é o mesmo item
+    if (currentItemUpper === itemUpper) {
+      // Verifica a data do registro
+      var dataRegistroStr = data[i][3]; // Coluna D (Data)
+      if (!dataRegistroStr || dataRegistroStr === "") continue;
+
+      // Converte string para Date
+      var dataRegistro = parseDateString(dataRegistroStr);
+      if (!dataRegistro) continue;
+
+      // Verifica se está dentro do período de 20 dias
+      if (dataRegistro >= startDate && dataRegistro <= endDate) {
+        encontrados++;
+        var obs = data[i][5]; // Coluna F (Obs)
+        Logger.log("Analisando linha " + rowNum + " - Data: " + dataRegistroStr + " - Obs: '" + obs + "'");
+
+        // Verifica se contém "ATUALIZAÇÃO" ou "ACERTO"
+        if (obs && obs.toString().trim() !== "") {
+          var obsLower = obs.toString().toLowerCase();
+          var temKeyword = /acerto|atualiz/i.test(obsLower);
+          if (temKeyword) {
+            Logger.log("✓ ENCONTRADO 'ATUALIZAÇÃO' na linha " + rowNum);
+            Logger.log("=== hasAtualizacaoInPreviousEntries FINALIZADO: true ===");
+            return true;
           }
         }
-
-        // 2. FALLBACK: Busca no servidor (para itens novos ou não encontrados)
-        console.log('Histórico: buscando no servidor...');
-        google.script.run
-          .withSuccessHandler(function(result) {
-            if (result.success && result.data && result.data.rows.length > 0) {
-              // Mostra apenas os últimos 10 registros
-              const limitedRows = result.data.rows.slice(0, 10);
-              const limitedColors = result.data.colors.slice(0, 10);
-
-              displayTable('estoqueHistoricoContent', {
-                headers: result.data.headers,
-                rows: limitedRows,
-                colors: limitedColors
-              });
-
-              document.getElementById('estoqueHistorico').style.display = 'block';
-            } else {
-              document.getElementById('estoqueHistorico').style.display = 'none';
-            }
-          })
-          .withFailureHandler(function(error) {
-            console.error('Erro ao buscar histórico:', error);
-            document.getElementById('estoqueHistorico').style.display = 'none';
-          })
-          .buscarProduto(item, null, null);
-      }, 300); // Reduzido de 800ms para 300ms
-    }
-
-    // Load all estoque data for instant client-side filtering
-    function loadAllEstoqueData(showFeedback) {
-      console.log('=== loadAllEstoqueData INICIADO ===');
-      console.log('ShowFeedback:', showFeedback);
-
-      // Mostra indicador de carregamento sempre
-      const statusMsg = document.createElement('div');
-      statusMsg.id = 'dataLoadingStatus';
-      statusMsg.style.cssText = 'position:fixed;top:80px;right:20px;background:#2196f3;color:white;padding:10px 20px;border-radius:4px;box-shadow:0 2px 5px rgba(0,0,0,0.3);z-index:9999;font-size:14px;';
-      statusMsg.textContent = '🔄 Carregando dados do estoque...';
-      document.body.appendChild(statusMsg);
-
-      console.log('Chamando google.script.run.carregarTodosOsDadosEstoque()...');
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          console.log('SUCCESS Handler chamado');
-          console.log('Result:', result);
-
-          if (result && result.success) {
-            allEstoqueData = result.data;
-            estoqueHeaders = result.headers;
-            console.log('✅ Dados do estoque carregados com sucesso!');
-            console.log('Total de registros: ' + (allEstoqueData ? allEstoqueData.length : 0));
-
-            const statusMsg = document.getElementById('dataLoadingStatus');
-            if (statusMsg) {
-              statusMsg.textContent = '✅ ' + allEstoqueData.length + ' registros carregados!';
-              statusMsg.style.background = '#4CAF50';
-              setTimeout(() => statusMsg.remove(), 3000);
-            }
-          } else {
-            console.error('❌ Erro retornado do servidor:', result ? result.message : 'Resposta vazia');
-
-            const statusMsg = document.getElementById('dataLoadingStatus');
-            if (statusMsg) {
-              statusMsg.textContent = '❌ Erro: ' + (result ? result.message : 'Resposta vazia');
-              statusMsg.style.background = '#f44336';
-              setTimeout(() => statusMsg.remove(), 5000);
-            }
-          }
-        })
-        .withFailureHandler(function(error) {
-          console.error('❌ FAILURE Handler chamado');
-          console.error('Erro completo:', error);
-          console.error('Tipo de erro:', typeof error);
-          console.error('Mensagem:', error.message);
-
-          const statusMsg = document.getElementById('dataLoadingStatus');
-          if (statusMsg) {
-            statusMsg.textContent = '❌ Falha ao carregar: ' + (error.message || error);
-            statusMsg.style.background = '#f44336';
-            setTimeout(() => statusMsg.remove(), 5000);
-          }
-
-          // Alerta para o usuário
-          alert('Erro ao carregar dados do estoque:\n\n' + (error.message || error) + '\n\nVerifique as permissões do script e tente novamente.');
-        })
-        .carregarTodosOsDadosEstoque();
-
-      console.log('Chamada ao servidor enviada. Aguardando resposta...');
-    }
-
-    // Normalize string for search (remove accents, lowercase)
-    function normalizeString(str) {
-      if (!str) return '';
-      return str.toString()
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '');
-    }
-
-    // Client-side filter function (INSTANT!)
-    function filterEstoqueData(itemFilter, dataInicio, dataFim) {
-      if (!allEstoqueData) {
-        console.error('Dados do estoque ainda não foram carregados');
-        return { success: false, message: 'Dados ainda não carregados. Aguarde...' };
       }
+    }
+  }
 
-      const itemUpper = itemFilter ? itemFilter.toString().trim().toUpperCase() : '';
-      let results = [];
+  Logger.log("Total de entradas analisadas no período: " + encontrados);
+  Logger.log("=== hasAtualizacaoInPreviousEntries FINALIZADO: false ===");
+  return false;
+}
 
-      // Filtra por item e data - CORRESPONDÊNCIA EXATA
-      for (let i = 0; i < allEstoqueData.length; i++) {
-        const record = allEstoqueData[i];
-        const currentItemUpper = record.row[1].toString().trim().toUpperCase(); // Coluna Item
+/**
+ * parseDateString: Converte string dd/mm/yyyy ou formato de data para objeto Date
+ */
+function parseDateString(dateStr) {
+  if (!dateStr) return null;
 
-        // Verifica se o item corresponde EXATAMENTE (se filtro foi fornecido)
-        if (itemUpper !== '' && currentItemUpper !== itemUpper) {
-          continue;
+  var str = dateStr.toString().trim();
+
+  // Se já é um formato de data completo (ex: "25/11/2025 14:30:00"), extrai apenas a parte da data
+  if (str.includes(" ")) {
+    str = str.split(" ")[0];
+  }
+
+  // Formato dd/mm/yyyy ou d/m/yyyy
+  var parts = str.split("/");
+  if (parts.length !== 3) return null;
+
+  var day = parseInt(parts[0], 10);
+  var month = parseInt(parts[1], 10) - 1; // Meses em JS são 0-11
+  var year = parseInt(parts[2], 10);
+
+  if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
+
+  return new Date(year, month, day);
+}
+
+/**
+ * getLastInfoFromDados: Retorna a última informação não vazia da coluna C da aba DADOS para um produto.
+ */
+function getLastInfoFromDados(product) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetDados = ss.getSheetByName("DADOS");
+  if (!sheetDados) return "";
+  var lastRow = sheetDados.getLastRow();
+  if (lastRow < 2) return "";
+  var data = sheetDados.getRange(2, 1, lastRow - 1, sheetDados.getLastColumn()).getValues();
+  var lastInfo = "";
+  for (var i = 0; i < data.length; i++) {
+    if (data[i][0].toString().trim() === product && data[i][2].toString().trim() !== "") {
+      lastInfo = data[i][2];
+    }
+  }
+  return lastInfo;
+}
+
+/**
+ * showCustomDialog: Exibe um diálogo HTML customizado com uma mensagem.
+ */
+function showCustomDialog(message) {
+  var template = HtmlService.createTemplateFromFile("CustomDialog");
+  template.message = message;
+  var html = template.evaluate().setWidth(400).setHeight(200);
+  SpreadsheetApp.getUi().showModalDialog(html, "AVISO");
+}
+
+/**
+ * localizarProduto: Abre o diálogo para localizar um produto.
+ */
+function localizarProduto() {
+  var template = HtmlService.createTemplateFromFile("DialogLocalizarProduto");
+  template.produtos = JSON.stringify(getProdutosEstoque());
+  var htmlOutput = template.evaluate().setWidth(400).setHeight(300);
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, "LOCALIZAR PRODUTO");
+}
+
+/**
+ * getProdutosEstoque: Retorna a lista única de produtos da aba ESTOQUE (Coluna B).
+ */
+function getProdutosEstoque() {
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get("produtosEstoque");
+  if (cached) {
+    return JSON.parse(cached);
+  }
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (!sheet) return [];
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var range = sheet.getRange("B2:B" + lastRow);
+  var values = range.getDisplayValues().flat();
+  var produtos = values.filter(function(v) {
+    return v.toString().trim() !== "";
+  });
+  var unique = Array.from(new Set(produtos));
+  cache.put("produtosEstoque", JSON.stringify(unique), 300);
+  return unique;
+}
+
+/**
+ * filtrarProduto: Aplica um filtro na aba ESTOQUE para exibir apenas as linhas cujo valor da coluna B seja igual ao produto.
+ */
+function filtrarProduto(produto) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (sheet.getFilter()) {
+    sheet.getFilter().remove();
+  }
+  var range = sheet.getDataRange();
+  var filter = range.createFilter();
+  var criteria = SpreadsheetApp.newFilterCriteria().whenTextEqualTo(produto).build();
+  filter.setColumnFilterCriteria(2, criteria);
+}
+
+/**
+ * mostrarTodos: Remove o filtro, ordena a aba ESTOQUE pela data (Coluna C) e seleciona uma célula.
+ */
+function mostrarTodos() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (sheet.getFilter()) {
+    sheet.getFilter().remove();
+  }
+  var lastRow = sheet.getLastRow();
+  var lastColumn = sheet.getLastColumn();
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, lastColumn).sort({ column: 3, ascending: true });
+  }
+  setActiveNextEmptyCell();
+}
+
+/**
+ * abrirDialogRelatorioEstoque: Abre o diálogo para definir a faixa de data do relatório.
+ */
+function abrirDialogRelatorioEstoque() {
+  var html = HtmlService.createTemplateFromFile("DialogRelatorioEstoque")
+      .evaluate()
+      .setWidth(400)
+      .setHeight(300);
+  SpreadsheetApp.getUi().showModalDialog(html, "RELATÓRIO DE ESTOQUE");
+}
+
+/**
+ * gerarRelatorioEstoque: Gera o relatório geral para o período definido.
+ */
+function gerarRelatorioEstoque(dataInicio, dataFim) {
+  Logger.log("gerarRelatorioEstoque: Início " + dataInicio + " - Fim " + dataFim);
+  var partsInicio = dataInicio.split("/");
+  var partsFim = dataFim.split("/");
+  var startDate = new Date(partsInicio[2], partsInicio[1] - 1, partsInicio[0], 0, 0, 0);
+  var endDate = new Date(partsFim[2], partsFim[1] - 1, partsFim[0], 23, 59, 59);
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) throw new Error("A aba ESTOQUE não foi encontrada.");
+
+  var lastRow = sheetEstoque.getLastRow();
+  if (lastRow < 2) throw new Error("Não há dados na aba ESTOQUE.");
+
+  var lastColumn = sheetEstoque.getLastColumn();
+  var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, lastColumn);
+  var dataValues = dataRange.getValues();
+  var dataBackgrounds = dataRange.getBackgrounds();
+
+  var filtered = [];
+  for (var i = 0; i < dataValues.length; i++) {
+    var dt = new Date(dataValues[i][2]);
+    if (dt >= startDate && dt <= endDate) {
+      filtered.push({
+        row: dataValues[i],
+        background: dataBackgrounds[i][0] || "#ffffff"
+      });
+    }
+  }
+
+  var grupos = {};
+  for (var j = 0; j < filtered.length; j++) {
+    var item = filtered[j];
+    var prod = item.row[1];
+    if (!grupos[prod]) {
+      grupos[prod] = item;
+    } else {
+      var currentDate = new Date(item.row[2]);
+      var storedDate = new Date(grupos[prod].row[2]);
+      if (currentDate > storedDate) {
+        grupos[prod] = item;
+      }
+    }
+  }
+
+  var reportData = [];
+  var reportBackgrounds = [];
+  for (var prod in grupos) {
+    var item = grupos[prod];
+    var row = item.row;
+    var bg = item.background.toLowerCase();
+
+    // Determina o motivo baseado na cor
+    var motivo = "";
+    if (bg.indexOf("yellow") >= 0 || bg === "#ffff00" || bg === "#ffff") {
+      motivo = "⚠️ ENTRADA - Atualizar estoque";
+    } else if (bg.indexOf("red") >= 0 || bg === "#ff0000" || bg.indexOf("#f00") >= 0) {
+      motivo = "🔴 DESATUALIZADO (+20 dias)";
+    } else {
+      motivo = "OK";
+    }
+
+    reportData.push([prod, row[8], row[4], row[2], motivo]);
+    reportBackgrounds.push(item.background);
+  }
+
+  reportData.sort(function(a, b) {
+    return new Date(a[3]) - new Date(b[3]);
+  });
+
+  var sheetRelatorio = ss.getSheetByName("RELATORIO");
+  if (!sheetRelatorio) {
+    sheetRelatorio = ss.insertSheet("RELATORIO");
+    sheetRelatorio.getRange("J1").setValue(0);
+  }
+  var threshold = parseFloat(sheetRelatorio.getRange("J1").getValue());
+  if (isNaN(threshold)) {
+    threshold = 0;
+  }
+
+  for (var k = 0; k < reportData.length; k++) {
+    var novoSaldo = parseFloat(reportData[k][1]);
+    if (novoSaldo < threshold) {
+      reportData[k].push("URGENTE");
+    } else {
+      reportData[k].push("ESTOQUE");
+    }
+  }
+
+  sheetRelatorio.clearContents();
+  sheetRelatorio.getRange("J1").setValue(threshold);
+  sheetRelatorio.getRange(1, 1, 1, 6).setValues([["PRODUTO", "NOVO SALDO", "OBS", "DATA/HORA", "MOTIVO", "STATUS"]]);
+  if (reportData.length > 0) {
+    var reportRange = sheetRelatorio.getRange(2, 1, reportData.length, 6);
+    reportRange.setValues(reportData);
+
+    // Aplica as cores de fundo nas linhas do relatório
+    for (var m = 0; m < reportBackgrounds.length; m++) {
+      var bgColor = reportBackgrounds[m];
+      if (bgColor && bgColor !== "#ffffff" && bgColor !== "white") {
+        sheetRelatorio.getRange(m + 2, 1, 1, 6).setBackground(bgColor);
+      }
+    }
+  }
+
+  var relFilter = sheetRelatorio.getFilter();
+  if (relFilter) {
+    relFilter.remove();
+  }
+  sheetRelatorio.getRange(1, 1, sheetRelatorio.getLastRow(), 6).createFilter();
+
+  Logger.log("gerarRelatorioEstoque: Relatório gerado com " + reportData.length + " registros.");
+  return "Relatório gerado com sucesso!";
+}
+
+/**
+ * abrirDialogRelatorioPorGrupo: Abre o diálogo para definir o grupo do relatório.
+ */
+function abrirDialogRelatorioPorGrupo() {
+  var template = HtmlService.createTemplateFromFile("DialogRelatorioPorGrupo");
+  template.grupos = JSON.stringify(getGruposEstoque());
+  var htmlOutput = template.evaluate().setWidth(400).setHeight(300);
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, "RELATÓRIO POR GRUPO");
+}
+
+/**
+ * getGruposEstoque: Retorna os grupos únicos da aba ESTOQUE (Coluna A).
+ */
+function getGruposEstoque() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (!sheet) return [];
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var values = sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat();
+  var grupos = values.filter(function(v) {
+    return v.toString().trim() !== "";
+  });
+  return Array.from(new Set(grupos));
+}
+
+/**
+ * gerarRelatorioPorGrupo: Gera o relatório para um grupo específico.
+ */
+function gerarRelatorioPorGrupo(grupoSelecionado) {
+  Logger.log("gerarRelatorioPorGrupo: Grupo selecionado: " + grupoSelecionado);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) throw new Error("A aba ESTOQUE não foi encontrada.");
+  
+  var lastRow = sheetEstoque.getLastRow();
+  if (lastRow < 2) throw new Error("Não há dados na aba ESTOQUE.");
+  
+  var lastColumn = sheetEstoque.getLastColumn();
+  var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, lastColumn);
+  var dataValues = dataRange.getValues();
+  
+  var filtered = dataValues.filter(function(row) {
+    return row[0].toString().trim() === grupoSelecionado;
+  });
+  
+  var gruposItens = {};
+  filtered.forEach(function(row) {
+    var item = row[1];
+    if (!gruposItens[item]) {
+      gruposItens[item] = row;
+    } else {
+      var currentDate = new Date(row[2]);
+      var storedDate = new Date(gruposItens[item][2]);
+      if (currentDate > storedDate) {
+        gruposItens[item] = row;
+      }
+    }
+  });
+  
+  var reportData = [];
+  for (var item in gruposItens) {
+    var row = gruposItens[item];
+    reportData.push([row[0], row[1], row[8], row[2]]);
+  }
+  
+  reportData.sort(function(a, b) {
+    return new Date(a[3]) - new Date(b[3]);
+  });
+  
+  var sheetRelatorio = ss.getSheetByName("RELATORIO POR GRUPO DE ITEM");
+  if (!sheetRelatorio) {
+    sheetRelatorio = ss.insertSheet("RELATORIO POR GRUPO DE ITEM");
+  }
+  sheetRelatorio.clearContents();
+  sheetRelatorio.getRange(1, 1, 1, 4).setValues([["GRUPO", "ITEM", "NOVO SALDO", "DATA/HORA"]]);
+  if (reportData.length > 0) {
+    sheetRelatorio.getRange(2, 1, reportData.length, 4).setValues(reportData);
+  }
+  
+  Logger.log("gerarRelatorioPorGrupo: Relatório gerado com " + reportData.length + " registros.");
+  return "Relatório por grupo gerado com sucesso!";
+}
+
+/**
+ * showListagemEstoqueSidebar: Abre a sidebar para a listagem de estoque.
+ */
+function showListagemEstoqueSidebar() {
+  var template = HtmlService.createTemplateFromFile("DialogListagemEstoque");
+  template.produtos = JSON.stringify(getProdutosEstoque());
+  var htmlOutput = template.evaluate().setTitle("LISTAGEM DE ESTOQUE");
+  SpreadsheetApp.getUi().showSidebar(htmlOutput);
+}
+
+/* ================================
+   NOVAS FUNÇÕES: Estoque por Período e Limpar Filtro
+   ================================ */
+
+/**
+ * abrirDialogEstoquePorPeriodo: Abre um diálogo para que o usuário informe as datas de início e fim.
+ */
+function abrirDialogEstoquePorPeriodo() {
+  var html = HtmlService.createTemplateFromFile("DialogEstoquePorPeriodo")
+    .evaluate()
+    .setWidth(350)
+    .setHeight(250);
+  SpreadsheetApp.getUi().showModalDialog(html, "Filtrar Estoque por Período");
+}
+
+/**
+ * filtrarEstoquePorPeriodo: Copia as linhas da aba ESTOQUE, cuja data na coluna C
+ * esteja entre dataInicio e dataFim (formato dd/mm/yyyy), e as cola na aba "FILTRO POR PERIODO".
+ * Antes de colar, apaga o conteúdo anterior da aba.
+ */
+function filtrarEstoquePorPeriodo(dataInicio, dataFim) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) throw new Error("A aba ESTOQUE não foi encontrada.");
+  
+  var lastRow = sheetEstoque.getLastRow();
+  if (lastRow < 2) throw new Error("Não há dados na aba ESTOQUE.");
+  
+  // Divide as datas informadas (formato dd/mm/yyyy) em partes e cria objetos Date.
+  var partsInicio = dataInicio.split("/");
+  var partsFim = dataFim.split("/");
+  if (partsInicio.length !== 3 || partsFim.length !== 3) {
+    throw new Error("Formato de data inválido. Use dd/mm/yyyy");
+  }
+  
+  var startDate = new Date(
+    parseInt(partsInicio[2], 10), 
+    parseInt(partsInicio[1], 10) - 1, 
+    parseInt(partsInicio[0], 10)
+  );
+  
+  var endDate = new Date(
+    parseInt(partsFim[2], 10), 
+    parseInt(partsFim[1], 10) - 1, 
+    parseInt(partsFim[0], 10),
+    23, 59, 59, 999
+  );
+  
+  // Obtém os dados da aba ESTOQUE (assumindo que a primeira linha é o cabeçalho)
+  var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, sheetEstoque.getLastColumn());
+  var dataValues = dataRange.getValues();
+  
+  // Prepara a aba de destino "FILTRO POR PERIODO"
+  var sheetFiltro = ss.getSheetByName("FILTRO POR PERIODO");
+  if (!sheetFiltro) {
+    sheetFiltro = ss.insertSheet("FILTRO POR PERIODO");
+  } else {
+    // Apaga todo o conteúdo da aba, inclusive formatação e filtros antigos.
+    sheetFiltro.clear();
+  }
+  
+  // Copia o cabeçalho da aba ESTOQUE para a aba "FILTRO POR PERIODO"
+  var header = sheetEstoque.getRange(1, 1, 1, sheetEstoque.getLastColumn()).getValues();
+  sheetFiltro.getRange(1, 1, 1, header[0].length).setValues(header);
+  
+  var targetData = [];
+  
+  // Percorre cada linha e copia as que tiverem data na coluna C (índice 2) dentro do período
+  for (var i = 0; i < dataValues.length; i++) {
+    var row = dataValues[i];
+    var dateValue = row[2]; // Coluna C
+    // Verifica se o valor é uma data válida
+    if (!(dateValue instanceof Date)) continue;
+    if (dateValue >= startDate && dateValue <= endDate) {
+      targetData.push(row);
+    }
+  }
+  
+  // Copia os dados filtrados para a aba "FILTRO POR PERIODO", a partir da linha 2
+  if (targetData.length > 0) {
+    sheetFiltro.getRange(2, 1, targetData.length, targetData[0].length).setValues(targetData);
+  }
+  
+  // Ordena os dados (exceto o cabeçalho) pela coluna C em ordem crescente
+  var targetLastRow = sheetFiltro.getLastRow();
+  if (targetLastRow > 1) {
+    sheetFiltro.getRange(2, 1, targetLastRow - 1, sheetFiltro.getLastColumn())
+              .sort({ column: 3, ascending: true });
+  }
+  
+  return "Dados do período de " + dataInicio + " a " + dataFim + " foram copiados para a aba 'FILTRO POR PERIODO'.";
+}
+
+/**
+ * limparFiltroEstoque: Remove o filtro da aba ESTOQUE, ordena pela coluna C (datas) de forma ascendente
+ * e seleciona a célula 4 linhas abaixo da última linha preenchida.
+ */
+function limparFiltroEstoque() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESTOQUE");
+  if (!sheet) throw new Error("A aba ESTOQUE não foi encontrada.");
+  
+  if (sheet.getFilter()) {
+    sheet.getFilter().remove();
+  }
+  
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).sort({ column: 3, ascending: true });
+  }
+  
+  select4RowsBelow();
+  
+  return "Filtro removido e planilha ordenada por data.";
+}
+
+/**
+ * convertDateFormat: Converte uma data do formato dd/mm/yyyy para mm/dd/yyyy.
+ */
+function convertDateFormat(dateStr) {
+  var parts = dateStr.split("/");
+  if (parts.length !== 3) throw new Error("Data inválida: " + dateStr);
+  return parts[1] + "/" + parts[0] + "/" + parts[2];
+}
+
+/* ================================
+   NOVAS FUNÇÕES: Cores Desatualizadas
+   ================================ */
+
+/**
+ * processCoresDesatualizadas: A partir de uma data informada (formato dd/mm/yyyy),
+ * procura na aba ESTOQUE as linhas marcadas de vermelho (verificando a cor da primeira célula)
+ * e, para cada item (coluna A), agrupa os registros cuja data (coluna C) seja >= data informada.
+ * Para cada item, pega as últimas 5 linhas (baseadas na data) e copia somente o valor da coluna B
+ * para a aba "CORES DESATUALIZADAS", a partir da coluna E, com o cabeçalho "CORES DESATUALIZADAS".
+ * Além disso, na célula F1 da aba "CORES DESATUALIZADAS" é exibida a data informada.
+ */
+function processCoresDesatualizadas(startDateStr) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // Converte a data informada (dd/mm/yyyy) para objeto Date
+  var startDate = parseDateBR(startDateStr);
+  if (!startDate || isNaN(startDate)) {
+    throw new Error("Data de início inválida: use o formato dd/mm/yyyy.");
+  }
+  
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) throw new Error("A aba ESTOQUE não foi encontrada.");
+  
+  var lastRow = sheetEstoque.getLastRow();
+  var lastCol = sheetEstoque.getLastColumn();
+  if (lastRow < 2) throw new Error("Não há dados na aba ESTOQUE.");
+  
+  // Lê os dados e os backgrounds (exceto o cabeçalho)
+  var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, lastCol);
+  var dadosValues = dataRange.getValues();
+  var backgrounds = dataRange.getBackgrounds();
+  
+  // Cria um objeto para agrupar os registros por item (chave em lowercase)
+  var grupos = {};
+  
+  // Percorre cada linha para verificar se está marcada de vermelho na primeira célula
+  // e se a data na coluna C é >= startDate.
+  for (var i = 0; i < dadosValues.length; i++) {
+    var bg = backgrounds[i][0].toLowerCase();
+    if (bg !== "red" && bg !== "#ff0000") continue;
+    
+    var row = dadosValues[i];
+    var item = row[0] ? row[0].toString().trim() : "";
+    if (item === "") continue;
+    
+    // Data na coluna C (índice 2)
+    var dataCell = row[2];
+    if (!(dataCell instanceof Date)) {
+      dataCell = parseDateBR(dataCell);
+    }
+    if (!(dataCell instanceof Date) || isNaN(dataCell)) continue;
+    if (dataCell < startDate) continue;
+    
+    var key = item.toLowerCase();
+    if (!grupos[key]) {
+      grupos[key] = [];
+    }
+    grupos[key].push({ row: row, date: dataCell });
+  }
+  
+  // Para cada item, ordena os registros por data decrescente e pega as últimas 5 linhas
+  var resultados = [];
+  for (var key in grupos) {
+    if (grupos.hasOwnProperty(key)) {
+      var registros = grupos[key];
+      registros.sort(function(a, b) {
+        return b.date - a.date;
+      });
+      var ultimos5 = registros.slice(0, 5);
+      ultimos5.reverse(); // Exibe do mais antigo para o mais recente
+      for (var j = 0; j < ultimos5.length; j++) {
+        // Copia somente o valor da coluna B (índice 1)
+        resultados.push([ultimos5[j].row[1]]);
+      }
+    }
+  }
+  
+  // --- Parte 3: Copia os resultados para a aba CORES DESATUALIZADAS na coluna E ---
+  var sheetCores = ss.getSheetByName("CORES DESATUALIZADAS");
+  if (!sheetCores) {
+    sheetCores = ss.insertSheet("CORES DESATUALIZADAS");
+  } else {
+    sheetCores.clear();
+  }
+  
+  // Define o cabeçalho na coluna E
+  var header = [["CORES DESATUALIZADAS"]];
+  sheetCores.getRange(1, 5, 1, header[0].length).setValues(header);
+  
+  if (resultados.length > 0) {
+    var resultRange = sheetCores.getRange(2, 5, resultados.length, resultados[0].length);
+    resultRange.setValues(resultados);
+    // Define o fundo de todas as linhas copiadas como vermelho
+    resultRange.setBackground("red");
+  }
+  
+  // Exibe a data informada na célula F1
+  sheetCores.getRange("F1").setValue(startDateStr);
+  
+  return "Valores da coluna B para os itens em vermelho a partir de " + startDateStr + " foram copiados para a aba 'CORES DESATUALIZADAS' na coluna E, e a data foi registrada em F1.";
+}
+
+/**
+ * parseDateBR: Converte uma string no formato dd/mm/yyyy para um objeto Date.
+ */
+function parseDateBR(dateStr) {
+  if (typeof dateStr === 'string') {
+    var parts = dateStr.split("/");
+    if (parts.length === 3) {
+      return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+    }
+  }
+  return new Date(dateStr);
+}
+
+/* ================================
+   NOVAS FUNÇÕES: Cores Desatualizadas - Diálogo
+   ================================ */
+function showCoresDesatualizadasDialog() {
+  var html = HtmlService.createTemplateFromFile("DialogCoresDesatualizadas")
+    .evaluate()
+    .setWidth(300)
+    .setHeight(150);
+  SpreadsheetApp.getUi().showModalDialog(html, "Filtrar Cores Desatualizadas");
+}
+/**
+ * processRepeticoesCoresDesatualizadas:
+ * Lê a data definida na célula F1 da aba CORES DESATUALIZADAS e os cadastros inseridos na coluna E.
+ * Em seguida, na aba ESPELHO DO ESTOQUE, para cada cadastro encontrado em CORES DESATUALIZADAS (coluna E),
+ * busca todos os registros cujo cadastro (coluna A) corresponda (comparação case-insensitive)
+ * e cuja data na coluna B seja menor ou igual à data definida.
+ * Os registros encontrados são copiados para a aba CORES DESATUALIZADAS, onde:
+ *  - Coluna A: Cadastro
+ *  - Coluna B: Data (da ESPELHO DO ESTOQUE)
+ *  - Coluna C: Informação (da ESPELHO DO ESTOQUE, coluna E)
+ */
+function processRepeticoesCoresDesatualizadas() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // Obtém a aba CORES DESATUALIZADAS
+  var sheetCores = ss.getSheetByName("CORES DESATUALIZADAS");
+  if (!sheetCores) throw new Error("A aba CORES DESATUALIZADAS não foi encontrada.");
+  
+  // Lê a data definida na célula F1 (deve estar no formato dd/mm/yyyy)
+  var dataF1Raw = sheetCores.getRange("F1").getValue();
+  var dataF1 = parseDateBR(dataF1Raw.toString());
+  if (!dataF1 || isNaN(dataF1)) {
+    throw new Error("Data em F1 inválida. Certifique-se de que está no formato dd/mm/yyyy.");
+  }
+  
+  // Lê os cadastros da coluna E (a partir da linha 2)
+  var lastRowCores = sheetCores.getLastRow();
+  if (lastRowCores < 2) throw new Error("Não há cadastros na coluna E da aba CORES DESATUALIZADAS.");
+  var rangeCadastros = sheetCores.getRange(2, 5, lastRowCores - 1, 1);
+  var cadastrosData = rangeCadastros.getValues();
+  
+  // Armazena os cadastros únicos (usando lowercase para comparação)
+  var cadastros = {};
+  for (var i = 0; i < cadastrosData.length; i++) {
+    var val = cadastrosData[i][0];
+    if (val && val.toString().trim() !== "") {
+      cadastros[val.toString().trim().toLowerCase()] = val.toString().trim();
+    }
+  }
+  
+  // Acessa a aba ESPELHO DO ESTOQUE
+  var sheetEspelho = ss.getSheetByName("ESPELHO DO ESTOQUE");
+  if (!sheetEspelho) throw new Error("A aba ESPELHO DO ESTOQUE não foi encontrada.");
+  var lastRowEspelho = sheetEspelho.getLastRow();
+  var lastColEspelho = sheetEspelho.getLastColumn();
+  if (lastRowEspelho < 2) throw new Error("Não há dados na aba ESPELHO DO ESTOQUE.");
+  var rangeEspelho = sheetEspelho.getRange(2, 1, lastRowEspelho - 1, lastColEspelho);
+  var espelhoValues = rangeEspelho.getValues();
+  
+  var resultados = [];
+  
+  // Percorre cada registro da aba ESPELHO DO ESTOQUE
+  // Assumindo que:
+  // - Coluna A: Cadastro
+  // - Coluna B: Data
+  // - Coluna E: Informação
+  for (var j = 0; j < espelhoValues.length; j++) {
+    var row = espelhoValues[j];
+    var cadastroEspelho = row[0] ? row[0].toString().trim() : "";
+    if (cadastroEspelho === "") continue;
+    var key = cadastroEspelho.toLowerCase();
+    if (!(key in cadastros)) continue;
+    
+    // Data na ESPELHO DO ESTOQUE (coluna B, índice 1)
+    var dataEspelho = row[1];
+    if (!(dataEspelho instanceof Date)) {
+      dataEspelho = parseDateBR(dataEspelho);
+    }
+    if (!(dataEspelho instanceof Date) || isNaN(dataEspelho)) continue;
+    // Considera registros cuja data seja <= data definida (F1)
+    if (dataEspelho > dataF1) continue;
+    
+    // Extrai:
+    // Coluna A: Cadastro, Coluna B: Data, Coluna C: Informação (da coluna E da aba ESPELHO)
+    var info = row[4]; // Coluna E
+    resultados.push([cadastroEspelho, dataEspelho, info]);
+  }
+  
+  // Agora, vamos limpar a aba CORES DESATUALIZADAS e inserir esses resultados nas colunas A, B e C.
+  sheetCores.clear();
+  // Define o cabeçalho
+  sheetCores.getRange(1, 1, 1, 3).setValues([["Cadastro", "Data", "Informação"]]);
+  
+  if (resultados.length > 0) {
+    sheetCores.getRange(2, 1, resultados.length, 3).setValues(resultados);
+  }
+  
+  return "Registros até " + dataF1Raw + " foram copiados para a aba 'CORES DESATUALIZADAS' (Colunas A:C).";
+}
+
+/**
+ * parseDateBR: Converte uma string no formato dd/mm/yyyy para um objeto Date.
+ */
+function parseDateBR(dateStr) {
+  if (typeof dateStr === 'string') {
+    var parts = dateStr.split("/");
+    if (parts.length === 3) {
+      return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+    }
+  }
+  return new Date(dateStr);
+}
+/**
+ * processConsultaAtualizacoes:
+ * Lê a data de corte da célula F1 da aba CORES DESATUALIZADAS e os itens (cadastros) da coluna E.
+ * Em seguida, na aba ESPELHO DO ESTOQUE, para cada registro, se o cadastro (coluna B)
+ * corresponder (case-insensitive) a um dos itens e se a data (coluna C) for menor ou igual à data de corte,
+ * extrai:
+ *    - Cadastro (da coluna B),
+ *    - Data (da coluna C),
+ *    - Valor (da coluna E).
+ * Os resultados são escritos na aba CORES DESATUALIZADAS, a partir da linha 2, nas colunas A, B e C.
+ */
+function processConsultaAtualizacoes() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // Acessa a aba CORES DESATUALIZADAS
+  var sheetCores = ss.getSheetByName("CORES DESATUALIZADAS");
+  if (!sheetCores) throw new Error("A aba CORES DESATUALIZADAS não foi encontrada.");
+  
+  // Lê a data de corte da célula F1 (formato dd/mm/yyyy)
+  var cutoffRaw = sheetCores.getRange("F1").getValue();
+  var cutoffDate = parseDateBR(cutoffRaw.toString());
+  if (!cutoffDate || isNaN(cutoffDate)) {
+    throw new Error("Data de corte em F1 inválida. Certifique-se de que está no formato dd/mm/yyyy.");
+  }
+  
+  // Lê os itens (cadastros) da coluna E, a partir da linha 2
+  var lastRowCores = sheetCores.getLastRow();
+  if (lastRowCores < 2) throw new Error("Não há cadastros na coluna E da aba CORES DESATUALIZADAS.");
+  var rangeItems = sheetCores.getRange(2, 5, lastRowCores - 1, 1);
+  var itemsData = rangeItems.getValues();
+  
+  var queryItems = [];
+  for (var i = 0; i < itemsData.length; i++) {
+    var val = itemsData[i][0];
+    if (val && val.toString().trim() !== "") {
+      queryItems.push(val.toString().trim().toLowerCase());
+    }
+  }
+  
+  // Acessa a aba ESPELHO DO ESTOQUE
+  var sheetEspelho = ss.getSheetByName("ESPELHO DO ESTOQUE");
+  if (!sheetEspelho) throw new Error("A aba ESPELHO DO ESTOQUE não foi encontrada.");
+  var lastRowEspelho = sheetEspelho.getLastRow();
+  var lastColEspelho = sheetEspelho.getLastColumn();
+  if (lastRowEspelho < 2) throw new Error("Não há dados na aba ESPELHO DO ESTOQUE.");
+  
+  var rangeEspelho = sheetEspelho.getRange(2, 1, lastRowEspelho - 1, lastColEspelho);
+  var espelhoValues = rangeEspelho.getValues();
+  
+  var resultados = [];
+  
+  // Percorre os registros da aba ESPELHO DO ESTOQUE
+  // Assumindo que:
+  // - Coluna B (índice 1) contém o cadastro (para comparação)
+  // - Coluna C (índice 2) contém a data
+  // - Coluna E (índice 4) contém o valor
+  for (var j = 0; j < espelhoValues.length; j++) {
+    var row = espelhoValues[j];
+    var cadastroEspelho = row[1] ? row[1].toString().trim() : "";
+    if (cadastroEspelho === "") continue;
+    var cadastroKey = cadastroEspelho.toLowerCase();
+    if (queryItems.indexOf(cadastroKey) === -1) continue;
+    
+    var dataEspelho = row[2];
+    if (!(dataEspelho instanceof Date)) {
+      dataEspelho = parseDateBR(dataEspelho);
+    }
+    if (!(dataEspelho instanceof Date) || isNaN(dataEspelho)) continue;
+    // Só traz se a data for menor ou igual à data de corte
+    if (dataEspelho > cutoffDate) continue;
+    
+    var valor = row[4]; // Valor da coluna E
+    resultados.push([cadastroEspelho, dataEspelho, valor]);
+  }
+  
+  // --- Escreve os resultados na aba CORES DESATUALIZADAS nas colunas A, B e C ---
+  // Limpa as colunas A, B e C
+  sheetCores.getRange("A:C").clearContent();
+  // Define o cabeçalho
+  sheetCores.getRange(1, 1, 1, 3).setValues([["Cadastro", "Data", "Valor"]]);
+  
+  if (resultados.length > 0) {
+    sheetCores.getRange(2, 1, resultados.length, 3).setValues(resultados);
+  }
+  
+  return "Consulta atualizações concluída. Registros encontrados: " + resultados.length;
+}
+
+/**
+ * parseDateBR: Converte uma string no formato dd/mm/yyyy para um objeto Date.
+ */
+function parseDateBR(dateStr) {
+  if (typeof dateStr === 'string') {
+    var parts = dateStr.split("/");
+    if (parts.length === 3) {
+      return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+    }
+  }
+  return new Date(dateStr);
+}
+/**
+ * consultaAtualizacao: Para cada item informado via formulário (até 10),
+ * filtra os registros da aba "ESPELHO DO ESTOQUE" dos últimos 20 dias e
+ * retorna os 5 registros mais recentes individualmente, gravando os resultados
+ * na aba "CORES DESATUALIZADAS".
+ *
+ * Supõe-se que na aba "ESPELHO DO ESTOQUE":
+ *   - Coluna A: Item
+ *   - Coluna B: Data
+ *   - Coluna D: Valor
+ *   - Coluna E: Valor Adicional
+ *
+ * Os resultados serão escritos na aba "CORES DESATUALIZADAS" com:
+ *   - Coluna A: Item
+ *   - Coluna B: Data
+ *   - Coluna C: Valor (coluna D do ESPELHO)
+ *   - Coluna D: Valor adicional (coluna E do ESPELHO)
+ */
+function consultaAtualizacao(formData) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // Calcula o período: hoje e 20 dias atrás
+  var today = new Date();
+  var twentyDaysAgo = new Date(today.getTime() - 20 * 24 * 3600 * 1000);
+  Logger.log("Hoje: " + today);
+  Logger.log("20 dias atrás: " + twentyDaysAgo);
+  
+  // Obtém os itens informados no formulário (até 10) e converte para lowercase
+  var itemsSelecionados = [];
+  for (var i = 1; i <= 10; i++) {
+    var value = formData["item" + i];
+    if (value && value.trim() !== "") {
+      itemsSelecionados.push(value.trim().toLowerCase());
+    }
+  }
+  Logger.log("Itens selecionados: " + itemsSelecionados.join(", "));
+  
+  // Acessa a aba "ESPELHO DO ESTOQUE"
+  var sheetEspelho = ss.getSheetByName("ESPELHO DO ESTOQUE");
+  if (!sheetEspelho) throw new Error("A aba 'ESPELHO DO ESTOQUE' não foi encontrada.");
+  
+  var lastRowEspelho = sheetEspelho.getLastRow();
+  if (lastRowEspelho < 2) throw new Error("Não há dados na aba 'ESPELHO DO ESTOQUE'.");
+  
+  var dadosRange = sheetEspelho.getRange(2, 1, lastRowEspelho - 1, sheetEspelho.getLastColumn());
+  var dadosValues = dadosRange.getValues();
+  Logger.log("Total de registros lidos (Espelho): " + dadosValues.length);
+  
+  var results = [];
+  
+  // Para cada item informado, filtra os registros que atendem ao critério
+  itemsSelecionados.forEach(function(item) {
+    // Filtra registros onde:
+    // - O valor da coluna A (item) é igual ao item informado (case-insensitive)
+    // - A data (coluna B) está entre 20 dias atrás e hoje
+    var registros = dadosValues.filter(function(row) {
+      var itemNome = row[0] ? row[0].toString().trim().toLowerCase() : "";
+      var dataCell = row[1];
+      if (!(dataCell instanceof Date)) {
+        dataCell = new Date(dataCell);
+      }
+      return itemNome === item && dataCell >= twentyDaysAgo && dataCell <= today;
+    });
+    
+    // Ordena os registros por data do mais recente para o mais antigo
+    registros.sort(function(a, b) {
+      return new Date(b[1]) - new Date(a[1]);
+    });
+    
+    // Pega os 5 registros mais recentes (se existirem) e inverte a ordem para exibição cronológica crescente
+    var ultimos5 = registros.slice(0, 5);
+    ultimos5.reverse();
+    
+    // Para cada registro, extrai:
+    // - Item (coluna A), Data (coluna B), Valor (coluna D – índice 3) e Valor adicional (coluna E – índice 4)
+    ultimos5.forEach(function(row) {
+      results.push([ row[0], row[1], row[3], row[4] ]);
+    });
+  });
+  
+  // Escreve os resultados na aba "CORES DESATUALIZADAS"
+  var sheetCores = ss.getSheetByName("CORES DESATUALIZADAS");
+  if (!sheetCores) {
+    sheetCores = ss.insertSheet("CORES DESATUALIZADAS");
+  } else {
+    sheetCores.clear(); // Limpa todo o conteúdo existente
+  }
+  
+  // Define o cabeçalho e insere os resultados
+  sheetCores.getRange(1, 1, 1, 4).setValues([["Item", "Data", "Valor", "Valor Adicional"]]);
+  if (results.length > 0) {
+    sheetCores.getRange(2, 1, results.length, 4).setValues(results);
+  }
+  
+  return "Consulta de atualização (20 dias) concluída na aba 'CORES DESATUALIZADAS'.";
+}
+/**
+ * showConsultaAtualizacaoSidebar: Abre uma sidebar com um formulário para inserir 15 itens.
+ */
+function showConsultaAtualizacaoSidebar() {
+  var template = HtmlService.createTemplateFromFile("DialogConsultaAtualizacao");
+  var htmlOutput = template.evaluate().setTitle("Consulta Atualização (15 Itens)").setWidth(350).setHeight(500);
+  SpreadsheetApp.getUi().showSidebar(htmlOutput);
+}
+/**
+ * gerarListagemCoresDesatualizadas: Para cada item informado via formulário (até 10),
+ * busca na aba ESTOQUE os últimos 5 registros onde:
+ *   - Coluna B da aba ESTOQUE → Coluna A da aba CORES DESATUALIZADAS,
+ *   - Coluna C da aba ESTOQUE → Coluna B,
+ *   - Coluna E da aba ESTOQUE → Coluna C.
+ * Os registros são inseridos um item abaixo do outro na aba CORES DESATUALIZADAS.
+ * Além disso, a função retorna uma tabela HTML com os resultados para ser exibida na sidebar.
+ */
+function gerarListagemCoresDesatualizadas(formData) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) throw new Error("A aba ESTOQUE não foi encontrada.");
+  
+  var lastRow = sheetEstoque.getLastRow();
+  if (lastRow < 2) throw new Error("Não há dados na aba ESTOQUE.");
+  
+  // Lê os dados da aba ESTOQUE (considerando que a primeira linha é cabeçalho)
+  var estoqueData = sheetEstoque.getRange(2, 1, lastRow - 1, sheetEstoque.getLastColumn()).getValues();
+  
+  // Obtém os itens do formulário (até 10 itens)
+  var items = [];
+  for (var i = 1; i <= 10; i++) {
+    var campo = formData["item" + i];
+    if (campo && campo.trim() !== "") {
+      items.push(campo.trim().toLowerCase());
+    }
+  }
+  if (items.length === 0) throw new Error("Informe pelo menos um item.");
+  
+  var resultados = [];
+  
+  // Para cada item, filtra os registros (baseado na coluna B da aba ESTOQUE)
+  items.forEach(function(item) {
+    var registros = estoqueData.filter(function(row) {
+      return row[1] && row[1].toString().trim().toLowerCase() === item;
+    });
+    // Seleciona os últimos 5 registros e inverte para ordem cronológica crescente
+    var ultimos5 = registros.slice(-5);
+    ultimos5.reverse();
+    ultimos5.forEach(function(row) {
+      resultados.push([ row[1], row[2], row[4] ]);
+    });
+  });
+  
+  // Escreve os resultados na aba CORES DESATUALIZADAS
+  var sheetCores = ss.getSheetByName("CORES DESATUALIZADAS");
+  if (!sheetCores) {
+    sheetCores = ss.insertSheet("CORES DESATUALIZADAS");
+  } else {
+    sheetCores.clear();
+  }
+  
+  sheetCores.getRange(1, 1, 1, 3).setValues([["Produto (Coluna B)", "Data (Coluna C)", "Valor Extra (Coluna E)"]]);
+  if (resultados.length > 0) {
+    sheetCores.getRange(2, 1, resultados.length, 3).setValues(resultados);
+  }
+  
+  // Constrói uma tabela HTML com os resultados para exibição na sidebar
+  var htmlOutput = "<h3>Resultados:</h3>";
+  if (resultados.length > 0) {
+    htmlOutput += "<table border='1' style='border-collapse:collapse; width:100%;'>";
+    htmlOutput += "<tr><th>Produto</th><th>Data</th><th>Valor Extra</th></tr>";
+    resultados.forEach(function(row) {
+      htmlOutput += "<tr>";
+      htmlOutput += "<td>" + row[0] + "</td>";
+      htmlOutput += "<td>" + row[1] + "</td>";
+      htmlOutput += "<td>" + row[2] + "</td>";
+      htmlOutput += "</tr>";
+    });
+    htmlOutput += "</table>";
+  } else {
+    htmlOutput += "<p>Nenhum registro encontrado.</p>";
+  }
+  
+  return htmlOutput;
+}
+/**
+ * Abre a sidebar para a listagem de cores desatualizadas.
+ */
+function abrirDialogListagemCores() {
+  var template = HtmlService.createTemplateFromFile("DialogListagemCores");
+  template.espelhoItems = JSON.stringify(getEspelhoItemList());
+  var htmlOutput = template.evaluate()
+    .setTitle("Listagem de Cores Desatualizadas")
+    .setWidth(350)
+    .setHeight(500);
+  SpreadsheetApp.getUi().showSidebar(htmlOutput);
+}
+
+function getEspelhoItemList() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ESPELHO DO ESTOQUE");
+  if (!sheet) return [];
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 1) return [];
+  var values = sheet.getRange(1, 1, lastRow, 1).getValues().flat();
+  var items = [];
+  for (var i = 0; i < values.length; i++) {
+    if (values[i] && values[i].toString().trim() !== "") {
+      items.push(values[i].toString().trim());
+    }
+  }
+  return Array.from(new Set(items));
+}
+/**
+ * Abre a sidebar “Estoque 3 Meses” corretamente,
+ * passando o HtmlOutput para showSidebar().
+ */
+function showEstoque3MesesSidebar() {
+  var template = HtmlService.createTemplateFromFile("DialogEstoque3Meses");
+  template.itemList    = JSON.stringify(getItemList());
+  // formata a data de hoje em dd/MM/yyyy
+  template.currentDate = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy');
+  var html = template.evaluate()
+                .setTitle("Consumo 3 Meses")
+                .setWidth(500)     // largura maior
+                .setHeight(600);   // altura maior
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+/**
+ * Soma o consumo dos últimos 3 meses para até 20 itens,
+ * atualiza a aba CONSUMO 3 MESES e retorna o HTML da tabela.
+ */
+/**
+ * processEstoque3Meses: Soma o consumo dos últimos 3 meses para até 20 itens
+ * e retorna HTML incluindo a última data de lançamento de cada um.
+ */
+function processEstoque3Meses(formData) {
+  var ss        = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEsp  = ss.getSheetByName("ESPELHO DO ESTOQUE");
+  var sheetBase = ss.getSheetByName("BASE TINGIMENTO");
+  var sheetCons = ss.getSheetByName("CONSUMO 3 MESES") 
+                  || ss.insertSheet("CONSUMO 3 MESES");
+
+  // Verifica existência das abas
+  if (!sheetEsp)  throw new Error("Aba 'ESPELHO DO ESTOQUE' não foi encontrada.");
+  if (!sheetBase) throw new Error("Aba 'BASE TINGIMENTO' não foi encontrada.");
+
+  // 1) Coleta até 20 itens do formulário
+  var items = [];
+  for (var i = 1; i <= 20; i++) {
+    var v = formData['item' + i];
+    if (v && v.trim()) items.push(v.trim());
+  }
+  if (items.length === 0) {
+    throw new Error("Informe ao menos um item.");
+  }
+
+  // 2) Soma consumo dos últimos 3 meses (coluna D do espelho)
+  var today         = new Date();
+  var threeMonthsAgo = new Date(today.getFullYear(), today.getMonth() - 3, today.getDate());
+  var espData = sheetEsp
+                  .getRange(2, 1, sheetEsp.getLastRow() - 1, sheetEsp.getLastColumn())
+                  .getValues();
+
+  var consumos = items.map(function(it) {
+    var total = 0;
+    espData.forEach(function(r) {
+      if (r[0] && r[0].toString().trim().toLowerCase() === it.toLowerCase()) {
+        var dt = (r[1] instanceof Date) ? r[1] : new Date(r[1]);
+        if (dt >= threeMonthsAgo && dt <= today) {
+          total += parseFloat(r[3]) || 0;
         }
+      }
+    });
+    return { item: it, total: total };
+  });
+
+  // 3) Carrega padrões da BASE TINGIMENTO e fallback (linha 3)
+  var baseAll = sheetBase
+                  .getRange(2, 1, sheetBase.getLastRow() - 1, sheetBase.getLastColumn())
+                  .getValues();
+  var base = baseAll.map(function(r) {
+    return {
+      pattern: String(r[0]).trim().toLowerCase(),
+      values:  r.slice(2).map(function(c) { return parseFloat(c) || 0; })
+    };
+  });
+  var fallbackValues = baseAll[1].slice(2).map(function(c) { return parseFloat(c) || 0; });
+
+  // 4) Para cada consumo, encontra padrão e pega 8 valores mais próximos
+  consumos.forEach(function(c) {
+    var text = c.item.toLowerCase();
+    var match = base
+      .filter(function(b) { return b.pattern && text.indexOf(b.pattern) !== -1; })
+      .sort(function(a, b) { return b.pattern.length - a.pattern.length; })[0];
+
+    var source = match ? match.values : fallbackValues;
+    var diffs = source
+      .map(function(v) { return { v: v, d: Math.abs(v - c.total) }; })
+      .sort(function(a, b) { return a.d - b.d; })
+      .slice(0, 8)
+      .map(function(o) { return o.v; });
+
+    for (var j = 0; j < 8; j++) {
+      c['s' + (j + 1)] = diffs[j] !== undefined ? diffs[j] : '';
+    }
+  });
+
+  // 5) Grava na planilha CONSUMO 3 MESES (mantendo formatação)
+  var headers = ['Item', 'Total últimos 3 MESES'];
+  for (var k = 1; k <= 8; k++) headers.push('LOTE TINGIMENTO ' + k);
+
+  // Limpa só o conteúdo, sem afetar formatação
+  sheetCons.clearContents();
+  sheetCons.getRange(1, 1, 1, headers.length).setValues([headers]);
+
+  var out = consumos.map(function(c) {
+    var row = [c.item, c.total];
+    for (var m = 1; m <= 8; m++) row.push(c['s' + m]);
+    return row;
+  });
+  if (out.length) {
+    sheetCons.getRange(2, 1, out.length, headers.length).setValues(out);
+  }
+
+  // Centraliza e redimensiona colunas
+  var lastRow = sheetCons.getLastRow();
+  var lastCol = headers.length;
+  sheetCons.getRange(1, 1, lastRow, lastCol).setHorizontalAlignment("center");
+  sheetCons.autoResizeColumns(1, lastCol);
+
+  // 6) Monta e retorna tabela HTML para a sidebar
+  var html = '<table><tr>';
+  headers.forEach(function(h) { html += '<th>' + h + '</th>'; });
+  html += '</tr>';
+  out.forEach(function(r) {
+    html += '<tr>';
+    r.forEach(function(cell) { html += '<td>' + cell + '</td>'; });
+    html += '</tr>';
+  });
+  html += '</table>';
+  return html;
+}
+
+/**
+ * gerarListagemVermelho: Para cada produto (coluna B) na aba ESTOQUE,
+ * coleta apenas o registro mais recente (não contendo 'ACERTO' ou 'ATUALIZAÇÃO')
+ * varrendo de baixo para cima, e grava em "CORES DESATUALIZADAS" como texto simples.
+ */
+function gerarListagemVermelho() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('ESTOQUE');
+  if (!sheet) throw new Error("A aba 'ESTOQUE' não foi encontrada.");
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 2) throw new Error("Não há dados na aba 'ESTOQUE'.");
+
+  // Lê todo o intervalo de dados como texto
+  var range = sheet.getRange(2, 1, lastRow - 1, lastCol);
+  var values = range.getDisplayValues();
+
+  // Regex para filtrar explicações indesejadas
+  var regex = /acerto|atualiza[cç][ãa]o/;
+
+  // Agrupa apenas o registro mais recente por produto (coluna B)
+  var grupos = {};
+  for (var i = values.length - 1; i >= 0; i--) {
+    var row = values[i];
+    var obs = row[4];
+    var textoObs = obs ? obs.toLowerCase() : '';
+    if (regex.test(textoObs)) continue; // ignora se conter keywords
+
+    var item = row[1]; // coluna B
+    // Se ainda não capturou o último registro desse item, faz push
+    if (!grupos[item]) {
+      grupos[item] = row; // armazena o único registro desejado
+    }
+  }
+
+  // Prepara resultados: extrai cada registro único
+  var resultados = [];
+  for (var produto in grupos) {
+    resultados.push(grupos[produto]);
+  }
+
+  // Grava na aba CORES DESATUALIZADAS
+  var outSheet = ss.getSheetByName('CORES DESATUALIZADAS');
+  if (!outSheet) throw new Error("A aba 'CORES DESATUALIZADAS' não foi encontrada.");
+  outSheet.clearContents();
+
+  // Cabeçalho conforme layout da aba ESTOQUE (texto)
+  var header = ['Grupo','Item','Data','NF','Obs','Saldo Anterior','Entrada','Saída','Novo Saldo','Data/Hora','Usuário'];
+  outSheet.getRange(1, 1, 1, header.length).setValues([header]);
+
+  // Insere registros únicos, mantendo formato texto
+  if (resultados.length) {
+    var targetRange = outSheet.getRange(2, 1, resultados.length, lastCol);
+    targetRange.setValues(resultados);
+    targetRange.setNumberFormat('@');
+  }
+
+  return 'CORES DESATUALIZADAS atualizada com ' + resultados.length + ' registro(s) mais recente(s) por produto.';
+}
+
+/**
+ * DEBUG: Busca e mostra TODOS os registros de um item na ESTOQUE
+ * Use esta função para verificar se o item existe e como está escrito
+ */
+function debugBuscarItemNaEstoque(itemBuscado) {
+  Logger.log("=== DEBUG: Buscando '" + itemBuscado + "' na ESTOQUE ===");
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  var lastRow = sheetEstoque.getLastRow();
+
+  Logger.log("Total de linhas na ESTOQUE: " + lastRow);
+
+  // Lê TODA a coluna B (Item) - USA getDisplayValues para forçar TEXTO
+  var data = sheetEstoque.getRange(2, 1, lastRow - 1, 2).getDisplayValues();
+  Logger.log("Lendo colunas A (Grupo) e B (Item) como TEXTO");
+
+  var itemNormalized = normalize(itemBuscado);
+  Logger.log("Item normalizado buscado: '" + itemNormalized + "'");
+
+  var encontrados = [];
+  var semelhantes = [];
+
+  for (var i = 0; i < data.length; i++) {
+    var grupo = data[i][0];
+    var item = data[i][1];
+
+    if (item && item.toString().trim() !== "") {
+      var itemStr = item.toString();
+      var itemNorm = normalize(itemStr);
+
+      // Exato
+      if (itemNorm === itemNormalized) {
+        encontrados.push({
+          linha: i + 2,
+          grupo: grupo,
+          item: itemStr,
+          itemNorm: itemNorm
+        });
+      }
+      // Semelhante (contém parte do nome)
+      else if (itemNorm.indexOf(itemNormalized) >= 0 || itemNormalized.indexOf(itemNorm) >= 0) {
+        semelhantes.push({
+          linha: i + 2,
+          grupo: grupo,
+          item: itemStr,
+          itemNorm: itemNorm
+        });
+      }
+    }
+  }
+
+  Logger.log("\n========================================");
+  Logger.log("RESULTADOS:");
+  Logger.log("========================================");
+
+  if (encontrados.length > 0) {
+    Logger.log("\n✓ ENCONTRADOS " + encontrados.length + " registros EXATOS:");
+    for (var j = 0; j < Math.min(10, encontrados.length); j++) {
+      var reg = encontrados[j];
+      Logger.log("  Linha " + reg.linha + ": Grupo='" + reg.grupo + "' | Item='" + reg.item + "'");
+    }
+    if (encontrados.length > 10) {
+      Logger.log("  ... e mais " + (encontrados.length - 10) + " registros");
+    }
+  } else {
+    Logger.log("\n✗ NENHUM registro EXATO encontrado");
+  }
+
+  if (semelhantes.length > 0) {
+    Logger.log("\n≈ ENCONTRADOS " + semelhantes.length + " registros SEMELHANTES:");
+    for (var k = 0; k < Math.min(10, semelhantes.length); k++) {
+      var sem = semelhantes[k];
+      Logger.log("  Linha " + sem.linha + ": Grupo='" + sem.grupo + "' | Item='" + sem.item + "'");
+    }
+    if (semelhantes.length > 10) {
+      Logger.log("  ... e mais " + (semelhantes.length - 10) + " registros");
+    }
+  }
+
+  Logger.log("\n========================================");
+  Logger.log("TOTAL: " + encontrados.length + " exatos, " + semelhantes.length + " semelhantes");
+  Logger.log("========================================");
+
+  return {
+    exatos: encontrados.length,
+    semelhantes: semelhantes.length,
+    amostraExatos: encontrados.slice(0, 5),
+    amostraSemelhantes: semelhantes.slice(0, 5)
+  };
+}
+
+// ========================================
+// WEB APP FUNCTIONS
+// ========================================
+
+/**
+ * loginUser: Autentica usuário no Web App
+ * Verifica usuário e senha na sheet USUÁRIOS
+ * Formato da sheet: Coluna A = Usuário, Coluna B = Senha
+ */
+function loginUser(username, password) {
+  try {
+    // Verifica credenciais no sheet USUÁRIOS
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetUsuarios = ss.getSheetByName("USUÁRIOS");
+
+    if (!sheetUsuarios) {
+      return { success: false, message: "Sheet USUÁRIOS não encontrada" };
+    }
+
+    var lastRow = sheetUsuarios.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum usuário cadastrado" };
+    }
+
+    var data = sheetUsuarios.getRange(2, 1, lastRow - 1, 2).getValues();
+
+    // Remove espaços extras e converte para string
+    var usernameClean = String(username).trim();
+    var passwordClean = String(password).trim();
+
+    Logger.log("Tentativa de login - Usuário: '" + usernameClean + "' | Senha: '" + passwordClean + "'");
+
+    for (var i = 0; i < data.length; i++) {
+      var dbUser = String(data[i][0]).trim();
+      var dbPass = String(data[i][1]).trim();
+
+      Logger.log("Comparando com linha " + (i+2) + " - Usuário: '" + dbUser + "' | Senha: '" + dbPass + "'");
+
+      if (dbUser === usernameClean && dbPass === passwordClean) {
+        // Login bem-sucedido
+        Logger.log("Login bem-sucedido!");
+        // NOVO SISTEMA: Usa setLoggedUserSession() para salvar sessão corretamente
+        setLoggedUserSession(usernameClean);
+        return { success: true, user: usernameClean };
+      }
+    }
+
+    Logger.log("Login falhou - credenciais não encontradas");
+    return { success: false, message: "Usuário ou senha incorretos" };
+  } catch (error) {
+    Logger.log("Erro loginUser: " + error);
+    return { success: false, message: "Erro ao fazer login: " + error.message };
+  }
+}
+
+/**
+ * debugUsuarios: Função para debugar usuários cadastrados
+ * Execute esta função no Apps Script para ver os usuários na aba USUÁRIOS
+ */
+function debugUsuarios() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetUsuarios = ss.getSheetByName("USUÁRIOS");
+
+  if (!sheetUsuarios) {
+    Logger.log("❌ Sheet USUÁRIOS não encontrada!");
+    return;
+  }
+
+  var lastRow = sheetUsuarios.getLastRow();
+  Logger.log("📊 Total de linhas: " + lastRow);
+
+  if (lastRow < 2) {
+    Logger.log("❌ Nenhum usuário cadastrado (sheet vazia)");
+    return;
+  }
+
+  var data = sheetUsuarios.getRange(1, 1, lastRow, 2).getValues();
+
+  Logger.log("\n=== USUÁRIOS CADASTRADOS ===");
+  for (var i = 0; i < data.length; i++) {
+    var user = String(data[i][0]);
+    var pass = String(data[i][1]);
+    Logger.log("Linha " + (i+1) + ":");
+    Logger.log("  Usuário: '" + user + "' (length: " + user.length + ")");
+    Logger.log("  Senha: '" + pass + "' (length: " + pass.length + ")");
+  }
+  Logger.log("=========================\n");
+}
+
+/**
+ * logoutUser: Remove autenticação do usuário
+ */
+function logoutUser() {
+  // NOVO SISTEMA: Usa clearLoggedUserSession() para limpar sessão corretamente
+  clearLoggedUserSession();
+  return { success: true };
+}
+
+/**
+ * getDashboardData: Retorna dados estatísticos para o dashboard
+ */
+function getDashboardData() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+    var sheetDados = ss.getSheetByName("DADOS");
+
+    if (!sheetEstoque || !sheetDados) {
+      return { success: false };
+    }
+
+    // Total de itens únicos
+    var dataEstoque = sheetEstoque.getRange(2, 2, sheetEstoque.getLastRow() - 1, 1).getValues();
+    var uniqueItems = new Set();
+    dataEstoque.forEach(function(row) {
+      if (row[0]) uniqueItems.add(row[0]);
+    });
+
+    // Total de grupos
+    var dataGrupos = sheetDados.getRange(2, 4, sheetDados.getLastRow() - 1, 1).getValues();
+    var uniqueGroups = new Set();
+    dataGrupos.forEach(function(row) {
+      if (row[0]) uniqueGroups.add(row[0]);
+    });
+
+    // Entradas e saídas de hoje
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var dataMovimentos = sheetEstoque.getRange(2, 3, sheetEstoque.getLastRow() - 1, 5).getValues();
+
+    var recentEntries = 0;
+    var recentExits = 0;
+
+    dataMovimentos.forEach(function(row) {
+      var dataMovimento = new Date(row[0]);
+      dataMovimento.setHours(0, 0, 0, 0);
+
+      if (dataMovimento.getTime() === today.getTime()) {
+        var entrada = parseFloat(row[3]) || 0;
+        var saida = parseFloat(row[4]) || 0;
+
+        if (entrada > 0) recentEntries++;
+        if (saida > 0) recentExits++;
+      }
+    });
+
+    return {
+      success: true,
+      totalItems: uniqueItems.size,
+      totalGroups: uniqueGroups.size,
+      recentEntries: recentEntries,
+      recentExits: recentExits
+    };
+  } catch (error) {
+    Logger.log("Erro getDashboardData: " + error);
+    return { success: false };
+  }
+}
+
+/**
+ * insertGroup: Wrapper para inserir grupo via web app
+ */
+function insertGroup(grupo) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetDados = ss.getSheetByName("DADOS");
+
+    if (!sheetDados) {
+      return { success: false, message: "Sheet DADOS não encontrada" };
+    }
+
+    // Verifica se grupo já existe
+    var lastRow = sheetDados.getLastRow();
+    var existingGroups = sheetDados.getRange(2, 4, Math.max(1, lastRow - 1), 1).getValues();
+
+    for (var i = 0; i < existingGroups.length; i++) {
+      if (normalize(existingGroups[i][0]) === normalize(grupo)) {
+        return { success: false, message: "Grupo já existe" };
+      }
+    }
+
+    // Adiciona grupo
+    var nextRow = sheetDados.getLastRow() + 1;
+    sheetDados.getRange(nextRow, 4).setValue(grupo);
+
+    // Invalida cache
+    invalidateCache();
+
+    return { success: true, message: "Grupo adicionado com sucesso" };
+  } catch (error) {
+    Logger.log("Erro insertGroup: " + error);
+    return { success: false, message: "Erro ao inserir grupo: " + error.message };
+  }
+}
+
+/**
+ * buscarProduto: Wrapper para localizar produto via web app
+ * Retorna dados ordenados do mais novo para o mais antigo, com cores das linhas
+ */
+function buscarProduto(item, dataInicio, dataFim) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum dado encontrado" };
+    }
+
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
+    var dataValues = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getValues(); // Para pegar datas como Date
+    var backgrounds = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getBackgrounds();
+    var results = [];
+    var itemUpper = item.toString().trim().toUpperCase();
+
+    // Filtra por item e data (se fornecida) - CORRESPONDÊNCIA EXATA
+    for (var i = 0; i < data.length; i++) {
+      var currentItemUpper = data[i][1].toString().trim().toUpperCase();
+      if (currentItemUpper === itemUpper) {
+        // Pega a data como objeto Date (não string) - Coluna D (índice 3)
+        var dataMovimento = dataValues[i][3];
 
         // Verifica filtro de data
         if (dataInicio && dataFim) {
-          const recordDate = new Date(record.date);
-          const inicio = new Date(dataInicio);
-          const fim = new Date(dataFim);
+          var inicio = new Date(dataInicio);
+          var fim = new Date(dataFim);
           inicio.setHours(0, 0, 0, 0);
           fim.setHours(23, 59, 59, 999);
 
-          if (recordDate < inicio || recordDate > fim) {
+          if (dataMovimento < inicio || dataMovimento > fim) {
             continue; // Pula este registro
           }
         }
 
-        results.push(record);
-      }
-
-      if (results.length === 0) {
-        return { success: false, message: 'Nenhum resultado encontrado' };
-      }
-
-      // Ordena do mais novo para o mais antigo
-      results.sort(function(a, b) {
-        return new Date(b.date).getTime() - new Date(a.date).getTime();
-      });
-
-      // Prepara o resultado no formato esperado
-      const rows = [];
-      const colors = [];
-      for (let j = 0; j < results.length; j++) {
-        rows.push(results[j].row);
-        colors.push(results[j].background);
-      }
-
-      return {
-        success: true,
-        data: {
-          headers: estoqueHeaders,
-          rows: rows,
-          colors: colors
-        }
-      };
-    }
-
-    // Populate autocomplete datalist
-    function populateAutocomplete(datalistId, items) {
-      const datalist = document.getElementById(datalistId);
-      if (!datalist) {
-        console.error('Datalist não encontrado:', datalistId);
-        return;
-      }
-      if (!items || !Array.isArray(items)) {
-        console.error('Items inválidos para:', datalistId, items);
-        return;
-      }
-
-      datalist.innerHTML = '';
-      items.forEach(item => {
-        if (item) {
-          const option = document.createElement('option');
-          option.value = item;
-          datalist.appendChild(option);
-        }
-      });
-    }
-
-    // Autocomplete customizado que filtra do início (esquerda para direita)
-    function setupCustomAutocomplete(inputId, getDataFn) {
-      const input = document.getElementById(inputId);
-      if (!input) return;
-
-      // Remove datalist attribute se existir
-      input.removeAttribute('list');
-
-      // Cria wrapper e dropdown
-      const wrapper = document.createElement('div');
-      wrapper.className = 'autocomplete-wrapper';
-      input.parentNode.insertBefore(wrapper, input);
-      wrapper.appendChild(input);
-
-      const dropdown = document.createElement('div');
-      dropdown.className = 'autocomplete-dropdown';
-      dropdown.id = inputId + '-dropdown';
-      wrapper.appendChild(dropdown);
-
-      let selectedIndex = -1;
-
-      // Filtra e mostra opções
-      function showOptions() {
-        const value = input.value.toUpperCase().trim();
-        const data = getDataFn();
-        if (!data || data.length === 0) {
-          dropdown.classList.remove('show');
-          return;
-        }
-
-        let filtered;
-        if (value === '') {
-          // Se não digitou nada, mostra as primeiras 15 opções
-          filtered = data.slice(0, 15);
-        } else {
-          // Filtra itens que COMEÇAM com o texto digitado
-          filtered = data.filter(item =>
-            item && item.toUpperCase().startsWith(value)
-          ).slice(0, 15); // Limita a 15 resultados
-        }
-
-        if (filtered.length === 0) {
-          dropdown.classList.remove('show');
-          return;
-        }
-
-        dropdown.innerHTML = filtered.map((item, idx) =>
-          `<div class="autocomplete-option" data-index="${idx}" data-value="${item}">${item}</div>`
-        ).join('');
-        dropdown.classList.add('show');
-        selectedIndex = -1;
-      }
-
-      // Seleciona opção
-      function selectOption(value) {
-        input.value = value;
-        dropdown.classList.remove('show');
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-
-      // Eventos
-      input.addEventListener('input', showOptions);
-      input.addEventListener('focus', showOptions);
-
-      input.addEventListener('keydown', function(e) {
-        const options = dropdown.querySelectorAll('.autocomplete-option');
-        if (!dropdown.classList.contains('show') || options.length === 0) return;
-
-        if (e.key === 'ArrowDown') {
-          e.preventDefault();
-          selectedIndex = Math.min(selectedIndex + 1, options.length - 1);
-          options.forEach((opt, i) => opt.classList.toggle('selected', i === selectedIndex));
-          if (options[selectedIndex]) options[selectedIndex].scrollIntoView({ block: 'nearest' });
-        } else if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          selectedIndex = Math.max(selectedIndex - 1, 0);
-          options.forEach((opt, i) => opt.classList.toggle('selected', i === selectedIndex));
-          if (options[selectedIndex]) options[selectedIndex].scrollIntoView({ block: 'nearest' });
-        } else if (e.key === 'Enter' && selectedIndex >= 0) {
-          e.preventDefault();
-          selectOption(options[selectedIndex].dataset.value);
-        } else if (e.key === 'Escape') {
-          dropdown.classList.remove('show');
-        }
-      });
-
-      dropdown.addEventListener('click', function(e) {
-        if (e.target.classList.contains('autocomplete-option')) {
-          selectOption(e.target.dataset.value);
-        }
-      });
-
-      // Fecha ao clicar fora
-      document.addEventListener('click', function(e) {
-        if (!wrapper.contains(e.target)) {
-          dropdown.classList.remove('show');
-        }
-      });
-    }
-
-    // Inicializa autocompletes customizados após carregar dados
-    function initCustomAutocompletes() {
-      setupCustomAutocomplete('estoqueItem', () => autocompleteData?.items || []);
-      setupCustomAutocomplete('estoqueGroup', () => autocompleteData?.groups || []);
-      setupCustomAutocomplete('estoqueNF', () => autocompleteData?.nfs || []);
-      setupCustomAutocomplete('localizarItem', () => autocompleteData?.items || []);
-    }
-
-    // Populate select
-    function populateSelect(selectId, items) {
-      const select = document.getElementById(selectId);
-      const firstOption = select.options[0];
-      select.innerHTML = '';
-      select.appendChild(firstOption);
-      items.forEach(item => {
-        const option = document.createElement('option');
-        option.value = item;
-        option.textContent = item;
-        select.appendChild(option);
-      });
-    }
-
-    // Auto-fill group when item is selected
-    document.addEventListener('DOMContentLoaded', function() {
-      const itemInput = document.getElementById('estoqueItem');
-      if (itemInput) {
-        // Auto-fill group when item changes
-        itemInput.addEventListener('change', function() {
-          const item = this.value;
-          if (item) {
-            google.script.run
-              .withSuccessHandler(function(result) {
-                if (result.lastGroup) {
-                  document.getElementById('estoqueGroup').value = result.lastGroup;
-                }
-              })
-              .getLastRegistrationFromIndex(item);
-
-            // Show product history
-            showProductHistory(item);
-          }
-        });
-
-        // Show history as user types (with debounce)
-        let typingTimer;
-        itemInput.addEventListener('input', function() {
-          clearTimeout(typingTimer);
-          const item = this.value;
-          typingTimer = setTimeout(function() {
-            if (item && item.length >= 3) {
-              showProductHistory(item);
-            } else {
-              document.getElementById('estoqueHistorico').style.display = 'none';
-            }
-          }, 500); // Wait 500ms after user stops typing
+        // Adiciona dados com cor de fundo
+        results.push({
+          row: data[i],
+          background: backgrounds[i][0], // Cor da primeira coluna (toda linha tem mesma cor)
+          date: dataMovimento // Para ordenação (usa Date object real)
         });
       }
+    }
 
-      // Toggle valor unitário when observação changes
-      const obsSelect = document.getElementById('estoqueObs');
-      if (obsSelect) {
-        obsSelect.addEventListener('change', toggleValorUnitario);
-      }
+    if (results.length === 0) {
+      return { success: false, message: "Produto não encontrado" };
+    }
+
+    // Ordena do mais novo para o mais antigo (descendente)
+    results.sort(function(a, b) {
+      return b.date.getTime() - a.date.getTime();
     });
 
-    // Handle Inserir Estoque - Insere e mostra resultado
-    function handleInserirEstoque(event) {
-      event.preventDefault();
-
-      const formData = {
-        item: document.getElementById('estoqueItem').value,
-        group: document.getElementById('estoqueGroup').value,
-        nf: document.getElementById('estoqueNF').value,
-        unidade: document.getElementById('estoqueUnidade').value,
-        obs: document.getElementById('estoqueObs').value,
-        entrada: document.getElementById('estoqueEntrada').value,
-        saida: document.getElementById('estoqueSaida').value,
-        valorUnitario: document.getElementById('estoqueValorUnitario').value
-      };
-
-      // Validação de campos obrigatórios
-      if (!formData.item.trim()) {
-        showMessage('estoqueMessage', 'Informe o produto.', 'error');
-        document.getElementById('estoqueItem').focus();
-        return false;
-      }
-
-      if (!formData.group.trim()) {
-        showMessage('estoqueMessage', 'Informe o grupo.', 'error');
-        document.getElementById('estoqueGroup').focus();
-        return false;
-      }
-
-      if (!formData.unidade) {
-        showMessage('estoqueMessage', 'Selecione a unidade.', 'error');
-        document.getElementById('estoqueUnidade').focus();
-        return false;
-      }
-
-      // Validation
-      const entrada = parseFloat(formData.entrada) || 0;
-      const saida = parseFloat(formData.saida) || 0;
-
-      if (entrada > 0 && saida > 0) {
-        showMessage('estoqueMessage', 'Não é possível ter entrada e saída ao mesmo tempo.', 'error');
-        return false;
-      }
-
-      if (entrada === 0 && saida === 0) {
-        showMessage('estoqueMessage', 'Informe uma entrada ou saída.', 'error');
-        return false;
-      }
-
-      // Validação de valor unitário (regra: obrigatório se obs ≠ "ATUALIZAÇÃO")
-      const valorUnitario = parseFloat(formData.valorUnitario) || 0;
-      if (formData.obs.toUpperCase() !== 'ATUALIZAÇÃO' && valorUnitario <= 0) {
-        showMessage('estoqueMessage', 'Valor unitário é obrigatório (exceto quando Obs = ATUALIZAÇÃO).', 'error');
-        return false;
-      }
-
-      // Verifica se é item novo
-      const nomeItemUpper = formData.item.trim().toUpperCase();
-      const isItemNovo = !(autocompleteData && autocompleteData.items &&
-        autocompleteData.items.some(item => item.toUpperCase() === nomeItemUpper));
-
-      // Mostra loading enquanto processa, exibindo últimos 20 lançamentos deste item
-      showLoading('Processando lançamento...', formData.item);
-
-      // Envia para servidor e AGUARDA confirmação antes de mostrar resultado
-      google.script.run
-        .withSuccessHandler(function(result) {
-          hideLoading();
-
-          if (result.success) {
-            // Preenche modal de resultado com dados CONFIRMADOS do servidor
-            document.getElementById('resultProduto').textContent = formData.item;
-            document.getElementById('resultGrupo').textContent = formData.group || '-';
-            document.getElementById('resultNF').textContent = formData.nf || '-';
-            document.getElementById('resultObs').textContent = formData.obs || '-';
-
-            document.getElementById('resultTipo').innerHTML = entrada > 0 ?
-              '<span style="color: #28a745; font-weight: bold;">ENTRADA</span>' :
-              '<span style="color: #dc3545; font-weight: bold;">SAÍDA</span>';
-            document.getElementById('resultQtd').textContent = entrada > 0 ? entrada : saida;
-
-            // Mostra saldos CONFIRMADOS do servidor
-            const saldoAnterior = result.saldoAnterior !== undefined ? result.saldoAnterior : 0;
-            const novoSaldo = result.novoSaldo !== undefined ? result.novoSaldo : 0;
-            document.getElementById('resultSaldoAnterior').textContent = saldoAnterior;
-            document.getElementById('resultNovoSaldo').textContent = novoSaldo;
-
-            // Mostra aviso de item novo
-            document.getElementById('avisoItemNovoModal').style.display = isItemNovo ? 'block' : 'none';
-
-            // Mostra aviso de status do produto (VERMELHO ou AMARELO)
-            const avisoStatus = document.getElementById('avisoStatusProduto');
-            if (result.warning && result.message) {
-              avisoStatus.style.display = 'block';
-
-              // Define a cor baseado no tipo de aviso
-              if (result.message.includes('DESATUALIZADO') || result.message.includes('20 DIAS')) {
-                avisoStatus.innerHTML = `
-                  <div style="font-size: 2.5rem; margin-bottom: 10px; animation: pulse 1.5s infinite;">🚨</div>
-                  <div style="font-size: 1.3rem; margin-bottom: 10px; text-transform: uppercase;">⚠️ ATENÇÃO URGENTE ⚠️</div>
-                  <div style="font-size: 1.1rem; margin-bottom: 15px; line-height: 1.5;">
-                    <strong>PRODUTO DESATUALIZADO!</strong><br>
-                    Última atualização há mais de 20 dias
-                  </div>
-                  <div style="font-size: 1.2rem; background: #d32f2f; color: white; padding: 15px; border-radius: 6px; margin-top: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
-                    ⚡ AÇÃO NECESSÁRIA: ATUALIZAR ESTOQUE URGENTE! ⚡<br>
-                    <span style="font-size: 0.9rem; margin-top: 8px; display: block;">
-                      Realize uma contagem física e registre uma atualização completa do saldo
-                    </span>
-                  </div>
-                `;
-                avisoStatus.style.background = '#ffebee';
-                avisoStatus.style.border = '4px solid #f44336';
-                avisoStatus.style.color = '#c62828';
-                avisoStatus.style.boxShadow = '0 8px 16px rgba(244, 67, 54, 0.3)';
-              } else if (result.message.includes('ENTRADA')) {
-                avisoStatus.innerHTML = `
-                  <div style="font-size: 2rem; margin-bottom: 8px;">📦</div>
-                  <div style="font-size: 1.1rem; margin-bottom: 10px;"><strong>⚠️ ENTRADA DE ESTOQUE REGISTRADA!</strong></div>
-                  <div style="font-size: 0.95rem; line-height: 1.5;">
-                    É necessário atualizar o estoque deste item para evitar furos de estoque.<br>
-                    <strong>Realize uma contagem física e registre uma atualização completa do saldo.</strong>
-                  </div>
-                `;
-                avisoStatus.style.background = '#fff3cd';
-                avisoStatus.style.border = '3px solid #ffc107';
-                avisoStatus.style.color = '#856404';
-                avisoStatus.style.boxShadow = '0 4px 8px rgba(255, 193, 7, 0.2)';
-              }
-            } else {
-              avisoStatus.style.display = 'none';
-            }
-
-            // Abre modal de resultado APÓS confirmação do servidor
-            document.getElementById('modalResultadoEstoque').classList.add('show');
-
-            // Reseta formulário
-            resetEstoqueForm();
-
-            // Atualiza caches em background
-            clearClientCache();
-            loadDashboardData();
-            loadAutocompleteData();
-          } else {
-            showMessage('estoqueMessage', result.message || 'Erro ao inserir estoque', 'error');
-          }
-        })
-        .withFailureHandler(function(error) {
-          hideLoading();
-          showMessage('estoqueMessage', 'Erro: ' + error.message, 'error');
-        })
-        .processEstoqueWebApp(formData);
-
-      return false;
+    // Extrai apenas as linhas e cores
+    var sortedRows = [];
+    var rowColors = [];
+    for (var j = 0; j < results.length; j++) {
+      sortedRows.push(results[j].row);
+      rowColors.push(results[j].background);
     }
 
-    // Fecha modal de resultado e volta para inserir outro item
-    function fecharModalResultado() {
-      document.getElementById('modalResultadoEstoque').classList.remove('show');
-      // Garante que o formulário está limpo
-      resetEstoqueForm();
-    }
-
-    // Reset estoque form - limpa todos os campos completamente
-    function resetEstoqueForm() {
-      // Limpa campos de texto
-      document.getElementById('estoqueItem').value = '';
-      document.getElementById('estoqueGroup').value = '';
-      document.getElementById('estoqueNF').value = '';
-
-      // Reseta selects para primeira opção (vazia)
-      const unidadeSelect = document.getElementById('estoqueUnidade');
-      if (unidadeSelect) unidadeSelect.selectedIndex = 0;
-
-      const obsSelect = document.getElementById('estoqueObs');
-      if (obsSelect) obsSelect.selectedIndex = 0;
-
-      // Reseta valores numéricos
-      document.getElementById('estoqueEntrada').value = '0';
-      document.getElementById('estoqueSaida').value = '0';
-      document.getElementById('estoqueValorUnitario').value = '';
-
-      // Esconde campos condicionais
-      document.getElementById('valorUnitarioGroup').style.display = 'none';
-      document.getElementById('estoqueHistorico').style.display = 'none';
-
-      // Limpa avisos de item novo
-      document.getElementById('avisoItemNovoEstoque').style.display = 'none';
-      document.getElementById('avisoItemNovoSmall').style.display = 'none';
-
-      // Reseta estilo do grupo
-      const grupoContainer = document.getElementById('estoqueGroupContainer');
-      grupoContainer.style.background = '';
-      grupoContainer.style.padding = '';
-      grupoContainer.style.border = '';
-
-      // Foca no campo de item
-      document.getElementById('estoqueItem').focus();
-    }
-
-    // Volta da área de resultados para o formulário de inserção
-    function voltarParaFormulario() {
-      document.getElementById('estoqueResultArea').style.display = 'none';
-      document.getElementById('estoqueFormArea').style.display = 'block';
-      document.getElementById('estoqueItem').focus();
-    }
-
-    // ========== FUNÇÕES INSERIR NF (MÚLTIPLOS ITENS) ==========
-    let nfItemCounter = 0;
-
-    // Adicionar item na lista de NF
-    function adicionarItemNF() {
-      nfItemCounter++;
-      const container = document.getElementById('nfItensContainer');
-      const itemDiv = document.createElement('div');
-      itemDiv.id = 'nfItem-' + nfItemCounter;
-      itemDiv.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr auto; gap: 8px; margin-bottom: 10px; padding: 10px; background: white; border-radius: 4px; align-items: end;';
-      itemDiv.innerHTML = `
-        <div class="form-group" style="margin-bottom: 0;">
-          <label style="font-size: 0.75rem;">Item *</label>
-          <input type="text" class="nf-item-nome" list="nfItemDatalist-${nfItemCounter}" required style="padding: 6px;" placeholder="Nome do item" onblur="verificarItemNovo(this, ${nfItemCounter})">
-          <datalist id="nfItemDatalist-${nfItemCounter}"></datalist>
-          <small class="nf-item-novo-aviso" style="display: none; color: #dc3545; font-size: 0.7rem;">⚠️ Item NOVO!</small>
-        </div>
-        <div class="form-group grupo-field-novo" id="grupoField-${nfItemCounter}" style="margin-bottom: 0;">
-          <label style="font-size: 0.75rem;">Grupo *</label>
-          <select class="nf-item-grupo" style="padding: 6px;">
-            <option value="">Selecione...</option>
-          </select>
-        </div>
-        <div class="form-group" style="margin-bottom: 0;">
-          <label style="font-size: 0.75rem;">Preço *</label>
-          <input type="number" class="nf-item-preco" step="0.01" min="0" required style="padding: 6px;" placeholder="0.00">
-        </div>
-        <div class="form-group" style="margin-bottom: 0;">
-          <label style="font-size: 0.75rem;">Lote</label>
-          <input type="text" class="nf-item-lote" style="padding: 6px;" placeholder="Lote">
-        </div>
-        <div class="form-group" style="margin-bottom: 0;">
-          <label style="font-size: 0.75rem;">Entrada *</label>
-          <input type="number" class="nf-item-entrada" step="0.01" min="0.01" required style="padding: 6px;" placeholder="Qtd">
-        </div>
-        <button type="button" class="btn btn-danger" onclick="removerItemNF(${nfItemCounter})" style="padding: 6px 10px; height: fit-content;">✕</button>
-      `;
-      container.appendChild(itemDiv);
-
-      // Popula datalist do item
-      const datalist = document.getElementById('nfItemDatalist-' + nfItemCounter);
-      if (autocompleteData && autocompleteData.items) {
-        autocompleteData.items.forEach(item => {
-          const option = document.createElement('option');
-          option.value = item;
-          datalist.appendChild(option);
-        });
+    return {
+      success: true,
+      data: {
+        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
+        rows: sortedRows,
+        colors: rowColors
       }
+    };
+  } catch (error) {
+    Logger.log("Erro buscarProduto: " + error);
+    return { success: false, message: "Erro ao buscar produto: " + error.message };
+  }
+}
 
-      // Popula select de grupos
-      const grupoSelect = itemDiv.querySelector('.nf-item-grupo');
-      if (autocompleteData && autocompleteData.groups) {
-        autocompleteData.groups.forEach(grupo => {
-          const option = document.createElement('option');
-          option.value = grupo;
-          option.textContent = grupo;
-          grupoSelect.appendChild(option);
-        });
-      }
+/**
+ * testeConexao: Função de teste para verificar se a comunicação está funcionando
+ */
+function testeConexao() {
+  return { success: true, message: "Conexão funcionando!", timestamp: new Date().toString() };
+}
+
+/**
+ * carregarTodosOsDadosEstoque: Carrega TODOS os dados do estoque de uma vez
+ * Para filtros instantâneos no lado do cliente
+ */
+function carregarTodosOsDadosEstoque() {
+  // Garantia absoluta de que NUNCA retornará null
+  var resultado = { success: false, message: "Erro desconhecido", data: [] };
+
+  try {
+    Logger.log("=== carregarTodosOsDadosEstoque INICIADO ===");
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      Logger.log("ERRO: Sheet ESTOQUE não encontrada");
+      resultado.message = "Sheet ESTOQUE não encontrada";
+      return resultado;
     }
 
-    // Timeout para verificação de item novo na NF
-    let verificarItemNFTimeout = {};
+    var lastRow = sheetEstoque.getLastRow();
+    var lastCol = sheetEstoque.getLastColumn();
+    Logger.log("Total de linhas: " + lastRow + ", Total de colunas: " + lastCol);
 
-    // Verifica se o item é novo (não existe na base)
-    // Usa delay para aguardar o usuário terminar de selecionar do autocomplete
-    function verificarItemNovo(input, itemId) {
-      // Limpa timeout anterior para este item
-      clearTimeout(verificarItemNFTimeout[itemId]);
-
-      // Aguarda 400ms após o blur para verificar
-      verificarItemNFTimeout[itemId] = setTimeout(function() {
-        const nomeItem = input.value.trim().toUpperCase();
-        const grupoField = document.getElementById('grupoField-' + itemId);
-        const avisoNovo = input.parentElement.querySelector('.nf-item-novo-aviso');
-
-        if (!nomeItem) {
-          grupoField.classList.remove('show');
-          avisoNovo.style.display = 'none';
-          return;
-        }
-
-        // Verifica se item existe na lista de autocomplete
-        const itemExiste = autocompleteData && autocompleteData.items &&
-          autocompleteData.items.some(item => item.toUpperCase() === nomeItem);
-
-        if (!itemExiste) {
-          grupoField.classList.add('show');
-          avisoNovo.style.display = 'block';
-        } else {
-          grupoField.classList.remove('show');
-          avisoNovo.style.display = 'none';
-        }
-      }, 400);
+    if (lastRow < 2) {
+      Logger.log("Planilha vazia - retornando array vazio");
+      return { success: true, data: [], headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"] };
     }
 
-    // Verifica se um item existe na base
-    function itemExisteNaBase(nomeItem) {
-      if (!nomeItem) return false;
-      const nomeUpper = nomeItem.trim().toUpperCase();
-      return autocompleteData && autocompleteData.items &&
-        autocompleteData.items.some(item => item.toUpperCase() === nomeUpper);
+    // Detecta automaticamente o número de colunas (11 ou 13)
+    var numCols = lastCol >= 13 ? 13 : 11;
+    Logger.log("Usando estrutura de " + numCols + " colunas");
+
+    // Limita a 2.000 registros mais recentes para evitar exceder limite de transferência
+    // Com 43k+ linhas, 10k era grande demais. 2k é suficiente para buscas rápidas.
+    var maxRowsToLoad = 2000;
+    var totalDataRows = lastRow - 1; // Exclui header
+
+    var startRow, numRowsToLoad;
+    if (totalDataRows <= maxRowsToLoad) {
+      // Se tem menos de 2000 linhas, carrega tudo
+      startRow = 2;
+      numRowsToLoad = totalDataRows;
+    } else {
+      // Se tem mais de 2000, carrega apenas as últimas 2000 (mais recentes)
+      startRow = lastRow - maxRowsToLoad + 1;
+      numRowsToLoad = maxRowsToLoad;
     }
 
-    // Remover item da lista de NF
-    function removerItemNF(id) {
-      const itemDiv = document.getElementById('nfItem-' + id);
-      if (itemDiv) {
-        itemDiv.remove();
-      }
-    }
+    Logger.log("Carregando " + numRowsToLoad + " linhas (da linha " + startRow + " até " + (startRow + numRowsToLoad - 1) + ")");
 
-    // Limpar formulário NF
-    function limparFormNF() {
-      document.getElementById('nfNumero').value = '';
-      document.getElementById('nfPedido').value = '';
-      document.getElementById('nfUnidade').selectedIndex = 0;
-      document.getElementById('nfObs').selectedIndex = 0;
-      document.getElementById('nfItensContainer').innerHTML = '';
-      nfItemCounter = 0;
-      showMessage('nfMessage', '', '');
-    }
+    var data = sheetEstoque.getRange(startRow, 1, numRowsToLoad, numCols).getDisplayValues();
+    var dataValues = sheetEstoque.getRange(startRow, 1, numRowsToLoad, numCols).getValues();
+    var backgrounds = sheetEstoque.getRange(startRow, 1, numRowsToLoad, numCols).getBackgrounds();
 
-    // Voltar para formulário NF após inserção
-    function voltarParaNF() {
-      document.getElementById('nfResultArea').style.display = 'none';
-      document.getElementById('nfFormArea').style.display = 'block';
-      limparFormNF();
-    }
+    Logger.log("Dados carregados - processando...");
+    var allData = [];
 
-    // Variável global para armazenar itens pendentes de confirmação
-    let itensParaConfirmar = [];
-    let itensConfirmados = new Set();
+    // Define índice da coluna Data baseado no número de colunas
+    var dateColIndex = (numCols === 13) ? 3 : 2;  // Coluna D (índice 3) para 13 cols, C (índice 2) para 11 cols
 
-    // Processar inserção de NF com múltiplos itens - Abre modal de confirmação
-    function handleInserirNF() {
-      // Validar campos globais
-      const nfNumero = document.getElementById('nfNumero').value.trim();
-      const nfPedido = document.getElementById('nfPedido').value.trim();
-      const nfUnidade = document.getElementById('nfUnidade').value;
-      const nfObs = document.getElementById('nfObs').value;
-
-      if (!nfNumero) {
-        showMessage('nfMessage', 'Informe o número da NF', 'error');
-        return;
-      }
-      if (!nfUnidade) {
-        showMessage('nfMessage', 'Selecione a unidade', 'error');
-        return;
-      }
-
-      // Coletar itens
-      const container = document.getElementById('nfItensContainer');
-      const itemDivs = container.querySelectorAll('[id^="nfItem-"]');
-
-      if (itemDivs.length === 0) {
-        showMessage('nfMessage', 'Adicione pelo menos um item', 'error');
-        return;
-      }
-
-      itensParaConfirmar = [];
-      itensConfirmados = new Set();
-      let hasError = false;
-      let temItemNovo = false;
-
-      itemDivs.forEach((div, index) => {
-        const nome = div.querySelector('.nf-item-nome').value.trim().toUpperCase();
-        const preco = parseFloat(div.querySelector('.nf-item-preco').value) || 0;
-        const lote = div.querySelector('.nf-item-lote').value.trim();
-        const entrada = parseFloat(div.querySelector('.nf-item-entrada').value) || 0;
-        const grupoSelect = div.querySelector('.nf-item-grupo');
-        const grupoSelecionado = grupoSelect ? grupoSelect.value : '';
-
-        if (!nome) {
-          showMessage('nfMessage', `Item ${index + 1}: Nome do item é obrigatório`, 'error');
-          hasError = true;
-          return;
-        }
-        if (preco <= 0) {
-          showMessage('nfMessage', `Item ${index + 1} (${nome}): Preço é obrigatório`, 'error');
-          hasError = true;
-          return;
-        }
-        if (entrada <= 0) {
-          showMessage('nfMessage', `Item ${index + 1} (${nome}): Entrada é obrigatória`, 'error');
-          hasError = true;
-          return;
-        }
-
-        // Verifica se é item novo
-        const isNovoItem = !itemExisteNaBase(nome);
-
-        // Se for item novo, exige grupo
-        if (isNovoItem && !grupoSelecionado) {
-          showMessage('nfMessage', `Item ${index + 1} (${nome}): Item NOVO precisa de um Grupo selecionado`, 'error');
-          hasError = true;
-          return;
-        }
-
-        if (isNovoItem) {
-          temItemNovo = true;
-        }
-
-        // Concatena NF + Pedido + Lote
-        let nfConcatenado = nfNumero;
-        if (nfPedido) nfConcatenado += ' ' + nfPedido;
-        if (lote) nfConcatenado += ' ' + lote;
-
-        itensParaConfirmar.push({
-          index: index + 1,
-          item: nome,
-          unidade: nfUnidade,
-          nf: nfConcatenado,
-          obs: nfObs,
-          entrada: entrada,
-          saida: 0,
-          valorUnitario: preco,
-          lote: lote,
-          grupo: grupoSelecionado,
-          isNovo: isNovoItem
-        });
+    for (var i = 0; i < data.length; i++) {
+      allData.push({
+        row: data[i],
+        date: dataValues[i][dateColIndex],
+        background: backgrounds[i][0]
       });
-
-      if (hasError) return;
-
-      // Mostra loading enquanto prepara modal de confirmação
-      showLoading('Preparando confirmação...');
-
-      // Pequeno delay para garantir que o loading seja exibido
-      setTimeout(() => {
-        // Abre modal de confirmação
-        abrirModalConfirmacao(nfNumero, nfPedido, nfUnidade, nfObs, temItemNovo);
-      }, 100);
     }
 
-    // Abre o modal de confirmação com os itens
-    function abrirModalConfirmacao(nfNumero, nfPedido, nfUnidade, nfObs, temItemNovo) {
-      // Mostra/esconde aviso de itens novos
-      document.getElementById('avisoItensNovos').style.display = temItemNovo ? 'block' : 'none';
+    Logger.log("Processamento concluído - " + allData.length + " registros");
 
-      // Info da NF
-      let infoHtml = `<strong>NF:</strong> ${nfNumero}`;
-      if (nfPedido) infoHtml += ` | <strong>Pedido:</strong> ${nfPedido}`;
-      infoHtml += ` | <strong>Unidade:</strong> ${nfUnidade}`;
-      if (nfObs) infoHtml += ` | <strong>Obs:</strong> ${nfObs}`;
-      document.getElementById('infoNFModal').innerHTML = infoHtml;
+    // Headers baseados no número de colunas
+    var headers = (numCols === 13)
+      ? ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"]
+      : ["Grupo", "Item", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Alterado Em", "Alterado Por"];
 
-      // Lista de itens
-      const listaContainer = document.getElementById('listaItensConfirmacao');
-      let listaHtml = '';
+    Logger.log("=== carregarTodosOsDadosEstoque FINALIZADO COM SUCESSO ===");
 
-      itensParaConfirmar.forEach((item, idx) => {
-        const classeNovo = item.isNovo ? 'item-novo' : '';
-        const badgeNovo = item.isNovo ? '<span class="item-novo-badge">NOVO</span>' : '';
-        const grupoDisplay = item.isNovo ? item.grupo : '(existente)';
+    return {
+      success: true,
+      data: allData,
+      headers: headers
+    };
+  } catch (error) {
+    Logger.log("ERRO CRÍTICO em carregarTodosOsDadosEstoque: " + error);
+    Logger.log("Stack trace: " + error.stack);
+    resultado.message = "Erro ao carregar dados: " + error.message;
+    resultado.error = error.toString();
+    return resultado;
+  }
 
-        listaHtml += `
-          <div class="confirm-item-row ${classeNovo}" data-index="${idx}">
-            <span class="item-index">${item.index}</span>
-            <span class="item-nome">${item.item}${badgeNovo}</span>
-            <span>${grupoDisplay}</span>
-            <span>R$ ${item.valorUnitario.toFixed(2)}</span>
-            <span>${item.lote || '-'}</span>
-            <span>${item.entrada}</span>
-            <button type="button" class="btn-ok-item" onclick="confirmarItem(${idx})" id="btnOkItem-${idx}">OK</button>
-          </div>
-        `;
+  // Garantia final - nunca deve chegar aqui
+  return resultado;
+}
+
+/**
+ * mostrarTodosProdutos: Retorna todos os produtos do estoque
+ * Ordenados do mais novo para o mais antigo, com cores
+ */
+function mostrarTodosProdutos(dataInicio, dataFim) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum dado encontrado" };
+    }
+
+    var data = sheetEstoque.getRange(2, 1, Math.min(5000, lastRow - 1), 11).getDisplayValues();
+    var dataValues = sheetEstoque.getRange(2, 1, Math.min(5000, lastRow - 1), 11).getValues(); // Para pegar datas como Date
+    var backgrounds = sheetEstoque.getRange(2, 1, Math.min(5000, lastRow - 1), 11).getBackgrounds();
+    var results = [];
+
+    // Filtra por data (se fornecida)
+    for (var i = 0; i < data.length; i++) {
+      var dataMovimento = dataValues[i][2]; // Usa Date object real
+
+      if (dataInicio && dataFim) {
+        var inicio = new Date(dataInicio);
+        var fim = new Date(dataFim);
+        inicio.setHours(0, 0, 0, 0);
+        fim.setHours(23, 59, 59, 999);
+
+        if (dataMovimento < inicio || dataMovimento > fim) {
+          continue; // Pula este registro
+        }
+      }
+
+      results.push({
+        row: data[i],
+        background: backgrounds[i][0],
+        date: dataMovimento // Usa Date object real
       });
-
-      listaContainer.innerHTML = listaHtml;
-
-      // Atualiza contador
-      document.getElementById('totalConfirmados').textContent = '0';
-      document.getElementById('totalItensNF').textContent = itensParaConfirmar.length;
-      document.getElementById('btnConfirmarInsercaoFinal').disabled = true;
-
-      // Esconde loading e mostra modal
-      hideLoading();
-      document.getElementById('modalConfirmacaoNF').classList.add('show');
     }
 
-    // Confirma um item individual
-    function confirmarItem(idx) {
-      const btn = document.getElementById('btnOkItem-' + idx);
-      btn.classList.add('confirmed');
-      btn.disabled = true;
-      btn.textContent = 'OK';
+    // Ordena do mais novo para o mais antigo (descendente)
+    results.sort(function(a, b) {
+      return b.date.getTime() - a.date.getTime();
+    });
 
-      itensConfirmados.add(idx);
+    // Extrai apenas as linhas e cores
+    var sortedRows = [];
+    var rowColors = [];
+    for (var j = 0; j < results.length; j++) {
+      sortedRows.push(results[j].row);
+      rowColors.push(results[j].background);
+    }
 
-      // Atualiza contador
-      document.getElementById('totalConfirmados').textContent = itensConfirmados.size;
+    return {
+      success: true,
+      data: {
+        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
+        rows: sortedRows,
+        colors: rowColors
+      }
+    };
+  } catch (error) {
+    Logger.log("Erro mostrarTodosProdutos: " + error);
+    return { success: false, message: "Erro ao buscar produtos: " + error.message };
+  }
+}
 
-      // Habilita botão final se todos confirmados
-      if (itensConfirmados.size === itensParaConfirmar.length) {
-        document.getElementById('btnConfirmarInsercaoFinal').disabled = false;
+/**
+ * filtrarEstoquePorPeriodo: Aplica filtro por período na planilha
+ */
+function filtrarEstoquePorPeriodo(dataInicio, dataFim) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    // Remove filtro existente
+    var filter = sheetEstoque.getFilter();
+    if (filter) {
+      filter.remove();
+    }
+
+    // Cria novo filtro
+    var lastRow = sheetEstoque.getLastRow();
+    var lastCol = sheetEstoque.getLastColumn();
+    var range = sheetEstoque.getRange(1, 1, lastRow, lastCol);
+
+    var newFilter = range.createFilter();
+
+    // Aplica filtro na coluna C (Data)
+    var inicio = new Date(dataInicio);
+    var fim = new Date(dataFim);
+
+    var criteria = SpreadsheetApp.newFilterCriteria()
+      .whenDateAfter(inicio)
+      .whenDateBefore(fim)
+      .build();
+
+    newFilter.setColumnFilterCriteria(3, criteria);
+
+    return { success: true, message: "Filtro aplicado com sucesso" };
+  } catch (error) {
+    Logger.log("Erro filtrarEstoquePorPeriodo: " + error);
+    return { success: false, message: "Erro ao filtrar: " + error.message };
+  }
+}
+
+/**
+ * getEstoque3Meses: Retorna estoque dos últimos 3 meses
+ */
+function getEstoque3Meses() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum dado encontrado" };
+    }
+
+    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 11).getValues();
+    var results = [];
+
+    var today = new Date();
+    var threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(today.getMonth() - 3);
+
+    for (var i = 0; i < data.length; i++) {
+      var dataMovimento = new Date(data[i][2]);
+      if (dataMovimento >= threeMonthsAgo) {
+        results.push(data[i]);
       }
     }
 
-    // Fecha modal de confirmação
-    function fecharModalConfirmacao() {
-      document.getElementById('modalConfirmacaoNF').classList.remove('show');
+    if (results.length === 0) {
+      return { success: false, message: "Nenhum movimento nos últimos 3 meses" };
     }
 
-    // Volta para edição do formulário
-    function voltarParaEdicao() {
-      fecharModalConfirmacao();
-      showMessage('nfMessage', 'Ajuste os dados e clique em Confirmar novamente', 'info');
-    }
-
-    // Confirma inserção final e envia para o servidor
-    function confirmarInsercaoFinal() {
-      if (itensConfirmados.size !== itensParaConfirmar.length) {
-        alert('Confirme todos os itens antes de prosseguir');
-        return;
+    return {
+      success: true,
+      data: {
+        headers: ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo", "Valor", "Alterado Em", "Alterado Por"],
+        rows: results
       }
+    };
+  } catch (error) {
+    Logger.log("Erro getEstoque3Meses: " + error);
+    return { success: false, message: "Erro ao buscar estoque: " + error.message };
+  }
+}
 
-      const nfNumero = document.getElementById('nfNumero').value.trim();
+/**
+ * registrarAuditoria: Registra ações realizadas no sistema para auditoria
+ * @param {string} acao - Descrição da ação realizada
+ * @param {string} item - Item afetado (opcional)
+ * @param {string} detalhes - Detalhes adicionais (opcional)
+ */
+function registrarAuditoria(acao, item, detalhes) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetAuditoria = ss.getSheetByName("AUDITORIA");
 
-      // Prepara itens para envio
-      const itensParaEnviar = itensParaConfirmar.map(item => ({
-        item: item.item,
-        unidade: item.unidade,
-        nf: item.nf,
-        obs: item.obs,
-        entrada: item.entrada,
-        saida: item.saida,
-        valorUnitario: item.valorUnitario,
-        grupo: item.grupo || '' // Envia grupo para itens novos
-      }));
-
-      fecharModalConfirmacao();
-
-      // Mostra loading durante processamento
-      showLoading('Inserindo ' + itensParaEnviar.length + ' itens no sistema...');
-
-      // Envia para servidor
-      google.script.run
-        .withSuccessHandler(function(result) {
-          hideLoading();
-          if (result.success) {
-            document.getElementById('nfFormArea').style.display = 'none';
-            document.getElementById('nfResultArea').style.display = 'block';
-
-            // Mostra mensagem e tabela de itens inseridos
-            document.getElementById('nfResultMessage').innerHTML =
-              '<strong>' + itensParaEnviar.length + '</strong> item(ns) inserido(s) com sucesso na NF <strong>' + nfNumero + '</strong>';
-
-            // Mostra tabela com os itens inseridos
-            mostrarTabelaItensInseridos(itensParaEnviar);
-
-            // Atualiza cache e autocomplete
-            clearClientCache();
-            loadDashboardData();
-            loadAutocompleteData();
-
-            showMessage('nfMessage', '', '');
-          } else {
-            showMessage('nfMessage', result.message || 'Erro ao inserir itens', 'error');
-          }
-        })
-        .withFailureHandler(function(error) {
-          hideLoading();
-          showMessage('nfMessage', 'Erro: ' + error.message, 'error');
-        })
-        .processMultipleEstoqueItemsWithGroup(itensParaEnviar);
+    // Cria a aba se não existir
+    if (!sheetAuditoria) {
+      sheetAuditoria = ss.insertSheet("AUDITORIA");
+      sheetAuditoria.getRange(1, 1, 1, 6).setValues([["Data/Hora", "Usuário", "Email", "Ação", "Item", "Detalhes"]]);
+      sheetAuditoria.getRange(1, 1, 1, 6).setFontWeight("bold");
+      sheetAuditoria.setFrozenRows(1);
     }
 
-    // Mostra tabela com os itens que foram inseridos
-    function mostrarTabelaItensInseridos(itens) {
-      const container = document.getElementById('nfResultTable');
-      let html = `
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Item</th>
-              <th>Grupo</th>
-              <th>Unidade</th>
-              <th>NF</th>
-              <th>Preço</th>
-              <th>Entrada</th>
-            </tr>
-          </thead>
-          <tbody>
-      `;
+    var now = new Date();
+    var usuario = getLoggedUser();
+    var email = "";
 
-      itens.forEach((item, idx) => {
-        html += `
-          <tr>
-            <td>${idx + 1}</td>
-            <td>${item.item}</td>
-            <td>${item.grupo || '-'}</td>
-            <td>${item.unidade}</td>
-            <td>${item.nf}</td>
-            <td>R$ ${item.valorUnitario.toFixed(2)}</td>
-            <td>${item.entrada}</td>
-          </tr>
-        `;
-      });
-
-      html += '</tbody></table>';
-      container.innerHTML = html;
+    // Tenta pegar o email do usuário atual
+    try {
+      email = Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail() || "";
+    } catch (e) {
+      email = "N/A";
     }
 
-    // ========== FUNÇÕES LANÇAMENTO EM LOTE ==========
-    let loteItemCounter = 0;
-    let itensParaConfirmarLote = [];
-    let itensConfirmadosLote = new Set();
-
-    // Abre a área de lançamento em lote
-    function abrirLancamentoLote() {
-      document.getElementById('estoqueFormArea').style.display = 'none';
-      document.getElementById('estoqueResultArea').style.display = 'none';
-      document.getElementById('estoqueLoteResultArea').style.display = 'none';
-      document.getElementById('estoqueLoteArea').style.display = 'block';
-
-      // Popula os selects do lote
-      populateLoteSelects();
-
-      // Adiciona o primeiro item automaticamente
-      if (document.getElementById('loteItensContainer').children.length === 0) {
-        adicionarItemLote();
-      }
-    }
-
-    // Popula os selects do formulário de lote
-    function populateLoteSelects() {
-      if (!autocompleteData) return;
-
-      // Grupo
-      const grupoSelect = document.getElementById('loteGrupo');
-      if (grupoSelect.options.length <= 1 && autocompleteData.groups) {
-        autocompleteData.groups.forEach(grupo => {
-          const option = document.createElement('option');
-          option.value = grupo;
-          option.textContent = grupo;
-          grupoSelect.appendChild(option);
-        });
-      }
-
-      // Unidade
-      const unidadeSelect = document.getElementById('loteUnidade');
-      if (unidadeSelect.options.length <= 1 && autocompleteData.medidas) {
-        autocompleteData.medidas.forEach(medida => {
-          const option = document.createElement('option');
-          option.value = medida;
-          option.textContent = medida;
-          unidadeSelect.appendChild(option);
-        });
-      }
-
-      // Observação
-      const obsSelect = document.getElementById('loteObs');
-      if (obsSelect.options.length <= 1 && autocompleteData.observacoes) {
-        autocompleteData.observacoes.forEach(obs => {
-          const option = document.createElement('option');
-          option.value = obs;
-          option.textContent = obs;
-          obsSelect.appendChild(option);
-        });
-      }
-    }
-
-    // Volta para o formulário de estoque simples
-    function voltarParaEstoqueSimples() {
-      document.getElementById('estoqueLoteArea').style.display = 'none';
-      document.getElementById('estoqueLoteResultArea').style.display = 'none';
-      document.getElementById('estoqueFormArea').style.display = 'block';
-      limparFormLote();
-    }
-
-    // Adiciona um item na lista do lote
-    function adicionarItemLote() {
-      loteItemCounter++;
-      const container = document.getElementById('loteItensContainer');
-      const operacao = document.querySelector('input[name="loteOperacao"]:checked').value;
-      const labelQtd = operacao === 'entrada' ? 'Entrada *' : 'Saída *';
-
-      const itemDiv = document.createElement('div');
-      itemDiv.id = 'loteItem-' + loteItemCounter;
-      itemDiv.className = 'lote-item-row';
-      itemDiv.innerHTML = `
-        <div class="form-group" style="margin-bottom: 0;">
-          <label style="font-size: 0.75rem;">Produto *</label>
-          <input type="text" class="lote-item-nome" list="loteItemDatalist-${loteItemCounter}" required style="padding: 6px;" placeholder="Nome do produto" onblur="verificarItemNovoLote(this, ${loteItemCounter})">
-          <datalist id="loteItemDatalist-${loteItemCounter}"></datalist>
-          <small class="lote-item-novo-aviso" style="display: none; color: #dc3545; font-size: 0.7rem;">⚠️ Item NOVO!</small>
-        </div>
-        <div class="form-group" style="margin-bottom: 0;">
-          <label style="font-size: 0.75rem;">${labelQtd}</label>
-          <input type="number" class="lote-item-qtd" step="0.01" min="0.01" required style="padding: 6px;" placeholder="Qtd">
-        </div>
-        <button type="button" class="btn btn-danger" onclick="removerItemLote(${loteItemCounter})" style="padding: 6px 10px; height: fit-content;">✕</button>
-      `;
-      container.appendChild(itemDiv);
-
-      // Popula datalist do item
-      const datalist = document.getElementById('loteItemDatalist-' + loteItemCounter);
-      if (autocompleteData && autocompleteData.items) {
-        autocompleteData.items.forEach(item => {
-          const option = document.createElement('option');
-          option.value = item;
-          datalist.appendChild(option);
-        });
-      }
-    }
-
-    // Timeout para verificação de item novo no lote
-    let verificarItemLoteTimeout = {};
-
-    // Verifica se o item é novo no lote
-    function verificarItemNovoLote(input, itemId) {
-      clearTimeout(verificarItemLoteTimeout[itemId]);
-
-      verificarItemLoteTimeout[itemId] = setTimeout(function() {
-        const nomeItem = input.value.trim().toUpperCase();
-        const avisoNovo = input.parentElement.querySelector('.lote-item-novo-aviso');
-
-        if (!nomeItem) {
-          avisoNovo.style.display = 'none';
-          return;
-        }
-
-        const itemExiste = autocompleteData && autocompleteData.items &&
-          autocompleteData.items.some(item => item.toUpperCase() === nomeItem);
-
-        if (!itemExiste) {
-          avisoNovo.style.display = 'block';
-        } else {
-          avisoNovo.style.display = 'none';
-        }
-      }, 400);
-    }
-
-    // Remove item do lote
-    function removerItemLote(id) {
-      const itemDiv = document.getElementById('loteItem-' + id);
-      if (itemDiv) {
-        itemDiv.remove();
-      }
-    }
-
-    // Limpa formulário do lote
-    function limparFormLote() {
-      document.querySelector('input[name="loteOperacao"][value="entrada"]').checked = true;
-      document.getElementById('loteGrupo').selectedIndex = 0;
-      document.getElementById('loteUnidade').selectedIndex = 0;
-      document.getElementById('loteObs').selectedIndex = 0;
-      document.getElementById('loteNF').value = '';
-      document.getElementById('loteItensContainer').innerHTML = '';
-      loteItemCounter = 0;
-      showMessage('estoqueLoteMessage', '', '');
-    }
-
-    // Processa inserção do lote - abre modal de confirmação
-    function handleInserirLote() {
-      // Validar campos globais
-      const operacao = document.querySelector('input[name="loteOperacao"]:checked').value;
-      const grupo = document.getElementById('loteGrupo').value;
-      const unidade = document.getElementById('loteUnidade').value;
-      const obs = document.getElementById('loteObs').value;
-      const nf = document.getElementById('loteNF').value.trim();
-
-      if (!grupo) {
-        showMessage('estoqueLoteMessage', 'Selecione o grupo', 'error');
-        return;
-      }
-      if (!unidade) {
-        showMessage('estoqueLoteMessage', 'Selecione a unidade', 'error');
-        return;
-      }
-
-      // Coletar itens
-      const container = document.getElementById('loteItensContainer');
-      const itemDivs = container.querySelectorAll('[id^="loteItem-"]');
-
-      if (itemDivs.length === 0) {
-        showMessage('estoqueLoteMessage', 'Adicione pelo menos um item', 'error');
-        return;
-      }
-
-      itensParaConfirmarLote = [];
-      itensConfirmadosLote = new Set();
-      let hasError = false;
-      let temItemNovo = false;
-
-      itemDivs.forEach((div, index) => {
-        const nome = div.querySelector('.lote-item-nome').value.trim().toUpperCase();
-        const qtd = parseFloat(div.querySelector('.lote-item-qtd').value) || 0;
-
-        if (!nome) {
-          showMessage('estoqueLoteMessage', `Item ${index + 1}: Nome do produto é obrigatório`, 'error');
-          hasError = true;
-          return;
-        }
-        if (qtd <= 0) {
-          showMessage('estoqueLoteMessage', `Item ${index + 1} (${nome}): Quantidade é obrigatória`, 'error');
-          hasError = true;
-          return;
-        }
-
-        const isNovoItem = !itemExisteNaBase(nome);
-        if (isNovoItem) {
-          temItemNovo = true;
-        }
-
-        itensParaConfirmarLote.push({
-          index: index + 1,
-          item: nome,
-          unidade: unidade,
-          nf: nf,
-          obs: obs,
-          entrada: operacao === 'entrada' ? qtd : 0,
-          saida: operacao === 'saida' ? qtd : 0,
-          valorUnitario: 0,
-          grupo: grupo,
-          isNovo: isNovoItem,
-          qtd: qtd
-        });
-      });
-
-      if (hasError) return;
-
-      // Mostra loading enquanto prepara modal de confirmação
-      showLoading('Preparando confirmação do lote...');
-
-      // Pequeno delay para garantir que o loading seja exibido
-      setTimeout(() => {
-        // Abre modal de confirmação
-        abrirModalConfirmacaoLote(operacao, grupo, unidade, obs, nf, temItemNovo);
-      }, 100);
-    }
-
-    // Abre o modal de confirmação do lote
-    function abrirModalConfirmacaoLote(operacao, grupo, unidade, obs, nf, temItemNovo) {
-      // Mostra/esconde aviso de itens novos
-      document.getElementById('avisoItensNovosLote').style.display = temItemNovo ? 'block' : 'none';
-
-      // Info do Lote
-      const tipoOp = operacao === 'entrada' ? '📥 ENTRADA' : '📤 SAÍDA';
-      const corOp = operacao === 'entrada' ? '#28a745' : '#dc3545';
-      let infoHtml = `<strong style="color: ${corOp};">${tipoOp}</strong>`;
-      infoHtml += ` | <strong>Grupo:</strong> ${grupo}`;
-      infoHtml += ` | <strong>Unidade:</strong> ${unidade}`;
-      if (nf) infoHtml += ` | <strong>Pedido/OC:</strong> ${nf}`;
-      if (obs) infoHtml += ` | <strong>Obs:</strong> ${obs}`;
-      document.getElementById('infoLoteModal').innerHTML = infoHtml;
-
-      // Lista de itens com placeholders para saldo
-      const listaContainer = document.getElementById('listaItensConfirmacaoLote');
-      let listaHtml = '';
-
-      itensParaConfirmarLote.forEach((item, idx) => {
-        const classeNovo = item.isNovo ? 'item-novo' : '';
-        const badgeNovo = item.isNovo ? '<span class="item-novo-badge">NOVO</span>' : '';
-
-        listaHtml += `
-          <div class="confirm-item-row-lote ${classeNovo}" data-index="${idx}">
-            <span class="item-index">${item.index}</span>
-            <span class="item-nome">${item.item}${badgeNovo}</span>
-            <span>${item.qtd}</span>
-            <span id="saldoAtualLote-${idx}" style="color: #666;">...</span>
-            <span id="saldoFinalLote-${idx}" style="font-weight: bold; color: #28a745;">...</span>
-            <button type="button" class="btn-ok-item" onclick="confirmarItemLote(${idx})" id="btnOkItemLote-${idx}">OK</button>
-          </div>
-        `;
-      });
-
-      listaContainer.innerHTML = listaHtml;
-
-      // Atualiza contador
-      document.getElementById('totalConfirmadosLote').textContent = '0';
-      document.getElementById('totalItensLote').textContent = itensParaConfirmarLote.length;
-      document.getElementById('btnConfirmarInsercaoFinalLote').disabled = true;
-
-      // Mostra modal (mantém loading até carregar saldos)
-      document.getElementById('modalConfirmacaoLote').classList.add('show');
-
-      // Busca saldos de todos os itens
-      carregarSaldosLote(operacao);
-    }
-
-    // Carrega os saldos de todos os itens do lote
-    function carregarSaldosLote(operacao) {
-      const itensNomes = itensParaConfirmarLote.map(item => item.item);
-
-      // Busca saldos do servidor
-      google.script.run
-        .withSuccessHandler(function(saldos) {
-          // saldos é um objeto { "ITEM1": saldo1, "ITEM2": saldo2, ... }
-          itensParaConfirmarLote.forEach((item, idx) => {
-            const saldoAtual = saldos[item.item] || 0;
-            const saldoFinal = operacao === 'entrada'
-              ? saldoAtual + item.qtd
-              : saldoAtual - item.qtd;
-
-            // Atualiza item com saldos
-            item.saldoAtual = saldoAtual;
-            item.saldoFinal = saldoFinal;
-
-            // Atualiza display
-            const spanAtual = document.getElementById('saldoAtualLote-' + idx);
-            const spanFinal = document.getElementById('saldoFinalLote-' + idx);
-
-            if (spanAtual) spanAtual.textContent = saldoAtual.toFixed(2);
-            if (spanFinal) {
-              spanFinal.textContent = saldoFinal.toFixed(2);
-              // Cor vermelha se saldo final ficar negativo
-              if (saldoFinal < 0) {
-                spanFinal.style.color = '#dc3545';
-              }
-            }
-          });
-          // Esconde loading após carregar saldos
-          hideLoading();
-        })
-        .withFailureHandler(function(error) {
-          console.error('Erro ao carregar saldos:', error);
-          // Em caso de erro, mostra "?" nos campos
-          itensParaConfirmarLote.forEach((item, idx) => {
-            const spanAtual = document.getElementById('saldoAtualLote-' + idx);
-            const spanFinal = document.getElementById('saldoFinalLote-' + idx);
-            if (spanAtual) spanAtual.textContent = '?';
-            if (spanFinal) spanFinal.textContent = '?';
-          });
-          // Esconde loading mesmo em caso de erro
-          hideLoading();
-        })
-        .getMultipleSaldos(itensNomes);
-    }
-
-    // Confirma um item individual do lote
-    function confirmarItemLote(idx) {
-      const btn = document.getElementById('btnOkItemLote-' + idx);
-      btn.classList.add('confirmed');
-      btn.disabled = true;
-      btn.textContent = 'OK';
-
-      itensConfirmadosLote.add(idx);
-
-      // Atualiza contador
-      document.getElementById('totalConfirmadosLote').textContent = itensConfirmadosLote.size;
-
-      // Habilita botão final se todos confirmados
-      if (itensConfirmadosLote.size === itensParaConfirmarLote.length) {
-        document.getElementById('btnConfirmarInsercaoFinalLote').disabled = false;
-      }
-    }
-
-    // Fecha modal de confirmação do lote
-    function fecharModalConfirmacaoLote() {
-      document.getElementById('modalConfirmacaoLote').classList.remove('show');
-    }
-
-    // Volta para edição do formulário do lote
-    function voltarParaEdicaoLote() {
-      fecharModalConfirmacaoLote();
-      showMessage('estoqueLoteMessage', 'Ajuste os dados e clique em Confirmar novamente', 'info');
-    }
-
-    // Confirma inserção final do lote e envia para o servidor
-    function confirmarInsercaoFinalLote() {
-      if (itensConfirmadosLote.size !== itensParaConfirmarLote.length) {
-        alert('Confirme todos os itens antes de prosseguir');
-        return;
-      }
-
-      const operacao = document.querySelector('input[name="loteOperacao"]:checked').value;
-
-      // Prepara itens para envio
-      const itensParaEnviar = itensParaConfirmarLote.map(item => ({
-        item: item.item,
-        unidade: item.unidade,
-        nf: item.nf,
-        obs: item.obs,
-        entrada: item.entrada,
-        saida: item.saida,
-        valorUnitario: item.valorUnitario,
-        grupo: item.grupo
-      }));
-
-      fecharModalConfirmacaoLote();
-
-      // Mostra loading durante processamento
-      showLoading('Processando ' + itensParaEnviar.length + ' itens em lote...');
-
-      // Envia para servidor com retorno de saldos
-      google.script.run
-        .withSuccessHandler(function(result) {
-          hideLoading();
-          if (result.success) {
-            document.getElementById('estoqueLoteArea').style.display = 'none';
-            document.getElementById('estoqueLoteResultArea').style.display = 'block';
-
-            const tipoOp = operacao === 'entrada' ? 'ENTRADAS' : 'SAÍDAS';
-            const itemText = itensParaEnviar.length === 1 ? 'ITEM' : 'ITENS';
-            document.getElementById('estoqueLoteResultMessage').innerHTML =
-              '<strong style="font-size: 1.2rem;">✅ ' + itensParaEnviar.length + ' ' + itemText + ' INSERIDO(S) COM SUCESSO NO SISTEMA DE ESTOQUE!</strong><br>' +
-              '<span style="font-size: 0.95rem;">Operação: ' + tipoOp + '</span>';
-
-            // Mostra tabela com saldos
-            mostrarTabelaSaldosLote(result.itensProcessados || itensParaEnviar, operacao);
-
-            // Atualiza cache e autocomplete
-            clearClientCache();
-            loadDashboardData();
-            loadAutocompleteData();
-
-            showMessage('estoqueLoteMessage', '', '');
-          } else {
-            showMessage('estoqueLoteMessage', result.message || 'Erro ao inserir itens', 'error');
-          }
-        })
-        .withFailureHandler(function(error) {
-          hideLoading();
-          showMessage('estoqueLoteMessage', 'Erro: ' + error.message, 'error');
-        })
-        .processMultipleEstoqueItemsWithSaldos(itensParaEnviar);
-    }
-
-    // Mostra tabela com os saldos após inserção do lote (formato similar ao lançamento individual)
-    function mostrarTabelaSaldosLote(itens, operacao) {
-      const container = document.getElementById('estoqueLoteResultTable');
-      const tipoOp = operacao === 'entrada' ? '<span style="color: #28a745; font-weight: bold;">ENTRADA</span>' : '<span style="color: #dc3545; font-weight: bold;">SAÍDA</span>';
-
-      let html = '';
-
-      itens.forEach((item, idx) => {
-        const qtd = operacao === 'entrada' ? item.entrada : item.saida;
-        const saldoAnterior = item.saldoAnterior !== undefined ? item.saldoAnterior : 0;
-        const novoSaldo = item.novoSaldo !== undefined ? item.novoSaldo : 0;
-
-        // Define estilo e HTML do aviso baseado no tipo
-        let avisoHtml = '';
-        let containerStyle = 'background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px;';
-
-        if (item.aviso && item.aviso.includes('DESATUALIZADO')) {
-          // AVISO URGENTE - Item desatualizado (+20 dias)
-          containerStyle = 'background: #ffebee; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 4px solid #f44336; box-shadow: 0 8px 16px rgba(244, 67, 54, 0.3);';
-          avisoHtml = `
-            <div style="background: #ffebee; padding: 20px; border-radius: 8px; margin-bottom: 15px; text-align: center; border: 4px solid #f44336;">
-              <div style="font-size: 2.5rem; margin-bottom: 10px; animation: pulse 1.5s infinite;">🚨</div>
-              <div style="font-size: 1.3rem; margin-bottom: 10px; text-transform: uppercase; color: #c62828; font-weight: bold;">⚠️ ATENÇÃO URGENTE ⚠️</div>
-              <div style="font-size: 1.1rem; margin-bottom: 15px; line-height: 1.5; color: #c62828;">
-                <strong>PRODUTO DESATUALIZADO!</strong><br>
-                Última atualização há mais de 20 dias
-              </div>
-              <div style="font-size: 1.2rem; background: #d32f2f; color: white; padding: 15px; border-radius: 6px; margin-top: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
-                ⚡ AÇÃO NECESSÁRIA: ATUALIZAR ESTOQUE URGENTE! ⚡<br>
-                <span style="font-size: 0.9rem; margin-top: 8px; display: block;">
-                  Realize uma contagem física e registre uma atualização completa do saldo
-                </span>
-              </div>
-            </div>
-          `;
-        } else if (item.aviso && item.aviso.includes('ENTRADA')) {
-          // AVISO - Entrada de estoque
-          containerStyle = 'background: #fff3cd; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 3px solid #ffc107; box-shadow: 0 4px 8px rgba(255, 193, 7, 0.2);';
-          avisoHtml = `
-            <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin-bottom: 15px; text-align: center; border: 3px solid #ffc107;">
-              <div style="font-size: 2rem; margin-bottom: 8px;">📦</div>
-              <div style="font-size: 1.1rem; margin-bottom: 10px; color: #856404;"><strong>⚠️ ENTRADA DE ESTOQUE REGISTRADA!</strong></div>
-              <div style="font-size: 0.95rem; line-height: 1.5; color: #856404;">
-                É necessário atualizar o estoque deste item para evitar furos de estoque.<br>
-                <strong>Realize uma contagem física e registre uma atualização completa do saldo.</strong>
-              </div>
-            </div>
-          `;
-        }
-
-        html += `
-          <div style="${containerStyle}">
-            ${avisoHtml}
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 6px; font-weight: bold; width: 35%;">Produto:</td>
-                <td style="padding: 6px; font-size: 1.1rem;"><strong>${item.item}</strong></td>
-              </tr>
-              <tr style="background: #fff;">
-                <td style="padding: 6px; font-weight: bold;">Grupo:</td>
-                <td style="padding: 6px;">${item.grupo || '-'}</td>
-              </tr>
-              <tr>
-                <td style="padding: 6px; font-weight: bold;">Tipo:</td>
-                <td style="padding: 6px;">${tipoOp}</td>
-              </tr>
-              <tr style="background: #fff;">
-                <td style="padding: 6px; font-weight: bold;">Quantidade:</td>
-                <td style="padding: 6px; font-size: 1.1rem; font-weight: bold;">${qtd}</td>
-              </tr>
-            </table>
-            <!-- Destaque para os saldos -->
-            <div style="margin-top: 10px; padding: 10px; background: linear-gradient(135deg, #e8f5e9, #c8e6c9); border-radius: 6px; border: 2px solid #4caf50;">
-              <table style="width: 100%; border-collapse: collapse;">
-                <tr>
-                  <td style="padding: 6px; font-weight: bold; width: 35%;">Saldo Anterior:</td>
-                  <td style="padding: 6px; font-size: 1.1rem;">${saldoAnterior}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 6px; font-weight: bold; font-size: 1rem; color: #2e7d32;">NOVO SALDO:</td>
-                  <td style="padding: 6px; font-size: 1.3rem; font-weight: bold; color: #2e7d32;">${novoSaldo}</td>
-                </tr>
-              </table>
-            </div>
-          </div>
-        `;
-      });
-
-      container.innerHTML = html;
-    }
-
-    // Volta para o formulário de lote
-    function voltarParaLote() {
-      document.getElementById('estoqueLoteResultArea').style.display = 'none';
-      document.getElementById('estoqueLoteArea').style.display = 'block';
-      limparFormLote();
-      adicionarItemLote();
-    }
-
-    // Handle Inserir Grupo
-    function handleInserirGrupo(event) {
-      event.preventDefault();
-
-      // Converte para maiúscula
-      const grupo = document.getElementById('grupoNome').value.toUpperCase().trim();
-
-      if (!grupo) {
-        showMessage('grupoMessage', 'Digite o nome do grupo', 'error');
-        return false;
-      }
-
-      // Verifica se grupo já existe
-      if (grupoJaExiste(grupo)) {
-        showMessage('grupoMessage', 'Este grupo já existe! Escolha outro nome.', 'error');
-        return false;
-      }
-
-      showLoading('Inserindo grupo...');
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          hideLoading();
-          if (result.success) {
-            showMessage('grupoMessage', 'Grupo "' + grupo + '" inserido com sucesso!', 'success');
-            document.getElementById('grupoForm').reset();
-            loadAutocompleteData();
-            atualizarListaGrupos(); // Atualiza a lista
-          } else {
-            showMessage('grupoMessage', result.message || 'Erro ao inserir grupo', 'error');
-          }
-        })
-        .withFailureHandler(function(error) {
-          hideLoading();
-          showMessage('grupoMessage', 'Erro: ' + error.message, 'error');
-        })
-        .insertGroup(grupo);
-
-      return false;
-    }
-
-    // Verifica se grupo já existe na lista de autocomplete
-    function grupoJaExiste(grupo) {
-      if (!autocompleteData || !autocompleteData.groups) return false;
-      const grupoUpper = grupo.toUpperCase().trim();
-      return autocompleteData.groups.some(g => g.toUpperCase().trim() === grupoUpper);
-    }
-
-    // Valida em tempo real se grupo já existe
-    function validarGrupoDuplicado() {
-      const input = document.getElementById('grupoNome');
-      const validation = document.getElementById('grupoValidation');
-      const btn = document.getElementById('btnAdicionarGrupo');
-      const grupo = input.value.toUpperCase().trim();
-
-      if (!grupo) {
-        validation.style.display = 'none';
-        btn.disabled = false;
-        return;
-      }
-
-      if (grupoJaExiste(grupo)) {
-        validation.textContent = '⚠️ Este grupo já existe!';
-        validation.style.display = 'block';
-        btn.disabled = true;
-        btn.style.opacity = '0.5';
-      } else {
-        validation.style.display = 'none';
-        btn.disabled = false;
-        btn.style.opacity = '1';
-      }
-    }
-
-    // Atualiza a lista de grupos existentes na tela
-    function atualizarListaGrupos() {
-      const container = document.getElementById('listaGruposExistentes');
-      const contador = document.getElementById('totalGrupos');
-
-      if (!autocompleteData || !autocompleteData.groups || autocompleteData.groups.length === 0) {
-        container.innerHTML = '<p style="color: #999;">Nenhum grupo cadastrado.</p>';
-        contador.textContent = '0';
-        return;
-      }
-
-      // Ordena alfabeticamente
-      const gruposOrdenados = [...autocompleteData.groups].sort();
-
-      contador.textContent = gruposOrdenados.length;
-
-      let html = '<div style="display: flex; flex-wrap: wrap; gap: 8px;">';
-      gruposOrdenados.forEach(grupo => {
-        html += '<span style="background: #e3f2fd; color: #1565c0; padding: 4px 10px; border-radius: 4px; font-size: 0.85rem;">' + grupo + '</span>';
-      });
-      html += '</div>';
-
-      container.innerHTML = html;
-    }
-
-    // ========================================
-    // FUNÇÕES DE BUSCA - Localizar Produto
-    // ========================================
-
-    /**
-     * Busca Rápida - Usa índice em memória (INSTANTÂNEO)
-     * Mostra últimos 20 registros do item
-     */
-    function handleBuscaRapida(event) {
-      event.preventDefault();
-
-      const item = document.getElementById('localizarItem').value;
-
-      if (!item || item.trim() === '') {
-        showMessage('localizarMessage', 'Por favor, informe um item para buscar', 'warning');
-        return false;
-      }
-
-      // Primeiro atualiza o índice do servidor (em background)
-      refreshHistoryIndexInBackground();
-
-      // Busca no índice local (instantâneo)
-      const localHistory = getItemHistoryFromIndex(item);
-
-      if (localHistory) {
-        const displayData = formatHistoryForDisplay(localHistory, 20);
-        if (displayData && displayData.rows.length > 0) {
-          // Mostra resumo do item
-          const infoHtml = '<div style="margin-bottom:10px;padding:10px;background:#e3f2fd;border-radius:4px;">' +
-            '<strong>📊 Resumo:</strong> ' +
-            'Saldo Atual: <strong>' + (localHistory.info.lastStock || '0') + '</strong> | ' +
-            'Última Atualização: <strong>' + (localHistory.info.lastDate || '-') + '</strong> | ' +
-            'Grupo: <strong>' + (localHistory.info.group || '-') + '</strong>' +
-            '<br><small style="color:#666;">⚡ Busca Rápida - Últimos ' + displayData.rows.length + ' registros (cache)</small>' +
-            '</div>';
-
-          document.getElementById('localizarTableContainer').innerHTML = infoHtml;
-          displayTable('localizarTableContainer', displayData);
-          document.getElementById('localizarResults').style.display = 'block';
-          document.getElementById('totalResults').textContent = displayData.rows.length + ' (últimos)';
-          showMessage('localizarMessage', '⚡ ' + displayData.rows.length + ' registros encontrados (instantâneo)', 'success');
-          return false;
-        }
-      }
-
-      // Se não encontrou no índice local, busca no servidor
-      showMessage('localizarMessage', '🔍 Item não encontrado no cache, buscando no servidor...', 'info');
-      buscarHistoricoCompleto(item);
-
-      return false;
-    }
-
-    /**
-     * Histórico Completo - Busca TODOS os registros do servidor
-     */
-    function handleHistoricoCompleto() {
-      const item = document.getElementById('localizarItem').value;
-
-      if (!item || item.trim() === '') {
-        showMessage('localizarMessage', 'Por favor, informe um item para buscar', 'warning');
-        return;
-      }
-
-      buscarHistoricoCompleto(item);
-    }
-
-    /**
-     * Busca histórico completo no servidor (todos os registros)
-     */
-    function buscarHistoricoCompleto(item) {
-      showMessage('localizarMessage', '📜 Buscando histórico completo no servidor...', 'info');
-      document.getElementById('localizarResults').style.display = 'none';
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success && result.data && result.data.rows.length > 0) {
-            // Mostra resumo
-            const infoHtml = '<div style="margin-bottom:10px;padding:10px;background:#e8f5e9;border-radius:4px;">' +
-              '<strong>📜 Histórico Completo:</strong> ' + result.data.rows.length + ' registros encontrados' +
-              '<br><small style="color:#666;">Dados carregados diretamente da planilha</small>' +
-              '</div>';
-
-            document.getElementById('localizarTableContainer').innerHTML = infoHtml;
-            displayTable('localizarTableContainer', result.data);
-            document.getElementById('localizarResults').style.display = 'block';
-            document.getElementById('totalResults').textContent = result.data.rows.length;
-            showMessage('localizarMessage', '✅ ' + result.data.rows.length + ' registros encontrados (histórico completo)', 'success');
-          } else {
-            showMessage('localizarMessage', result.message || 'Nenhum registro encontrado para este item', 'warning');
-            document.getElementById('localizarResults').style.display = 'none';
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('localizarMessage', 'Erro ao buscar: ' + error.message, 'error');
-        })
-        .buscarProduto(item, null, null);
-    }
-
-    // Show all products (CLIENT-SIDE - INSTANT!)
-    function showAllProducts() {
-      // Filtra no lado do cliente sem filtro de item (mostra tudo)
-      const result = filterEstoqueData('', null, null);
-
-      if (result.success && result.data) {
-        displayTable('localizarTableContainer', result.data);
-        document.getElementById('localizarResults').style.display = 'block';
-        document.getElementById('totalResults').textContent = result.data.rows.length;
-      } else {
-        showMessage('localizarMessage', result.message || 'Erro ao buscar produtos', 'error');
-      }
-    }
-
-    // Print results (CLIENT-SIDE - INSTANT!)
-    function printResults(filterByDate) {
-      const item = document.getElementById('localizarItem').value;
-
-      if (filterByDate) {
-        const dataInicio = document.getElementById('printDataInicio').value;
-        const dataFim = document.getElementById('printDataFim').value;
-
-        if (!dataInicio || !dataFim) {
-          alert('Por favor, selecione o período para impressão.');
-          return;
-        }
-
-        // Filtra no lado do cliente com data (INSTANTÂNEO!)
-        const result = filterEstoqueData(item, dataInicio, dataFim);
-
-        if (result.success && result.data) {
-          displayTable('localizarTableContainer', result.data);
-          document.getElementById('totalResults').textContent = result.data.rows.length;
-          setTimeout(() => window.print(), 500);
-        } else {
-          showMessage('localizarMessage', 'Nenhum resultado no período selecionado', 'warning');
-        }
-      } else {
-        // Imprime tudo que está sendo exibido
-        setTimeout(() => window.print(), 100);
-      }
-    }
-
-    // Handle Listagem Estoque (legado - não mais usado)
-    function handleListagemEstoque(event) {
-      event.preventDefault();
-
-      const formData = {
-        group: document.getElementById('listagemGroup').value,
-        item: document.getElementById('listagemItem') ? document.getElementById('listagemItem').value : ''
-      };
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success && result.data) {
-            displayTable('listagemTableContainer', result.data);
-            document.getElementById('listagemResults').style.display = 'block';
-          } else {
-            showMessage('listagemMessage', result.message || 'Nenhum resultado encontrado', 'warning');
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('listagemMessage', 'Erro: ' + error.message, 'error');
-        })
-        .gerarListagemEstoqueWebApp(formData);
-
-      return false;
-    }
-
-    // Handle Busca por Grupo - Retorna último lançamento de cada item do grupo
-    function handleBuscaPorGrupo() {
-      const grupo = document.getElementById('listagemGroup').value;
-
-      if (!grupo) {
-        showMessage('listagemMessage', 'Selecione um grupo para buscar', 'warning');
-        return;
-      }
-
-      // Mostra loading
-      showMessage('listagemMessage', 'Buscando itens do grupo...', 'info');
-      document.getElementById('listagemResults').style.display = 'none';
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success && result.data) {
-            displayTable('listagemTableContainer', result.data);
-            document.getElementById('listagemTotal').textContent = result.totalItens || result.data.rows.length;
-            document.getElementById('listagemResults').style.display = 'block';
-            showMessage('listagemMessage', 'Encontrados ' + (result.totalItens || result.data.rows.length) + ' itens no grupo "' + grupo + '"', 'success');
-          } else {
-            showMessage('listagemMessage', result.message || 'Nenhum resultado encontrado', 'warning');
-            document.getElementById('listagemResults').style.display = 'none';
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('listagemMessage', 'Erro: ' + error.message, 'error');
-          document.getElementById('listagemResults').style.display = 'none';
-        })
-        .buscarUltimoLancamentoPorGrupo(grupo);
-    }
-
-    // Adicionar novo campo de item na Listagem de Estoque
-    function adicionarItemListagem() {
-      const container = document.getElementById('listagemItensContainer');
-      const newRow = document.createElement('div');
-      newRow.className = 'listagem-item-row';
-      newRow.style.cssText = 'display: flex; gap: 8px; margin-bottom: 8px; align-items: center;';
-      newRow.innerHTML = `
-        <input type="text" class="listagem-item-input" list="listagemItemDatalist" placeholder="Digite o nome do item..." style="flex: 1; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
-        <button type="button" class="btn-remove-item" onclick="removerItemListagem(this)" style="background: #f44336; color: white; border: none; border-radius: 4px; width: 36px; height: 36px; cursor: pointer; font-size: 1.2rem;" title="Remover item">×</button>
-      `;
-      container.appendChild(newRow);
-
-      // Foca no novo input
-      newRow.querySelector('input').focus();
-    }
-
-    // Remover campo de item da Listagem de Estoque
-    function removerItemListagem(button) {
-      const container = document.getElementById('listagemItensContainer');
-      const rows = container.querySelectorAll('.listagem-item-row');
-
-      // Mantém pelo menos um campo
-      if (rows.length <= 1) {
-        // Apenas limpa o campo em vez de remover
-        rows[0].querySelector('input').value = '';
-        return;
-      }
-
-      // Remove a linha do botão clicado
-      button.closest('.listagem-item-row').remove();
-    }
-
-    // Handle Busca por Lista de Itens - Retorna último lançamento de cada item da lista
-    function handleBuscaPorListaItens() {
-      // Coleta todos os valores dos inputs dinâmicos
-      const inputs = document.querySelectorAll('#listagemItensContainer .listagem-item-input');
-      const itens = [];
-
-      inputs.forEach(input => {
-        const valor = input.value.trim();
-        if (valor) {
-          itens.push(valor);
-        }
-      });
-
-      if (itens.length === 0) {
-        showMessage('listagemMessage', 'Selecione pelo menos um item para buscar', 'warning');
-        return;
-      }
-
-      // Junta os itens em uma string separada por vírgula
-      const listaItens = itens.join(',');
-
-      // Mostra loading
-      showMessage('listagemMessage', 'Buscando ' + itens.length + ' item(ns)...', 'info');
-      document.getElementById('listagemResults').style.display = 'none';
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success && result.data) {
-            displayTable('listagemTableContainer', result.data);
-            document.getElementById('listagemTotal').textContent = result.totalItens || result.data.rows.length;
-            document.getElementById('listagemResults').style.display = 'block';
-
-            let msg = 'Encontrados ' + (result.totalItens || result.data.rows.length) + ' itens';
-
-            // Mostra itens não encontrados, se houver
-            if (result.itensNaoEncontrados && result.itensNaoEncontrados.length > 0) {
-              msg += '. Não encontrados: ' + result.itensNaoEncontrados.join(', ');
-              showMessage('listagemMessage', msg, 'warning');
-            } else {
-              showMessage('listagemMessage', msg, 'success');
-            }
-          } else {
-            showMessage('listagemMessage', result.message || 'Nenhum resultado encontrado', 'warning');
-            document.getElementById('listagemResults').style.display = 'none';
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('listagemMessage', 'Erro: ' + error.message, 'error');
-          document.getElementById('listagemResults').style.display = 'none';
-        })
-        .buscarUltimoLancamentoPorItens(listaItens);
-    }
-
-    // Imprimir Listagem de Estoque
-    function printListagem() {
-      const resultsDiv = document.getElementById('listagemResults');
-      if (!resultsDiv || resultsDiv.style.display === 'none') {
-        alert('Nenhum resultado para imprimir');
-        return;
-      }
-
-      const printWindow = window.open('', '_blank');
-      const tableHTML = document.getElementById('listagemTableContainer').innerHTML;
-
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Listagem de Estoque</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            h1 { text-align: center; margin-bottom: 20px; }
-            table { width: 100%; border-collapse: collapse; font-size: 11px; }
-            th, td { border: 1px solid #333; padding: 5px 8px; text-align: left; }
-            th { background-color: #4a6da7; color: white; }
-            tr:nth-child(even) { background-color: #f2f2f2; }
-            .row-red { background-color: #ffcccc !important; }
-            .row-yellow { background-color: #ffffcc !important; }
-            .info { text-align: center; margin-bottom: 10px; color: #666; }
-            @media print {
-              body { padding: 0; }
-              table { font-size: 9px; }
-            }
-          </style>
-        </head>
-        <body>
-          <h1>Listagem de Estoque</h1>
-          <p class="info">Total: ${document.getElementById('listagemTotal').textContent} itens - Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
-          ${tableHTML}
-        </body>
-        </html>
-      `);
-
-      printWindow.document.close();
-      printWindow.focus();
-      setTimeout(() => printWindow.print(), 500);
-    }
-
-    // Handle Relatório Estoque
-    function handleRelatorioEstoque(event) {
-      event.preventDefault();
-
-      const dataInicio = document.getElementById('relatorioDataInicio').value;
-      const dataFim = document.getElementById('relatorioDataFim').value;
-
-      showMessage('relatorioMessage', 'Buscando lançamentos...', 'info');
-      document.getElementById('relatorioResults').style.display = 'none';
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success && result.data) {
-            displayTable('relatorioTableContainer', result.data);
-            document.getElementById('relatorioTotal').textContent = result.data.rows.length;
-            document.getElementById('relatorioResults').style.display = 'block';
-            showMessage('relatorioMessage', 'Encontrados ' + result.data.rows.length + ' lançamentos no período', 'success');
-          } else {
-            showMessage('relatorioMessage', result.message || 'Nenhum resultado encontrado', 'warning');
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('relatorioMessage', 'Erro: ' + error.message, 'error');
-        })
-        .gerarRelatorioEstoqueWebApp(dataInicio, dataFim);
-
-      return false;
-    }
-
-    // Imprimir Relatório de Estoque
-    function printRelatorio() {
-      const resultsDiv = document.getElementById('relatorioResults');
-      if (!resultsDiv || resultsDiv.style.display === 'none') {
-        alert('Nenhum resultado para imprimir');
-        return;
-      }
-      const dataInicio = document.getElementById('relatorioDataInicio').value;
-      const dataFim = document.getElementById('relatorioDataFim').value;
-      const printWindow = window.open('', '_blank');
-      const tableHTML = document.getElementById('relatorioTableContainer').innerHTML;
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Relatório de Estoque</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            h1 { text-align: center; margin-bottom: 20px; }
-            table { width: 100%; border-collapse: collapse; font-size: 11px; }
-            th, td { border: 1px solid #333; padding: 5px 8px; text-align: left; }
-            th { background-color: #4a6da7; color: white; }
-            tr:nth-child(even) { background-color: #f2f2f2; }
-            .row-red { background-color: #ffcccc !important; }
-            .row-yellow { background-color: #ffffcc !important; }
-            .info { text-align: center; margin-bottom: 10px; color: #666; }
-          </style>
-        </head>
-        <body>
-          <h1>Relatório de Estoque</h1>
-          <p class="info">Período: ${dataInicio} a ${dataFim} | Total: ${document.getElementById('relatorioTotal').textContent} lançamentos | Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
-          ${tableHTML}
-        </body>
-        </html>
-      `);
-      printWindow.document.close();
-      printWindow.focus();
-      setTimeout(() => printWindow.print(), 500);
-    }
-
-    // Handle Relatório por Grupo (mantido para compatibilidade)
-    function handleRelatorioPorGrupo(event) {
-      event.preventDefault();
-
-      const grupo = document.getElementById('relatorioGrupoSelect').value;
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success && result.data) {
-            displayTable('relatorioGrupoTableContainer', result.data);
-            document.getElementById('relatorioGrupoResults').style.display = 'block';
-          } else {
-            showMessage('relatorioGrupoMessage', result.message || 'Nenhum resultado encontrado', 'warning');
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('relatorioGrupoMessage', 'Erro: ' + error.message, 'error');
-        })
-        .gerarRelatorioPorGrupoWebApp(grupo);
-
-      return false;
-    }
-
-    // Handle Estoque por Período
-    function handleEstoquePorPeriodo(event) {
-      event.preventDefault();
-
-      const dataInicio = document.getElementById('periodoDataInicio').value;
-      const dataFim = document.getElementById('periodoDataFim').value;
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success) {
-            showMessage('estoquePeriodoMessage', 'Filtro aplicado com sucesso! Verifique a planilha.', 'success');
-          } else {
-            showMessage('estoquePeriodoMessage', result.message || 'Erro ao filtrar', 'error');
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('estoquePeriodoMessage', 'Erro: ' + error.message, 'error');
-        })
-        .filtrarEstoquePorPeriodo(dataInicio, dataFim);
-
-      return false;
-    }
-
-    // ========================================
-    // ESTOQUE 3 MESES - Funções
-    // ========================================
-
-    // Adicionar campo de item no Estoque 3 Meses
-    function adicionarItemEstoque3M() {
-      const container = document.getElementById('estoque3MesesItensContainer');
-      const newRow = document.createElement('div');
-      newRow.className = 'estoque3m-item-row';
-      newRow.style.cssText = 'display: flex; gap: 8px; margin-bottom: 8px; align-items: center;';
-      newRow.innerHTML = `
-        <input type="text" class="estoque3m-item-input" list="estoque3MesesItemDatalist" placeholder="Digite o nome do item..." style="flex: 1; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
-        <button type="button" onclick="removerItemEstoque3M(this)" style="background: #f44336; color: white; border: none; border-radius: 4px; width: 36px; height: 36px; cursor: pointer; font-size: 1.2rem;" title="Remover item">×</button>
-      `;
-      container.appendChild(newRow);
-      newRow.querySelector('input').focus();
-    }
-
-    // Remover campo de item do Estoque 3 Meses
-    function removerItemEstoque3M(button) {
-      const container = document.getElementById('estoque3MesesItensContainer');
-      const rows = container.querySelectorAll('.estoque3m-item-row');
-      if (rows.length <= 1) {
-        rows[0].querySelector('input').value = '';
-        return;
-      }
-      button.closest('.estoque3m-item-row').remove();
-    }
-
-    // Handle Estoque 3 Meses - Calcula total de saídas por item
-    function handleEstoque3Meses() {
-      const inputs = document.querySelectorAll('#estoque3MesesItensContainer .estoque3m-item-input');
-      const itens = [];
-      inputs.forEach(input => {
-        const valor = input.value.trim();
-        if (valor) itens.push(valor);
-      });
-
-      if (itens.length === 0) {
-        showMessage('estoque3MesesMessage', 'Selecione pelo menos um item', 'warning');
-        return;
-      }
-
-      showMessage('estoque3MesesMessage', 'Calculando saídas dos últimos 3 meses...', 'info');
-      document.getElementById('estoque3MesesResults').style.display = 'none';
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success && result.data) {
-            displayTable('estoque3MesesTableContainer', result.data);
-            document.getElementById('estoque3MesesTotal').textContent = result.totalItens || result.data.rows.length;
-            document.getElementById('estoque3MesesResults').style.display = 'block';
-
-            let msg = 'Calculado para ' + (result.totalItens || result.data.rows.length) + ' itens';
-            if (result.itensNaoEncontrados && result.itensNaoEncontrados.length > 0) {
-              msg += '. Não encontrados: ' + result.itensNaoEncontrados.join(', ');
-              showMessage('estoque3MesesMessage', msg, 'warning');
-            } else {
-              showMessage('estoque3MesesMessage', msg, 'success');
-            }
-          } else {
-            showMessage('estoque3MesesMessage', result.message || 'Nenhum resultado encontrado', 'warning');
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('estoque3MesesMessage', 'Erro: ' + error.message, 'error');
-        })
-        .calcularEstoque3Meses(itens.join(','));
-    }
-
-    // Imprimir Estoque 3 Meses
-    function printEstoque3Meses() {
-      const resultsDiv = document.getElementById('estoque3MesesResults');
-      if (!resultsDiv || resultsDiv.style.display === 'none') {
-        alert('Nenhum resultado para imprimir');
-        return;
-      }
-      const printWindow = window.open('', '_blank');
-      const tableHTML = document.getElementById('estoque3MesesTableContainer').innerHTML;
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Consumo em 3 Meses - Saídas</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            h1 { text-align: center; margin-bottom: 20px; }
-            table { width: 100%; border-collapse: collapse; font-size: 11px; }
-            th, td { border: 1px solid #333; padding: 5px 8px; text-align: left; }
-            th { background-color: #e65100; color: white; }
-            tr:nth-child(even) { background-color: #f2f2f2; }
-            .info { text-align: center; margin-bottom: 10px; color: #666; }
-          </style>
-        </head>
-        <body>
-          <h1>Total de Saídas - Últimos 3 Meses</h1>
-          <p class="info">Total: ${document.getElementById('estoque3MesesTotal').textContent} itens - Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
-          ${tableHTML}
-        </body>
-        </html>
-      `);
-      printWindow.document.close();
-      printWindow.focus();
-      setTimeout(() => printWindow.print(), 500);
-    }
-
-    // ========================================
-    // CORES DESATUALIZADAS - Funções
-    // ========================================
-
-    // Handle Cores Desatualizadas - 15 dias sem ATUALIZAÇÃO
-    function handleCoresDesatualizadas() {
-      showMessage('coresMessage', 'Buscando cores desatualizadas...', 'info');
-      document.getElementById('coresResults').style.display = 'none';
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success && result.data) {
-            displayTable('coresTableContainer', result.data);
-            document.getElementById('coresTotal').textContent = result.totalItens || result.data.rows.length;
-            document.getElementById('coresResults').style.display = 'block';
-            showMessage('coresMessage', 'Encontrados ' + (result.totalItens || result.data.rows.length) + ' itens desatualizados', 'success');
-          } else {
-            showMessage('coresMessage', result.message || 'Nenhum item desatualizado encontrado', 'success');
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('coresMessage', 'Erro: ' + error.message, 'error');
-        })
-        .buscarCoresDesatualizadas();
-    }
-
-    // Imprimir Cores Desatualizadas
-    function printCores() {
-      const resultsDiv = document.getElementById('coresResults');
-      if (!resultsDiv || resultsDiv.style.display === 'none') {
-        alert('Nenhum resultado para imprimir');
-        return;
-      }
-      const printWindow = window.open('', '_blank');
-      const tableHTML = document.getElementById('coresTableContainer').innerHTML;
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Cores Desatualizadas</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            h1 { text-align: center; margin-bottom: 20px; }
-            table { width: 100%; border-collapse: collapse; font-size: 11px; }
-            th, td { border: 1px solid #333; padding: 5px 8px; text-align: left; }
-            th { background-color: #7b1fa2; color: white; }
-            tr:nth-child(even) { background-color: #f2f2f2; }
-            .info { text-align: center; margin-bottom: 10px; color: #666; }
-          </style>
-        </head>
-        <body>
-          <h1>Cores Desatualizadas (Mais de 15 dias)</h1>
-          <p class="info">Total: ${document.getElementById('coresTotal').textContent} itens - Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
-          ${tableHTML}
-        </body>
-        </html>
-      `);
-      printWindow.document.close();
-      printWindow.focus();
-      setTimeout(() => printWindow.print(), 500);
-    }
-
-    // ========================================
-    // APAGAR ÚLTIMA LINHA - Funções
-    // ========================================
-
-    // Carregar últimas 20 entradas
-    function carregarUltimasEntradas() {
-      showMessage('apagarLinhaMessage', 'Carregando últimas entradas...', 'info');
-      document.getElementById('ultimasEntradasArea').style.display = 'none';
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success && result.data) {
-            // Exibe informação da última entrada
-            const ultimaRow = result.data.rows[0];
-            if (ultimaRow) {
-              document.getElementById('ultimaEntradaInfo').innerHTML = `
-                <strong>Última entrada:</strong><br>
-                <strong>Item:</strong> ${ultimaRow[1] || '-'} |
-                <strong>Grupo:</strong> ${ultimaRow[0] || '-'} |
-                <strong>Data:</strong> ${ultimaRow[3] || '-'} |
-                <strong>Entrada:</strong> ${ultimaRow[7] || '0'} |
-                <strong>Saída:</strong> ${ultimaRow[8] || '0'} |
-                <strong>Saldo:</strong> ${ultimaRow[9] || '-'}
-              `;
-            }
-            displayTable('ultimasEntradasTableContainer', result.data);
-            document.getElementById('ultimasEntradasArea').style.display = 'block';
-            showMessage('apagarLinhaMessage', '', '');
-          } else {
-            showMessage('apagarLinhaMessage', result.message || 'Nenhuma entrada encontrada', 'warning');
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('apagarLinhaMessage', 'Erro: ' + error.message, 'error');
-        })
-        .getUltimas20Entradas();
-    }
-
-    // Confirmar exclusão da última linha
-    function confirmarApagarLinha() {
-      if (!confirm('⚠️ ATENÇÃO FINAL!\n\nVocê está prestes a APAGAR PERMANENTEMENTE a última entrada.\n\nEsta ação NÃO PODE SER DESFEITA!\n\nTem certeza que deseja continuar?')) return;
-
-      showMessage('apagarLinhaMessage', 'Apagando última entrada...', 'info');
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success) {
-            showMessage('apagarLinhaMessage', 'Última entrada apagada com sucesso!', 'success');
-            document.getElementById('ultimasEntradasArea').style.display = 'none';
-            loadDashboardData();
-            loadAutocompleteData();
-            // Recarrega a lista após 1 segundo
-            setTimeout(carregarUltimasEntradas, 1000);
-          } else {
-            showMessage('apagarLinhaMessage', result.message || 'Erro ao apagar', 'error');
-          }
-        })
-        .withFailureHandler(function(error) {
-          showMessage('apagarLinhaMessage', 'Erro: ' + error.message, 'error');
-        })
-        .apagarUltimaLinhaWebApp();
-    }
-
-    // Display table from data with row colors
-    function displayTable(containerId, data) {
-      const container = document.getElementById(containerId);
-
-      if (!data || !data.headers || !data.rows || data.rows.length === 0) {
-        container.innerHTML = '<p>Nenhum resultado encontrado.</p>';
-        return;
-      }
-
-      let html = '<table><thead><tr>';
-      data.headers.forEach(header => {
-        html += '<th>' + header + '</th>';
-      });
-      html += '</tr></thead><tbody>';
-
-      data.rows.forEach((row, index) => {
-        // Determina a classe CSS baseada na cor de fundo
-        let rowClass = '';
-        if (data.colors && data.colors[index]) {
-          const color = data.colors[index].toLowerCase();
-          if (color === '#ff0000' || color === 'red' || color === '#f00') {
-            rowClass = ' class="row-red"';
-          } else if (color === '#ffff00' || color === 'yellow' || color === '#ff0') {
-            rowClass = ' class="row-yellow"';
-          }
-        }
-
-        html += '<tr' + rowClass + '>';
-        row.forEach(cell => {
-          html += '<td>' + (cell !== null && cell !== undefined ? cell : '') + '</td>';
-        });
-        html += '</tr>';
-      });
-
-      html += '</tbody></table>';
-      container.innerHTML = html;
-    }
-  </script>
-
-  <!-- Modal de Resultado Inserir Estoque -->
-  <!-- Loading Overlay -->
-  <div id="loadingOverlay">
-    <div class="loading-content">
-      <div class="loading-spinner"></div>
-      <div class="loading-text" id="loadingText">Processando...</div>
-      <div class="loading-subtext">Aguarde, não feche esta janela</div>
-
-      <!-- Lista de Últimos Lançamentos -->
-      <div class="ultimos-lancamentos" id="ultimosLancamentos">
-        <h4>📋 Últimos 20 Lançamentos do Item</h4>
-        <div class="lancamentos-list" id="lancamentosList">
-          <div class="loading-lancamentos">Carregando lançamentos...</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div id="modalResultadoEstoque" class="modal-overlay">
-    <div class="modal-content" style="max-width: 600px;">
-      <div class="modal-header" style="background: #28a745; color: white;">
-        <h3>✓ Lançamento Realizado!</h3>
-      </div>
-      <div class="modal-body">
-        <!-- Mensagem de Sucesso -->
-        <div style="background: #d4edda; border: 2px solid #28a745; color: #155724; padding: 12px; border-radius: 8px; margin-bottom: 15px; text-align: center; font-weight: bold; font-size: 1.1rem;">
-          ✅ ITEM INSERIDO COM SUCESSO NO SISTEMA DE ESTOQUE!
-        </div>
-        <div id="avisoItemNovoModal" class="novo-item-warning" style="display: none;">
-          <strong>⚠️ ATENÇÃO:</strong> Este é um item <strong>NOVO</strong> que foi cadastrado agora!
-        </div>
-        <!-- Aviso de Produto Desatualizado ou Entrada -->
-        <div id="avisoStatusProduto" style="display: none; margin-bottom: 15px; padding: 20px; border-radius: 8px; font-weight: bold; text-align: center;"></div>
-        <div style="background: #f5f5f5; padding: 15px; border-radius: 8px;">
-          <table style="width: 100%; border-collapse: collapse;">
-            <tr>
-              <td style="padding: 8px; font-weight: bold; width: 40%;">Produto:</td>
-              <td style="padding: 8px;" id="resultProduto"></td>
-            </tr>
-            <tr style="background: #fff;">
-              <td style="padding: 8px; font-weight: bold;">Grupo:</td>
-              <td style="padding: 8px;" id="resultGrupo"></td>
-            </tr>
-            <tr>
-              <td style="padding: 8px; font-weight: bold;">Tipo:</td>
-              <td style="padding: 8px;" id="resultTipo"></td>
-            </tr>
-            <tr style="background: #fff;">
-              <td style="padding: 8px; font-weight: bold;">Quantidade:</td>
-              <td style="padding: 8px; font-size: 1.1rem; font-weight: bold;" id="resultQtd"></td>
-            </tr>
-            <tr>
-              <td style="padding: 8px; font-weight: bold;">NF:</td>
-              <td style="padding: 8px;" id="resultNF"></td>
-            </tr>
-            <tr style="background: #fff;">
-              <td style="padding: 8px; font-weight: bold;">Observação:</td>
-              <td style="padding: 8px;" id="resultObs"></td>
-            </tr>
-          </table>
-        </div>
-        <!-- Destaque para os saldos -->
-        <div style="margin-top: 15px; padding: 15px; background: linear-gradient(135deg, #e8f5e9, #c8e6c9); border-radius: 8px; border: 2px solid #4caf50;">
-          <table style="width: 100%; border-collapse: collapse;">
-            <tr>
-              <td style="padding: 8px; font-weight: bold; width: 40%;">Saldo Anterior:</td>
-              <td style="padding: 8px; font-size: 1.2rem;" id="resultSaldoAnterior"></td>
-            </tr>
-            <tr>
-              <td style="padding: 8px; font-weight: bold; font-size: 1.1rem; color: #2e7d32;">NOVO SALDO:</td>
-              <td style="padding: 8px; font-size: 1.5rem; font-weight: bold; color: #2e7d32;" id="resultNovoSaldo"></td>
-            </tr>
-          </table>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-success" onclick="fecharModalResultado()" style="width: 100%;">
-          ✓ OK - Inserir Outro Item
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Modal de Confirmação NF -->
-  <div id="modalConfirmacaoNF" class="modal-overlay">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3>📋 Confirme os Itens da NF</h3>
-        <button class="modal-close" onclick="fecharModalConfirmacao()">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div id="avisoItensNovos" class="novo-item-warning" style="display: none;">
-          <strong>⚠️ ATENÇÃO:</strong> Existem itens <strong>NOVOS</strong> que não existem na base de dados!
-          <br>Verifique se digitou corretamente para evitar problemas futuros.
-          <br>Itens novos estão destacados em <span style="background: #fff3cd; padding: 2px 6px;">amarelo</span>.
-        </div>
-        <div id="infoNFModal" style="background: #e3f2fd; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
-          <!-- Info da NF será inserida aqui -->
-        </div>
-        <div class="confirm-header-row">
-          <span>#</span>
-          <span>Item</span>
-          <span>Grupo</span>
-          <span>Preço</span>
-          <span>Lote</span>
-          <span>Entrada</span>
-          <span>Ação</span>
-        </div>
-        <div id="listaItensConfirmacao">
-          <!-- Itens serão listados aqui -->
-        </div>
-        <div id="contadorConfirmacao" style="text-align: center; margin-top: 15px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
-          Confirmados: <strong><span id="totalConfirmados">0</span></strong> de <strong><span id="totalItensNF">0</span></strong>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-warning" onclick="voltarParaEdicao()">↩ Voltar e Ajustar</button>
-        <button type="button" id="btnConfirmarInsercaoFinal" class="btn btn-success" onclick="confirmarInsercaoFinal()" disabled>
-          ✓ Confirmar e Inserir
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Modal de Confirmação Lote -->
-  <div id="modalConfirmacaoLote" class="modal-overlay">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3>📦 Confirme a Movimentação em Lote</h3>
-        <button class="modal-close" onclick="fecharModalConfirmacaoLote()">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div id="avisoItensNovosLote" class="novo-item-warning" style="display: none;">
-          <strong>⚠️ ATENÇÃO:</strong> Existem itens <strong>NOVOS</strong> que não existem na base de dados!
-          <br>Verifique se digitou corretamente para evitar problemas futuros.
-          <br>Itens novos estão destacados em <span style="background: #fff3cd; padding: 2px 6px;">amarelo</span>.
-        </div>
-        <div id="infoLoteModal" style="background: #e8f5e9; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
-          <!-- Info do Lote será inserida aqui -->
-        </div>
-        <div class="confirm-header-row-lote">
-          <span>#</span>
-          <span>Produto</span>
-          <span>Quantidade</span>
-          <span>Saldo Atual</span>
-          <span style="background: #28a745; color: white; padding: 2px 6px; border-radius: 3px;">Saldo Final</span>
-          <span>Ação</span>
-        </div>
-        <div id="listaItensConfirmacaoLote">
-          <!-- Itens serão listados aqui -->
-        </div>
-        <div id="contadorConfirmacaoLote" style="text-align: center; margin-top: 15px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
-          Confirmados: <strong><span id="totalConfirmadosLote">0</span></strong> de <strong><span id="totalItensLote">0</span></strong>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-warning" onclick="voltarParaEdicaoLote()">↩ Voltar e Ajustar</button>
-        <button type="button" id="btnConfirmarInsercaoFinalLote" class="btn btn-success" onclick="confirmarInsercaoFinalLote()" disabled>
-          ✓ Confirmar e Inserir
-        </button>
-      </div>
-    </div>
-  </div>
-</body>
-</html>
+    var rowData = [
+      now,
+      usuario,
+      email,
+      acao,
+      item || "",
+      detalhes || ""
+    ];
+
+    var nextRow = sheetAuditoria.getLastRow() + 1;
+    sheetAuditoria.getRange(nextRow, 1, 1, 6).setValues([rowData]);
+
+    Logger.log("Auditoria: " + acao + " | Usuário: " + usuario + " | Email: " + email + " | Item: " + (item || "N/A"));
+  } catch (error) {
+    Logger.log("Erro ao registrar auditoria: " + error.message);
+    // Não propaga o erro para não interromper a operação principal
+  }
+}
