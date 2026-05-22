@@ -2169,6 +2169,60 @@
       return null;
     }
 
+    // Verifica se o item está desatualizado (última obs=ATUALIZAÇÃO/ACERTO há >20 dias ou nunca houve)
+    function isItemDesatualizado(itemName) {
+      if (!itemName || !itemHistoryIndex) return false;
+      const itemKey = itemName.toString().trim().toUpperCase();
+
+      let itemData = itemHistoryIndex[itemKey];
+      if (!itemData) {
+        for (const k in itemHistoryIndex) {
+          if (k.toUpperCase() === itemKey) { itemData = itemHistoryIndex[k]; break; }
+        }
+      }
+
+      // Item sem histórico = item novo → não bloqueia
+      if (!itemData || !itemData.history || itemData.history.length === 0) return false;
+
+      const hoje = new Date();
+      hoje.setHours(0, 0, 0, 0);
+
+      // Percorre histórico (ordenado por data desc) buscando último ATUALIZAÇÃO/ACERTO
+      for (const record of itemData.history) {
+        const obs = (record.row[5] || '').toString().trim().toUpperCase();
+        if (obs === 'ATUALIZAÇÃO' || obs === 'ACERTO') {
+          const diffDias = (hoje - new Date(record.date)) / (1000 * 3600 * 24);
+          return diffDias > 20;
+        }
+      }
+
+      // Nenhum ATUALIZAÇÃO nos registros → desatualizado
+      return true;
+    }
+
+    // Mostra modal de bloqueio para itens desatualizados. Retorna Promise<'atualizar'|'provisorio'|'cancelar'>
+    function mostrarModalBloqueio(itensDesatualizados) {
+      return new Promise(function(resolve) {
+        const lista = document.getElementById('bloqueioListaItens');
+        lista.innerHTML = itensDesatualizados.map(function(nome) {
+          return '<div style="padding:4px 0;border-bottom:1px solid #ffcdd2;">🔴 ' + nome + '</div>';
+        }).join('');
+
+        const modal = document.getElementById('modalBloqueioDesatualizado');
+        modal.classList.add('show');
+
+        function cleanup() {
+          modal.classList.remove('show');
+          document.getElementById('btnBloqueioAtualizar').onclick = null;
+          document.getElementById('btnBloqueioProvisorio').onclick = null;
+          document.getElementById('btnBloqueioCancelar').onclick = null;
+        }
+        document.getElementById('btnBloqueioAtualizar').onclick = function() { cleanup(); resolve('atualizar'); };
+        document.getElementById('btnBloqueioProvisorio').onclick = function() { cleanup(); resolve('provisorio'); };
+        document.getElementById('btnBloqueioCancelar').onclick = function() { cleanup(); resolve('cancelar'); };
+      });
+    }
+
     /**
      * Formata dados do índice para exibição na tabela
      * Garante ordenação do mais novo para o mais antigo
@@ -3070,98 +3124,115 @@
       const isItemNovo = !(autocompleteData && autocompleteData.items &&
         autocompleteData.items.some(item => item.toUpperCase() === nomeItemUpper));
 
-      // Mostra loading enquanto processa, exibindo últimos 20 lançamentos deste item
-      showLoading('Processando lançamento...', formData.item);
+      // Função interna de submit (closure sobre formData, isItemNovo, entrada, saida)
+      function _fazerSubmitEstoque() {
+        showLoading('Processando lançamento...', formData.item);
 
-      // Envia para servidor e AGUARDA confirmação antes de mostrar resultado
-      google.script.run
-        .withSuccessHandler(function(result) {
-          hideLoading();
+        google.script.run
+          .withSuccessHandler(function(result) {
+            hideLoading();
 
-          if (result.success) {
-            // Preenche modal de resultado com dados CONFIRMADOS do servidor
-            document.getElementById('resultProduto').textContent = formData.item;
-            document.getElementById('resultGrupo').textContent = formData.group || '-';
-            document.getElementById('resultNF').textContent = formData.nf || '-';
-            document.getElementById('resultObs').textContent = formData.obs || '-';
+            if (result.success) {
+              // Preenche modal de resultado com dados CONFIRMADOS do servidor
+              document.getElementById('resultProduto').textContent = formData.item;
+              document.getElementById('resultGrupo').textContent = formData.group || '-';
+              document.getElementById('resultNF').textContent = formData.nf || '-';
+              document.getElementById('resultObs').textContent = formData.obs || '-';
 
-            document.getElementById('resultTipo').innerHTML = entrada > 0 ?
-              '<span style="color: #28a745; font-weight: bold;">ENTRADA</span>' :
-              '<span style="color: #dc3545; font-weight: bold;">SAÍDA</span>';
-            document.getElementById('resultQtd').textContent = entrada > 0 ? entrada : saida;
+              document.getElementById('resultTipo').innerHTML = entrada > 0 ?
+                '<span style="color: #28a745; font-weight: bold;">ENTRADA</span>' :
+                '<span style="color: #dc3545; font-weight: bold;">SAÍDA</span>';
+              document.getElementById('resultQtd').textContent = entrada > 0 ? entrada : saida;
 
-            // Mostra saldos CONFIRMADOS do servidor
-            const saldoAnterior = result.saldoAnterior !== undefined ? result.saldoAnterior : 0;
-            const novoSaldo = result.novoSaldo !== undefined ? result.novoSaldo : 0;
-            document.getElementById('resultSaldoAnterior').textContent = saldoAnterior;
-            document.getElementById('resultNovoSaldo').textContent = novoSaldo;
+              // Mostra saldos CONFIRMADOS do servidor
+              const saldoAnterior = result.saldoAnterior !== undefined ? result.saldoAnterior : 0;
+              const novoSaldo = result.novoSaldo !== undefined ? result.novoSaldo : 0;
+              document.getElementById('resultSaldoAnterior').textContent = saldoAnterior;
+              document.getElementById('resultNovoSaldo').textContent = novoSaldo;
 
-            // Mostra aviso de item novo
-            document.getElementById('avisoItemNovoModal').style.display = isItemNovo ? 'block' : 'none';
+              // Mostra aviso de item novo
+              document.getElementById('avisoItemNovoModal').style.display = isItemNovo ? 'block' : 'none';
 
-            // Mostra aviso de status do produto (VERMELHO ou AMARELO)
-            const avisoStatus = document.getElementById('avisoStatusProduto');
-            if (result.warning && result.message) {
-              avisoStatus.style.display = 'block';
+              // Mostra aviso de status do produto (VERMELHO ou AMARELO)
+              const avisoStatus = document.getElementById('avisoStatusProduto');
+              if (result.warning && result.message) {
+                avisoStatus.style.display = 'block';
 
-              // Define a cor baseado no tipo de aviso
-              if (result.message.includes('DESATUALIZADO') || result.message.includes('20 DIAS')) {
-                avisoStatus.innerHTML = `
-                  <div style="font-size: 2.5rem; margin-bottom: 10px; animation: pulse 1.5s infinite;">🚨</div>
-                  <div style="font-size: 1.3rem; margin-bottom: 10px; text-transform: uppercase;">⚠️ ATENÇÃO URGENTE ⚠️</div>
-                  <div style="font-size: 1.1rem; margin-bottom: 15px; line-height: 1.5;">
-                    <strong>PRODUTO DESATUALIZADO!</strong><br>
-                    Última atualização há mais de 20 dias
-                  </div>
-                  <div style="font-size: 1.2rem; background: #d32f2f; color: white; padding: 15px; border-radius: 6px; margin-top: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
-                    ⚡ AÇÃO NECESSÁRIA: ATUALIZAR ESTOQUE URGENTE! ⚡<br>
-                    <span style="font-size: 0.9rem; margin-top: 8px; display: block;">
-                      Realize uma contagem física e registre uma atualização completa do saldo
-                    </span>
-                  </div>
-                `;
-                avisoStatus.style.background = '#ffebee';
-                avisoStatus.style.border = '4px solid #f44336';
-                avisoStatus.style.color = '#c62828';
-                avisoStatus.style.boxShadow = '0 8px 16px rgba(244, 67, 54, 0.3)';
-              } else if (result.message.includes('ENTRADA')) {
-                avisoStatus.innerHTML = `
-                  <div style="font-size: 2rem; margin-bottom: 8px;">📦</div>
-                  <div style="font-size: 1.1rem; margin-bottom: 10px;"><strong>⚠️ ENTRADA DE ESTOQUE REGISTRADA!</strong></div>
-                  <div style="font-size: 0.95rem; line-height: 1.5;">
-                    É necessário atualizar o estoque deste item para evitar furos de estoque.<br>
-                    <strong>Realize uma contagem física e registre uma atualização completa do saldo.</strong>
-                  </div>
-                `;
-                avisoStatus.style.background = '#fff3cd';
-                avisoStatus.style.border = '3px solid #ffc107';
-                avisoStatus.style.color = '#856404';
-                avisoStatus.style.boxShadow = '0 4px 8px rgba(255, 193, 7, 0.2)';
+                // Define a cor baseado no tipo de aviso
+                if (result.message.includes('DESATUALIZADO') || result.message.includes('20 DIAS')) {
+                  avisoStatus.innerHTML = `
+                    <div style="font-size: 2.5rem; margin-bottom: 10px; animation: pulse 1.5s infinite;">🚨</div>
+                    <div style="font-size: 1.3rem; margin-bottom: 10px; text-transform: uppercase;">⚠️ ATENÇÃO URGENTE ⚠️</div>
+                    <div style="font-size: 1.1rem; margin-bottom: 15px; line-height: 1.5;">
+                      <strong>PRODUTO DESATUALIZADO!</strong><br>
+                      Última atualização há mais de 20 dias
+                    </div>
+                    <div style="font-size: 1.2rem; background: #d32f2f; color: white; padding: 15px; border-radius: 6px; margin-top: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                      ⚡ AÇÃO NECESSÁRIA: ATUALIZAR ESTOQUE URGENTE! ⚡<br>
+                      <span style="font-size: 0.9rem; margin-top: 8px; display: block;">
+                        Realize uma contagem física e registre uma atualização completa do saldo
+                      </span>
+                    </div>
+                  `;
+                  avisoStatus.style.background = '#ffebee';
+                  avisoStatus.style.border = '4px solid #f44336';
+                  avisoStatus.style.color = '#c62828';
+                  avisoStatus.style.boxShadow = '0 8px 16px rgba(244, 67, 54, 0.3)';
+                } else if (result.message.includes('ENTRADA')) {
+                  avisoStatus.innerHTML = `
+                    <div style="font-size: 2rem; margin-bottom: 8px;">📦</div>
+                    <div style="font-size: 1.1rem; margin-bottom: 10px;"><strong>⚠️ ENTRADA DE ESTOQUE REGISTRADA!</strong></div>
+                    <div style="font-size: 0.95rem; line-height: 1.5;">
+                      É necessário atualizar o estoque deste item para evitar furos de estoque.<br>
+                      <strong>Realize uma contagem física e registre uma atualização completa do saldo.</strong>
+                    </div>
+                  `;
+                  avisoStatus.style.background = '#fff3cd';
+                  avisoStatus.style.border = '3px solid #ffc107';
+                  avisoStatus.style.color = '#856404';
+                  avisoStatus.style.boxShadow = '0 4px 8px rgba(255, 193, 7, 0.2)';
+                }
+              } else {
+                avisoStatus.style.display = 'none';
               }
+
+              // Abre modal de resultado APÓS confirmação do servidor
+              document.getElementById('modalResultadoEstoque').classList.add('show');
+
+              // Reseta formulário
+              resetEstoqueForm();
+
+              // Atualiza caches em background
+              clearClientCache();
+              loadDashboardData();
+              loadAutocompleteData();
             } else {
-              avisoStatus.style.display = 'none';
+              showMessage('estoqueMessage', result.message || 'Erro ao inserir estoque', 'error');
             }
+          })
+          .withFailureHandler(function(error) {
+            hideLoading();
+            showMessage('estoqueMessage', 'Erro: ' + error.message, 'error');
+          })
+          .processEstoqueWebApp(formData);
+      }
 
-            // Abre modal de resultado APÓS confirmação do servidor
-            document.getElementById('modalResultadoEstoque').classList.add('show');
-
-            // Reseta formulário
-            resetEstoqueForm();
-
-            // Atualiza caches em background
-            clearClientCache();
-            loadDashboardData();
-            loadAutocompleteData();
-          } else {
-            showMessage('estoqueMessage', result.message || 'Erro ao inserir estoque', 'error');
+      // === BLOQUEIO: ITEM DESATUALIZADO (>20 DIAS SEM ATUALIZAÇÃO) ===
+      if (isItemDesatualizado(formData.item)) {
+        mostrarModalBloqueio([formData.item.trim()]).then(function(acao) {
+          if (acao === 'cancelar') return;
+          if (acao === 'atualizar') {
+            formData.obs = 'ATUALIZAÇÃO';
+            const obsEl = document.getElementById('estoqueObs');
+            if (obsEl) obsEl.value = 'ATUALIZAÇÃO';
+            toggleValorUnitario();
           }
-        })
-        .withFailureHandler(function(error) {
-          hideLoading();
-          showMessage('estoqueMessage', 'Erro: ' + error.message, 'error');
-        })
-        .processEstoqueWebApp(formData);
+          _fazerSubmitEstoque();
+        });
+        return false;
+      }
 
+      _fazerSubmitEstoque();
       return false;
     }
 
@@ -3440,6 +3511,28 @@
       });
 
       if (hasError) return;
+
+      // === BLOQUEIO: ITENS DESATUALIZADOS (>20 DIAS SEM ATUALIZAÇÃO) ===
+      const nfItensDesatualizados = itensParaConfirmar
+        .filter(function(i) { return !i.isNovo && isItemDesatualizado(i.item); })
+        .map(function(i) { return i.item; });
+
+      if (nfItensDesatualizados.length > 0) {
+        mostrarModalBloqueio(nfItensDesatualizados).then(function(acao) {
+          if (acao === 'cancelar') return;
+          let obsEfetivo = nfObs;
+          if (acao === 'atualizar') {
+            obsEfetivo = 'ATUALIZAÇÃO';
+            const obsEl = document.getElementById('nfObs');
+            if (obsEl) obsEl.value = 'ATUALIZAÇÃO';
+          }
+          showLoading('Preparando confirmação...');
+          setTimeout(function() {
+            abrirModalConfirmacao(nfNumero, nfPedido, nfUnidade, obsEfetivo, temItemNovo);
+          }, 100);
+        });
+        return;
+      }
 
       // Mostra loading enquanto prepara modal de confirmação
       showLoading('Preparando confirmação...');
@@ -3839,6 +3932,28 @@
       });
 
       if (hasError) return;
+
+      // === BLOQUEIO: ITENS DESATUALIZADOS (>20 DIAS SEM ATUALIZAÇÃO) ===
+      const loteItensDesatualizados = itensParaConfirmarLote
+        .filter(function(i) { return !i.isNovo && isItemDesatualizado(i.item); })
+        .map(function(i) { return i.item; });
+
+      if (loteItensDesatualizados.length > 0) {
+        mostrarModalBloqueio(loteItensDesatualizados).then(function(acao) {
+          if (acao === 'cancelar') return;
+          let obsEfetivo = obs;
+          if (acao === 'atualizar') {
+            obsEfetivo = 'ATUALIZAÇÃO';
+            const obsEl = document.getElementById('loteObs');
+            if (obsEl) obsEl.value = 'ATUALIZAÇÃO';
+          }
+          showLoading('Preparando confirmação do lote...');
+          setTimeout(function() {
+            abrirModalConfirmacaoLote(operacao, grupo, unidade, obsEfetivo, nf, temItemNovo);
+          }, 100);
+        });
+        return;
+      }
 
       // Mostra loading enquanto prepara modal de confirmação
       showLoading('Preparando confirmação do lote...');
@@ -5111,5 +5226,46 @@
       </div>
     </div>
   </div>
+
+  <!-- Modal Bloqueio - Item Desatualizado (>20 dias sem ATUALIZAÇÃO) -->
+  <div id="modalBloqueioDesatualizado" class="modal-overlay">
+    <div class="modal-content" style="max-width:540px;">
+      <div class="modal-header" style="background:#c62828;color:white;">
+        <h3>🚨 PRODUTO(S) DESATUALIZADO(S)</h3>
+      </div>
+      <div class="modal-body">
+        <div style="background:#ffebee;border:3px solid #f44336;border-radius:8px;padding:16px;margin-bottom:16px;">
+          <div style="font-size:1.5rem;text-align:center;margin-bottom:8px;">⚠️</div>
+          <div style="font-size:1.05rem;font-weight:bold;color:#c62828;margin-bottom:10px;text-align:center;">
+            Os itens abaixo não foram atualizados há mais de 20 dias!
+          </div>
+          <div id="bloqueioListaItens" style="font-size:0.95rem;color:#333;"></div>
+        </div>
+        <div style="font-size:0.9rem;color:#555;line-height:1.6;">
+          <strong>Escolha como prosseguir:</strong>
+          <ul style="margin-top:8px;padding-left:20px;">
+            <li><strong>Registrar Atualização:</strong> Define Obs = "ATUALIZAÇÃO" e submete. Resolve o status do item.</li>
+            <li><strong>Entrada/Saída Provisória:</strong> Submete sem alterar a observação. O aviso voltará no próximo lançamento.</li>
+            <li><strong>Cancelar:</strong> Não submete nada.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="modal-footer" style="flex-direction:column;gap:8px;">
+        <button type="button" id="btnBloqueioAtualizar"
+          class="btn" style="background:#28a745;color:white;width:100%;padding:12px;font-size:1rem;font-weight:bold;border:none;border-radius:6px;cursor:pointer;">
+          ✅ Registrar Atualização (Obs = "ATUALIZAÇÃO")
+        </button>
+        <button type="button" id="btnBloqueioProvisorio"
+          class="btn" style="background:#ff9800;color:white;width:100%;padding:12px;font-size:1rem;border:none;border-radius:6px;cursor:pointer;">
+          ⚡ Entrada/Saída Provisória (sem alterar observação)
+        </button>
+        <button type="button" id="btnBloqueioCancelar"
+          class="btn btn-secondary" style="width:100%;padding:12px;font-size:1rem;border-radius:6px;cursor:pointer;">
+          ✕ Cancelar
+        </button>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>
