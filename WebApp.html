@@ -2172,12 +2172,14 @@
     // Verifica se o item está desatualizado (última obs=ATUALIZAÇÃO/ACERTO há >20 dias ou nunca houve)
     function isItemDesatualizado(itemName) {
       if (!itemName || !itemHistoryIndex) return false;
-      const itemKey = itemName.toString().trim().toUpperCase();
+      const itemKey = itemName.toString().trim().toLowerCase(); // lowercase = padrão do itemHistoryIndex
 
       let itemData = itemHistoryIndex[itemKey];
       if (!itemData) {
+        // Fallback: busca case-insensitive
+        const itemKeyUp = itemKey.toUpperCase();
         for (const k in itemHistoryIndex) {
-          if (k.toUpperCase() === itemKey) { itemData = itemHistoryIndex[k]; break; }
+          if (k.toUpperCase() === itemKeyUp) { itemData = itemHistoryIndex[k]; break; }
         }
       }
 
@@ -3525,6 +3527,8 @@
             obsEfetivo = 'ATUALIZAÇÃO';
             const obsEl = document.getElementById('nfObs');
             if (obsEl) obsEl.value = 'ATUALIZAÇÃO';
+            // Atualiza obs em todos os itens do array — confirmarInsercaoFinal lê item.obs
+            itensParaConfirmar.forEach(function(item) { item.obs = 'ATUALIZAÇÃO'; });
           }
           showLoading('Preparando confirmação...');
           setTimeout(function() {
@@ -3946,6 +3950,8 @@
             obsEfetivo = 'ATUALIZAÇÃO';
             const obsEl = document.getElementById('loteObs');
             if (obsEl) obsEl.value = 'ATUALIZAÇÃO';
+            // Atualiza obs em todos os itens do array — confirmarInsercaoFinalLote lê item.obs
+            itensParaConfirmarLote.forEach(function(item) { item.obs = 'ATUALIZAÇÃO'; });
           }
           showLoading('Preparando confirmação do lote...');
           setTimeout(function() {
