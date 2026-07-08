@@ -169,6 +169,7 @@ function getLastRegistrationOpt(item) {
  * invalidateCacheOpt: Invalida caches otimizados
  */
 function invalidateCacheOpt() {
+  __itemHistoryIndexMemo = null;
   var cache = CacheService.getScriptCache();
   cache.remove("autocompleteData");
   cache.remove("itemIndexOpt");
@@ -344,16 +345,24 @@ function _loadIndiceItensFromSheet() {
 
   var data = sheetIndice.getRange(2, 1, lastRow - 1, 5).getValues();
   var indice = {};
+  var tz = Session.getScriptTimeZone();
 
   for (var i = 0; i < data.length; i++) {
     var item = data[i][0];
     if (!item) continue;
 
+    // CORREÇÃO: converte Date para string — objetos Date quebram o retorno de
+    // google.script.run (getLastRegistrationFromIndex) quando o cache está frio
+    var dataItem = data[i][2];
+    if (dataItem instanceof Date) {
+      dataItem = Utilities.formatDate(dataItem, tz, "dd/MM/yyyy HH:mm:ss");
+    }
+
     var itemKey = item.toString().trim().toUpperCase();
     indice[itemKey] = {
       item: data[i][0],
       saldo: data[i][1],
-      data: data[i][2],
+      data: dataItem,
       grupo: data[i][3],
       linha: data[i][4]
     };
@@ -378,19 +387,24 @@ function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque, invalidate
     var sheetIndice = getOrCreateIndiceItensSheet();
     var itemKey = itemName.toString().trim().toUpperCase();
 
-    // Busca item no índice
-    var lastRow = sheetIndice.getLastRow();
-    var itemRow = -1;
-
-    if (lastRow > 1) {
-      var items = sheetIndice.getRange(2, 1, lastRow - 1, 1).getValues();
-      for (var i = 0; i < items.length; i++) {
-        if (items[i][0] && items[i][0].toString().trim().toUpperCase() === itemKey) {
-          itemRow = i + 2;
-          break;
+    // OTIMIZAÇÃO BATCH: lê a coluna de itens do índice UMA VEZ por execução.
+    // Antes, um lote de 20 itens fazia 20 leituras completas da coluna.
+    if (!updateIndiceItem._posMemo) {
+      var mapa = {};
+      var lastRow = sheetIndice.getLastRow();
+      if (lastRow > 1) {
+        var items = sheetIndice.getRange(2, 1, lastRow - 1, 1).getValues();
+        for (var i = 0; i < items.length; i++) {
+          if (items[i][0]) {
+            mapa[items[i][0].toString().trim().toUpperCase()] = i + 2;
+          }
         }
       }
+      updateIndiceItem._posMemo = { mapa: mapa, nextRow: Math.max(lastRow + 1, 2) };
     }
+
+    var memo = updateIndiceItem._posMemo;
+    var itemRow = memo.mapa[itemKey] || -1;
 
     var now = new Date();
     var rowData = [itemName, saldo, data, grupo, linhaEstoque, now];
@@ -400,8 +414,10 @@ function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque, invalidate
       sheetIndice.getRange(itemRow, 1, 1, 6).setValues([rowData]);
     } else {
       // Adiciona novo item
-      var nextRow = sheetIndice.getLastRow() + 1;
+      var nextRow = memo.nextRow;
       sheetIndice.getRange(nextRow, 1, 1, 6).setValues([rowData]);
+      memo.mapa[itemKey] = nextRow;
+      memo.nextRow = nextRow + 1;
     }
 
     // OTIMIZAÇÃO BATCH: Invalida cache apenas se solicitado
@@ -490,8 +506,14 @@ function _getFallbackLastRegistration(item) {
       if (currentItem && currentItem.toString().trim().toUpperCase() === itemUpper) {
         var saldo = data[i][9]; // Coluna J - vem como NUMBER nativo
 
+        // Converte Date para string: objetos Date quebram o retorno via google.script.run
+        var lastDate = data[i][3];
+        if (lastDate instanceof Date) {
+          lastDate = Utilities.formatDate(lastDate, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss");
+        }
+
         return {
-          lastDate: data[i][3],   // Date nativo
+          lastDate: lastDate,
           lastStock: saldo,       // Number nativo (não string!)
           lastGroup: data[i][0]
         };
@@ -612,6 +634,16 @@ function _parseNumeroSeguro(valor, padrao) {
   }
 
   return numero;
+}
+
+/**
+ * _arredondarSaldo: Elimina ruído de ponto flutuante nos saldos.
+ * Sem isso, 5.1 - 5.1 + ... acumula erros e a tela mostra valores como
+ * "-5.000000000000064" ou "-6.39e-14". Arredonda para 4 casas decimais.
+ */
+function _arredondarSaldo(valor) {
+  var numero = _parseNumeroSeguro(valor, 0);
+  return Math.round(numero * 10000) / 10000;
 }
 
 /**
@@ -789,18 +821,28 @@ function atualizarIndiceAutomatico() {
 var MAX_HISTORY_PER_ITEM = 20;
 
 /**
+ * Memo por execução: evita reconstruir o índice várias vezes na MESMA execução
+ * (ex: lote com 20 itens chamando getItemHistory 20 vezes)
+ */
+var __itemHistoryIndexMemo = null;
+
+/**
  * getItemHistoryIndex: Retorna o índice de histórico completo do cache ou reconstrói
  * O índice contém os últimos 20 registros de cada item para acesso instantâneo
  */
 function getItemHistoryIndex() {
-  return getCachedDataOpt("itemHistoryIndex", function() {
+  if (__itemHistoryIndexMemo) return __itemHistoryIndexMemo;
+  __itemHistoryIndexMemo = getCachedDataOpt("itemHistoryIndex", function() {
     return _buildItemHistoryIndex();
   }, CACHE_TTL_OPT.ITEM_INDEX);
+  return __itemHistoryIndexMemo;
 }
 
 /**
  * _buildItemHistoryIndex: Constrói o índice de histórico com últimos 20 registros por item
  * Estrutura: { "item_normalizado": { info: {...}, history: [{row, date, background}, ...] } }
+ * OTIMIZAÇÃO: lê apenas as últimas MAX_RECENT_ROWS linhas (itens sem movimento recente
+ * caem no fallback de busca completa no servidor, que continua correto)
  */
 function _buildItemHistoryIndex() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -810,8 +852,13 @@ function _buildItemHistoryIndex() {
   var lastRow = sheetEstoque.getLastRow();
   if (lastRow < 2) return {};
 
-  // Lê todos os dados de uma vez (mais eficiente)
-  var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, 13);
+  // Lê apenas as linhas mais recentes (cobre os últimos 20 registros da grande
+  // maioria dos itens ativos, sem custear a leitura de 40k+ linhas)
+  var totalRows = lastRow - 1;
+  var rowsToRead = Math.min(totalRows, MAX_RECENT_ROWS);
+  var startRow = lastRow - rowsToRead + 1;
+
+  var dataRange = sheetEstoque.getRange(startRow, 1, rowsToRead, 13);
   var data = dataRange.getDisplayValues();
   var backgrounds = dataRange.getBackgrounds();
 
@@ -825,7 +872,9 @@ function _buildItemHistoryIndex() {
 
     var itemKey = itemOriginal.toLowerCase();
     var dateStr = row[3]; // Coluna D (Data)
-    var rowDate = dateStr ? new Date(dateStr) : new Date(0);
+    // CORREÇÃO: new Date("dd/mm/aaaa hh:mm") gera data inválida/errada.
+    // parseDateBR trata o formato brasileiro corretamente.
+    var rowDate = parseDateBR(dateStr);
     var background = backgrounds[i][0] || null; // Cor de fundo da linha
 
     // Inicializa o item no índice se não existir
@@ -850,8 +899,8 @@ function _buildItemHistoryIndex() {
     });
 
     // Atualiza info se este registro é mais recente
-    var currentLastDate = new Date(index[itemKey].info.lastDate);
-    if (rowDate > currentLastDate) {
+    var currentLastDate = parseDateBR(index[itemKey].info.lastDate);
+    if (rowDate >= currentLastDate) {
       index[itemKey].info.lastDate = dateStr;
       index[itemKey].info.lastStock = row[9];
       index[itemKey].info.group = row[0];
@@ -1003,11 +1052,11 @@ function processEstoqueWebApp(formData) {
     var lastReg = getLastRegistrationFromIndex(formData.item);
 
     // CONVERSÃO SEGURA: Usa função especializada que trata TODOS os formatos
-    var previousSaldo = _parseNumeroSeguro(lastReg.lastStock, 0);
+    var previousSaldo = _arredondarSaldo(lastReg.lastStock);
     var entrada = _parseNumeroSeguro(formData.entrada, 0);
     var saida = _parseNumeroSeguro(formData.saida, 0);
 
-    var newSaldo = previousSaldo + entrada - saida;
+    var newSaldo = _arredondarSaldo(previousSaldo + entrada - saida);
 
     Logger.log("processEstoqueWebApp: ===== DADOS DO LANÇAMENTO =====");
     Logger.log("processEstoqueWebApp: Item: " + formData.item);
@@ -1170,12 +1219,12 @@ function processMultipleEstoqueItems(itens) {
 
         if (indice[itemKey]) {
           grupoItem = indice[itemKey].grupo || '';
-          previousSaldo = parseFloat(indice[itemKey].saldo) || 0;
+          previousSaldo = _arredondarSaldo(indice[itemKey].saldo);
         }
 
         var entrada = parseFloat(itemData.entrada) || 0;
         var saida = parseFloat(itemData.saida) || 0;
-        var newSaldo = previousSaldo + entrada - saida;
+        var newSaldo = _arredondarSaldo(previousSaldo + entrada - saida);
 
         var rowData = [
           grupoItem,                    // A: Grupo
@@ -1308,13 +1357,13 @@ function processMultipleEstoqueItemsWithGroup(itens) {
 
         // OTIMIZAÇÃO: Busca no índice ao invés de ler planilha
         if (indice[itemKey]) {
-          previousSaldo = parseFloat(indice[itemKey].saldo) || 0;
+          previousSaldo = _arredondarSaldo(indice[itemKey].saldo);
           lastDate = indice[itemKey].data;
         }
 
         var entrada = parseFloat(itemData.entrada) || 0;
         var saida = parseFloat(itemData.saida) || 0;
-        var newSaldo = previousSaldo + entrada - saida;
+        var newSaldo = _arredondarSaldo(previousSaldo + entrada - saida);
 
         var rowData = [
           grupoItem,                    // A: Grupo
@@ -1494,13 +1543,13 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
 
         // Recupera saldo anterior do índice (O(1) - instantâneo!)
         if (indice[itemKey]) {
-          previousSaldo = parseFloat(indice[itemKey].saldo) || 0;
+          previousSaldo = _arredondarSaldo(indice[itemKey].saldo);
           lastDate = indice[itemKey].data;
         }
 
         var entrada = parseFloat(itemData.entrada) || 0;
         var saida = parseFloat(itemData.saida) || 0;
-        var newSaldo = previousSaldo + entrada - saida;
+        var newSaldo = _arredondarSaldo(previousSaldo + entrada - saida);
 
         var rowData = [
           grupoItem,                    // A: Grupo
@@ -1606,16 +1655,23 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
     backupEstoqueData();
 
     // Busca o histórico de cada item processado
+    // PROTEÇÃO: erro aqui NÃO pode descartar a confirmação — os itens já foram
+    // inseridos. Antes, uma falha nesta etapa fazia o usuário ver "erro" sem
+    // confirmação mesmo com o lançamento gravado na planilha.
     var historicos = [];
-    for (var h = 0; h < itensProcessados.length; h++) {
-      var itemHistorico = getItemHistory(itensProcessados[h].item);
-      if (itemHistorico.success) {
-        historicos.push({
-          item: itensProcessados[h].item,
-          grupo: itensProcessados[h].grupo,
-          historico: itemHistorico
-        });
+    try {
+      for (var h = 0; h < itensProcessados.length; h++) {
+        var itemHistorico = getItemHistory(itensProcessados[h].item);
+        if (itemHistorico.success) {
+          historicos.push({
+            item: itensProcessados[h].item,
+            grupo: itensProcessados[h].grupo,
+            historico: itemHistorico
+          });
+        }
       }
+    } catch (histError) {
+      Logger.log("Aviso: falha ao montar históricos (não fatal): " + histError);
     }
 
     if (erros.length > 0) {
@@ -1663,7 +1719,7 @@ function getMultipleSaldos(itensNomes) {
 
       // Busca O(1) no índice
       if (indice[itemKey]) {
-        result[itemKey] = parseFloat(indice[itemKey].saldo) || 0;
+        result[itemKey] = _arredondarSaldo(indice[itemKey].saldo);
       } else {
         // Item novo - saldo 0
         result[itemKey] = 0;
@@ -1930,13 +1986,14 @@ function gerarListagemCoresDesatualizadasWebApp(formData) {
     targetDate.setMonth(today.getMonth() - mesesAtras);
 
     // Mapeia último registro de cada item
+    // CORREÇÃO: usa parseDateBR (datas dd/mm/aaaa) e índices corretos das colunas
     var itemsMap = {};
     for (var i = 0; i < data.length; i++) {
       var item = data[i][1];
-      var dataMovimento = new Date(data[i][3]); // Coluna D (índice 3)
-      var obs = data[i][5] || ""; // Coluna F (índice 5)
+      if (!item) continue;
+      var dataMovimento = parseDateBR(data[i][3]); // Coluna D (índice 3)
 
-      if (!itemsMap[item] || dataMovimento > new Date(itemsMap[item][2])) {
+      if (!itemsMap[item] || dataMovimento > parseDateBR(itemsMap[item][3])) {
         itemsMap[item] = data[i];
       }
     }
@@ -1944,8 +2001,8 @@ function gerarListagemCoresDesatualizadasWebApp(formData) {
     // Filtra itens desatualizados
     for (var item in itemsMap) {
       var row = itemsMap[item];
-      var dataMovimento = new Date(row[2]);
-      var obs = row[4] || "";
+      var dataMovimento = parseDateBR(row[3]); // Coluna D (Data)
+      var obs = row[5] || "";                  // Coluna F (Obs)
 
       var matchObs = !observacao || normalize(obs).indexOf(normalize(observacao)) >= 0;
 
@@ -2100,7 +2157,8 @@ function getAllDataForSync(page) {
     var records = [];
     for (var i = 0; i < data.length; i++) {
       var dateStr = data[i][3]; // Coluna D (Data)
-      var rowDate = dateStr ? new Date(dateStr) : new Date(0);
+      // CORREÇÃO: parseDateBR trata datas em formato brasileiro (dd/mm/aaaa)
+      var rowDate = parseDateBR(dateStr);
 
       // Formato compacto: array ao invés de objeto
       records.push([
@@ -2158,11 +2216,13 @@ function getNewRecordsSince(sinceTimestamp) {
 
     for (var i = 0; i < data.length; i++) {
       var dateStr = data[i][3]; // Coluna D (Data)
-      var rowDate = dateStr ? new Date(dateStr) : new Date(0);
+      // CORREÇÃO: new Date() sobre "dd/mm/aaaa" gera data inválida → registros
+      // novos NUNCA eram detectados e a busca no cliente ficava desatualizada
+      var rowDate = parseDateBR(dateStr);
 
       // Também verifica coluna L (Alterado Em) para pegar edições
       var alteredStr = data[i][11]; // Coluna L (Alterado Em)
-      var alteredDate = alteredStr ? new Date(alteredStr) : new Date(0);
+      var alteredDate = parseDateBR(alteredStr);
 
       // Usa a data mais recente entre Data e Alterado Em
       var effectiveDate = alteredDate > rowDate ? alteredDate : rowDate;

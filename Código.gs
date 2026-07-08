@@ -133,50 +133,6 @@ function clearLoggedUserSession() {
   Logger.log("Sessão removida - Key: " + sessionKey);
 }
 
-/**
- * Atualiza o menu principal e adiciona um menu separado para processar cores.
- */
-function updateMenus() {
-  var ui = SpreadsheetApp.getUi();
-  ui.createMenu("GESTÃO DO ESTOQUE")
-    .addItem("Inserir Estoque", "showEstoqueSidebar")
-    .addItem("Inserir Grupo", "showGrupoDialog")
-    .addSeparator()
-    .addItem("Localizar Produto", "localizarProduto")
-    .addItem("Mostrar Todos", "mostrarTodos")
-    .addSeparator()
-    .addItem("Gerar Relatório", "abrirDialogRelatorioEstoque")
-    .addItem("Relatório por Grupo", "abrirDialogRelatorioPorGrupo")
-    .addItem("Listagem de Estoque", "showListagemEstoqueSidebar")
-    .addItem("Atualizar Compra de Fio e Histórico", "atualizarCompraDeFioEHistorico")
-    .addSeparator()
-    .addItem("Atualizar Total Embarcado", "atualizarTotalEmbarcado")
-    .addItem("Alternar Restauração", "toggleRestore")
-    .addItem("Apagar Última Linha", "apagarUltimaLinha")
-    .addSeparator()
-    .addItem("ÚLTIMA LINHA", "select10RowsBelow")
-    .addSeparator()
-    .addItem("Estoque por Período", "abrirDialogEstoquePorPeriodo")
-    .addItem("Limpar Filtro", "limparFiltroEstoque")
-    .addSeparator()
-    .addItem("Estoque 3 Meses", "showEstoque3MesesSidebar")
-    .addSeparator()
-    .addItem("Cores Desatualizadas", "showCoresDesatualizadasDialog")
-    .addToUi();
-}
-
-/**
- * onOpen: Executada quando a planilha é aberta.
- */
-function onOpen() {
-  PropertiesService.getUserProperties().deleteProperty("loggedUser");
-  Logger.log("onOpen: Propriedade 'loggedUser' apagada.");
-  
-  backupEstoqueData();
-  removeFilterOnOpen();
-  showLoginDialog();
-  // O updateMenus() só é chamado após login bem-sucedido
-}
 
 /* ... (demais funções já existentes no seu script, como backupEstoqueData, showEstoqueSidebar, etc.) ... */
 
@@ -280,1401 +236,10 @@ function processCoresFromSidebar(selectedCores) {
    ================================ */
 
 
-/**
- * onOpen: Executada quando a planilha é aberta.
- * Apaga a propriedade "loggedUser", remove filtros na aba "ESTOQUE" e faz backup dos dados.
- * Exibe o diálogo de login (o menu só é criado após um login bem-sucedido).
- */
-function onOpen() {
-  PropertiesService.getUserProperties().deleteProperty("loggedUser");
-  Logger.log("onOpen: Propriedade 'loggedUser' apagada.");
-  
-  backupEstoqueData();
-  removeFilterOnOpen();
-  showLoginDialog();
-  // updateMenus() não é chamado aqui para restringir acesso sem login.
-}
-
-/**
- * removeFilterOnOpen: Remove o filtro ativo na aba "ESTOQUE", se existir.
- */
-function removeFilterOnOpen() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetEstoque = ss.getSheetByName("ESTOQUE");
-  if (sheetEstoque && sheetEstoque.getFilter()) {
-    sheetEstoque.getFilter().remove();
-    Logger.log("removeFilterOnOpen: Filtro removido na aba ESTOQUE.");
-  }
-}
-
-/**
- * backupEstoqueData: Copia as últimas 500 linhas da aba "ESTOQUE" para a aba "BACKUP_ESTOQUE".
- */
-function backupEstoqueData() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetEstoque = ss.getSheetByName("ESTOQUE");
-  if (!sheetEstoque) return;
-  
-  var lastRow = sheetEstoque.getLastRow();
-  var startRow = Math.max(1, lastRow - 500 + 1);
-  var numRows = lastRow - startRow + 1;
-  var lastColumn = sheetEstoque.getLastColumn();
-  var values = sheetEstoque.getRange(startRow, 1, numRows, lastColumn).getValues();
-  
-  var sheetBackup = ss.getSheetByName("BACKUP_ESTOQUE");
-  if (!sheetBackup) {
-    sheetBackup = ss.insertSheet("BACKUP_ESTOQUE");
-  }
-  if (sheetBackup.getMaxRows() < lastRow) {
-    sheetBackup.insertRowsAfter(sheetBackup.getMaxRows(), lastRow - sheetBackup.getMaxRows());
-  }
-  sheetBackup.getRange(startRow, 1, numRows, lastColumn).clearContent();
-  sheetBackup.getRange(startRow, 1, numRows, lastColumn).setValues(values);
-  sheetBackup.hideSheet();
-  Logger.log("backupEstoqueData: Backup das linhas de " + startRow + " até " + lastRow + " realizado.");
-}
-
-/**
- * onEdit: Se a edição ocorrer na aba EMBARQUES (colunas A, B ou E), chama atualizarTotalEmbarcado;
- * se ocorrer na aba ESTOQUE, impede edições manuais.
- */
-function onEdit(e) {
-  var sheet = e.range.getSheet();
-  var sheetName = sheet.getName();
-  
-  if (sheetName === "EMBARQUES") {
-    var col = e.range.getColumn();
-    if (col === 1 || col === 2 || col === 5) {
-      atualizarTotalEmbarcado();
-    }
-    return;
-  }
-  
-  if (sheetName !== "ESTOQUE") return;
-  
-  var restoreEnabled = PropertiesService.getScriptProperties().getProperty("restoreEnabled");
-  if (restoreEnabled === "false") {
-    Logger.log("onEdit: Restauração desativada, nenhuma ação realizada.");
-    return;
-  }
-  
-  if (PropertiesService.getScriptProperties().getProperty("editingViaScript") === "true") {
-    return;
-  }
-  
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetBackup = ss.getSheetByName("BACKUP_ESTOQUE");
-  if (!sheetBackup) {
-    Logger.log("onEdit: Aba BACKUP_ESTOQUE não encontrada.");
-    return;
-  }
-  
-  var editedRange = e.range;
-  var numRows = editedRange.getNumRows();
-  var numCols = editedRange.getNumColumns();
-  var startRow = editedRange.getRow();
-  var startCol = editedRange.getColumn();
-  
-  var backupValues = sheetBackup.getRange(startRow, startCol, numRows, numCols).getValues();
-  var newValues = [];
-  for (var r = 0; r < numRows; r++) {
-    var row = [];
-    for (var c = 0; c < numCols; c++) {
-      row.push(backupValues[r][c] !== "" ? backupValues[r][c] : "");
-    }
-    newValues.push(row);
-  }
-  
-  PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
-  editedRange.setValues(newValues);
-  PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
-  
-  SpreadsheetApp.getUi().alert("Edição manual não é permitida. Utilize o sidebar para inserir dados.");
-  Logger.log("onEdit: Edição manual detectada e revertida na faixa " + editedRange.getA1Notation());
-}
-
-/**
- * toggleRestore: Alterna a restauração de dados para permitir edições manuais temporariamente.
- */
-function toggleRestore() {
-  var ui = SpreadsheetApp.getUi();
-  var response = ui.prompt("Digite a senha para alternar a restauração dos dados:");
-  if (response.getSelectedButton() !== ui.Button.OK) return;
-  var senha = response.getResponseText();
-  if (senha !== "919633") {
-    ui.alert("Senha incorreta!");
-    return;
-  }
-  var restoreEnabled = PropertiesService.getScriptProperties().getProperty("restoreEnabled");
-  if (restoreEnabled === null || restoreEnabled === "true") {
-    PropertiesService.getScriptProperties().setProperty("restoreEnabled", "false");
-    ui.alert("Restauração desativada. Agora você poderá editar manualmente.");
-  } else {
-    PropertiesService.getScriptProperties().setProperty("restoreEnabled", "true");
-    ui.alert("Restauração ativada. As edições manuais serão revertidas automaticamente.");
-  }
-  updateMenus();
-}
-
-/**
- * apagarUltimaLinha: Apaga a última linha preenchida da aba ESTOQUE.
- */
-function apagarUltimaLinha() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetEstoque = ss.getSheetByName("ESTOQUE");
-  if (!sheetEstoque) {
-    SpreadsheetApp.getUi().alert("A aba ESTOQUE não foi encontrada.");
-    return;
-  }
-  var lastRow = sheetEstoque.getLastRow();
-  if (lastRow < 2) {
-    SpreadsheetApp.getUi().alert("Não há dados para apagar.");
-    return;
-  }
-  PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
-  sheetEstoque.deleteRow(lastRow);
-  PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
-  backupEstoqueData();
-  SpreadsheetApp.getUi().alert("Última linha apagada com sucesso.");
-}
-
-/**
- * showGrupoDialog: Abre o diálogo para inserir um novo grupo na aba DADOS.
- */
-function showGrupoDialog() {
-  var template = HtmlService.createTemplateFromFile("DialogInserirGrupo");
-  template.groupList = JSON.stringify(getGroupList());
-  var htmlOutput = template.evaluate().setWidth(400).setHeight(250);
-  SpreadsheetApp.getUi().showModalDialog(htmlOutput, "INSERIR GRUPO");
-}
-
-/**
- * inserirGrupo: Insere o grupo na aba DADOS.
- */
-function inserirGrupo(formData) {
-  var group = formData.group;
-  if (!group || group.trim() === "") {
-    throw new Error("⚠️ Informe um grupo.");
-  }
-  group = group.trim();
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetDados = ss.getSheetByName("DADOS");
-  if (!sheetDados) throw new Error("A aba DADOS não foi encontrada.");
-  var existingGroups = getGroupList();
-  if (existingGroups.indexOf(group) !== -1) {
-    SpreadsheetApp.getUi().alert("Grupo já cadastrado.");
-    return "Grupo já cadastrado.";
-  }
-  var lastRow = sheetDados.getLastRow();
-  var newRow = lastRow < 2 ? 2 : lastRow + 1;
-  sheetDados.getRange(newRow, 4).setValue(group);
-  SpreadsheetApp.getUi().alert("Grupo inserido com sucesso.");
-  return "Grupo inserido com sucesso!";
-}
-
-/**
- * atualizarTotalEmbarcado: Atualiza a aba TOTAL EMBARCADO com os cadastros exclusivos e seus totais.
- * Os cadastros são gravados como texto para evitar formatação como data.
- * Se na coluna E de EMBARQUES houver "CHEGOU", subtrai o valor (sem deixar negativo).
- * Cria filtro na faixa A:B. (Mensagem de alerta removida)
- */
-function atualizarTotalEmbarcado() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetEmbarques = ss.getSheetByName("EMBARQUES");
-  if (!sheetEmbarques) throw new Error("A aba EMBARQUES não foi encontrada.");
-  
-  var lastRow = sheetEmbarques.getLastRow();
-  if (lastRow < 2) {
-    return "Sem dados na aba EMBARQUES.";
-  }
-  
-  var dataRange = sheetEmbarques.getRange(2, 1, lastRow - 1, sheetEmbarques.getLastColumn());
-  var dataValues = dataRange.getValues();
-  
-  var totais = {};
-  dataValues.forEach(function(row) {
-    var cadastro = row[0] ? row[0].toString().trim() : "";
-    if (cadastro === "") return;
-    var valor = parseFloat(row[1]) || 0;
-    var status = row[4] ? row[4].toString().trim().toLowerCase() : "";
-    if (!totais.hasOwnProperty(cadastro)) {
-      totais[cadastro] = 0;
-    }
-    if (status === "chegou") {
-      totais[cadastro] = Math.max(totais[cadastro] - valor, 0);
-    } else {
-      totais[cadastro] += valor;
-    }
-  });
-  
-  var sheetTotal = ss.getSheetByName("TOTAL EMBARCADO");
-  if (!sheetTotal) {
-    sheetTotal = ss.insertSheet("TOTAL EMBARCADO");
-  }
-  sheetTotal.clearContents();
-  sheetTotal.getRange(1, 1, 1, 2).setValues([["CADASTRO", "TOTAL"]]);
-  
-  var output = [];
-  for (var cadastro in totais) {
-    if (totais.hasOwnProperty(cadastro)) {
-      output.push(["'" + cadastro, totais[cadastro]]);
-    }
-  }
-  
-  if (output.length > 0) {
-    sheetTotal.getRange(2, 1, output.length, 2).setValues(output);
-    sheetTotal.getRange(2, 1, output.length, 1).setNumberFormat("@");
-  }
-  
-  if (sheetTotal.getFilter()) {
-    sheetTotal.getFilter().remove();
-  }
-  sheetTotal.getRange(1, 1, sheetTotal.getLastRow(), 2).createFilter();
-  
-  return "Total embarcado atualizado com sucesso!";
-}
-
-/**
- * atualizarCompraDeFio: Atualiza a aba COMPRA DE FIO com os valores das abas RELATORIO e TOTAL EMBARCADO.
- * Compara o Total Compra com o threshold definido em J1 para definir "URGENTE" ou "ESTOQUE".
- */
-function atualizarCompraDeFio() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  
-  var sheetCompra = ss.getSheetByName("COMPRA DE FIO");
-  if (!sheetCompra) {
-    throw new Error("A aba COMPRA DE FIO não foi encontrada.");
-  }
-  var compraData = sheetCompra.getDataRange().getValues();
-  if (compraData.length < 2) {
-    SpreadsheetApp.getUi().alert("Não há cadastros na aba COMPRA DE FIO para atualizar.");
-    return;
-  }
-  var cadastrosCompra = compraData.slice(1).map(function(row) {
-    return row[0] ? row[0].toString().replace(/^'/, "").trim() : "";
-  });
-  
-  var sheetRelatorio = ss.getSheetByName("RELATORIO");
-  if (!sheetRelatorio) {
-    throw new Error("A aba RELATORIO não foi encontrada.");
-  }
-  var relData = sheetRelatorio.getDataRange().getValues();
-  relData.shift();
-  var relMap = {};
-  relData.forEach(function(row) {
-    var cad = row[0] ? row[0].toString().trim() : "";
-    var valor = parseFloat(row[1]) || 0;
-    if (cad) {
-      relMap[cad] = valor;
-    }
-  });
-  
-  var sheetTotal = ss.getSheetByName("TOTAL EMBARCADO");
-  if (!sheetTotal) {
-    throw new Error("A aba TOTAL EMBARCADO não foi encontrada.");
-  }
-  var totalData = sheetTotal.getDataRange().getValues();
-  totalData.shift();
-  var totalMap = {};
-  totalData.forEach(function(row) {
-    var cad = row[0] ? row[0].toString().replace(/^'/, "").trim() : "";
-    var valor = parseFloat(row[1]) || 0;
-    if (cad) {
-      totalMap[cad] = valor;
-    }
-  });
-  
-  var notFound = [];
-  var totalCompra = [];
-  var breakdownRel = [];
-  var breakdownTot = [];
-  
-  cadastrosCompra.forEach(function(cad) {
-    if (!cad) return;
-    var valorRel = relMap.hasOwnProperty(cad) ? relMap[cad] : 0;
-    var valorTotal = totalMap.hasOwnProperty(cad) ? totalMap[cad] : 0;
-    var soma = valorRel + valorTotal;
-    if (!relMap.hasOwnProperty(cad)) {
-      notFound.push(cad);
-    }
-    totalCompra.push([soma]);
-    breakdownRel.push([valorRel]);
-    breakdownTot.push([valorTotal]);
-  });
-  
-  var lastRowCompra = sheetCompra.getLastRow();
-  if (lastRowCompra >= 2) {
-    sheetCompra.getRange(2, 2, lastRowCompra - 1, 1).clearContent();
-    sheetCompra.getRange(2, 5, lastRowCompra - 1, 1).clearContent();
-    sheetCompra.getRange(2, 6, lastRowCompra - 1, 2).clearContent();
-  }
-  
-  var threshold = parseFloat(sheetCompra.getRange("J1").getValue());
-  if (isNaN(threshold)) {
-    threshold = 0;
-  }
-  
-  for (var i = 0; i < totalCompra.length; i++) {
-    var totalValue = totalCompra[i][0];
-    sheetCompra.getRange(i + 2, 2).setValue(totalValue);
-    var label = parseFloat(totalValue) < threshold ? "URGENTE" : "ESTOQUE";
-    sheetCompra.getRange(i + 2, 5).setValue(label);
-    sheetCompra.getRange(i + 2, 6).setValue(breakdownRel[i][0]);
-    sheetCompra.getRange(i + 2, 7).setValue(breakdownTot[i][0]);
-  }
-  
-  var existingFilter = sheetCompra.getFilter();
-  if (existingFilter) {
-    existingFilter.remove();
-  }
-  sheetCompra.getRange(1, 1, sheetCompra.getLastRow(), 7).createFilter();
-  
-  if (notFound.length > 0) {
-    SpreadsheetApp.getUi().alert("Os seguintes cadastros não foram encontrados no RELATORIO: " + notFound.join(", "));
-  } else {
-    SpreadsheetApp.getUi().alert("Compra de fio atualizada com sucesso!");
-  }
-  
-  return "Compra de fio atualizada com sucesso!";
-}
-
-/**
- * copyCompraToHistorico: Copia os dados da aba COMPRA DE FIO para a aba HISTORICO, adicionando a data/hora atual.
- */
-function copyCompraToHistorico() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetCompra = ss.getSheetByName("COMPRA DE FIO");
-  var historicoSheet = ss.getSheetByName("HISTORICO");
-  if (!historicoSheet) {
-    historicoSheet = ss.insertSheet("HISTORICO");
-  }
-  
-  var numRowsToCopy = sheetCompra.getLastRow() - 1;
-  Logger.log("Número de linhas para copiar: " + numRowsToCopy);
-  if (numRowsToCopy > 0) {
-    var compData = sheetCompra.getRange(2, 1, numRowsToCopy, 7).getValues();
-    var now = new Date();
-    var historicoData = compData.map(function(row) {
-      return row.concat([now]);
-    });
-    var lastRowHistorico = historicoSheet.getLastRow();
-    var startRowHistorico = lastRowHistorico < 1 ? 1 : lastRowHistorico + 1;
-    historicoSheet.getRange(startRowHistorico, 1, historicoData.length, historicoData[0].length).setValues(historicoData);
-    Logger.log("Dados copiados para HISTORICO a partir da linha " + startRowHistorico);
-  } else {
-    Logger.log("Não há linhas para copiar na aba COMPRA DE FIO.");
-  }
-}
-
-/**
- * atualizarCompraDeFioEHistorico: Executa atualizarCompraDeFio() e, em seguida, copyCompraToHistorico().
- */
-function atualizarCompraDeFioEHistorico() {
-  atualizarCompraDeFio();
-  copyCompraToHistorico();
-}
-
-/**
- * showLoginDialog: Exibe o diálogo de login.
- */
-function showLoginDialog() {
-  var html = HtmlService.createTemplateFromFile("DialogLogin")
-    .evaluate()
-    .setWidth(350)
-    .setHeight(320);
-  SpreadsheetApp.getUi().showModalDialog(html, "LOGIN");
-}
-
-/**
- * processLogin: Valida as credenciais na aba DADOS e, se bem-sucedido, define "loggedUser" e cria o menu.
- */
-function processLogin(formData) {
-  Logger.log("processLogin: Dados recebidos: " + JSON.stringify(formData));
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetDados = ss.getSheetByName("DADOS");
-  if (!sheetDados) {
-    throw new Error("A aba DADOS não foi encontrada.");
-  }
-  var lastRow = sheetDados.getLastRow();
-  if (lastRow < 1) {
-    throw new Error("Não há usuários cadastrados.");
-  }
-  var data = sheetDados.getRange(1, 2, lastRow, 2).getValues();
-  var valid = false;
-  for (var i = 0; i < data.length; i++) {
-    var username = data[i][0];
-    var password = data[i][1];
-    if (username && password) {
-      if (username.toString().trim() === formData.username.toString().trim() &&
-          password.toString().trim() === formData.password.toString().trim()) {
-        valid = true;
-        break;
-      }
-    }
-  }
-  if (!valid) {
-    throw new Error("Credenciais inválidas.");
-  }
-  PropertiesService.getUserProperties().setProperty("loggedUser", formData.username.toString().trim());
-  Logger.log("processLogin: Login efetuado para " + formData.username);
-  updateMenus();
-  return "Login efetuado com sucesso!";
-}
-
-/**
- * getLoggedUser: Retorna o usuário logado de forma robusta.
- * Prioriza o usuário armazenado em UserProperties, mas usa Session como fallback.
- */
-function getLoggedUser() {
-  // NOVO SISTEMA: Usa getLoggedUserSession() que gerencia sessões corretamente
-  var loggedUser = getLoggedUserSession();
-
-  // Se encontrou usuário na sessão, retorna
-  if (loggedUser && loggedUser.trim() !== "") {
-    Logger.log("getLoggedUser: Usuário logado (sessão): " + loggedUser);
-    return loggedUser;
-  }
-
-  // Fallback: tenta usar email do Google (para compatibilidade)
-  try {
-    // Tenta pegar o email do usuário ativo do Google Sheets
-    var activeUser = Session.getActiveUser().getEmail();
-    if (activeUser && activeUser !== "") {
-      Logger.log("getLoggedUser: Usando email do Session: " + activeUser);
-      return activeUser;
-    }
-
-    // Fallback: tenta getEffectiveUser
-    var effectiveUser = Session.getEffectiveUser().getEmail();
-    if (effectiveUser && effectiveUser !== "") {
-      Logger.log("getLoggedUser: Usando email do EffectiveUser: " + effectiveUser);
-      return effectiveUser;
-    }
-  } catch (e) {
-    Logger.log("getLoggedUser: Erro ao obter usuário via Session: " + e.message);
-  }
-
-  // Se ainda não conseguiu, retorna "Desconhecido"
-  Logger.log("getLoggedUser: AVISO - Nenhum usuário identificado!");
-  return "Usuário Desconhecido";
-}
-
-/**
- * getUltimosLancamentos: Retorna os últimos 20 lançamentos de um item específico
- * Ordenados por data (mais recente primeiro)
- * @param {string} itemNome - Nome do item para filtrar (opcional)
- * @returns {Array} - Array de objetos com os lançamentos do item
- */
-function getUltimosLancamentos(itemNome) {
-  try {
-    // Se não passar item, não retorna nada
-    if (!itemNome || itemNome.trim() === '') {
-      Logger.log("getUltimosLancamentos: Nenhum item especificado, retornando vazio");
-      return [];
-    }
-
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheetEstoque = ss.getSheetByName("ESTOQUE");
-
-    if (!sheetEstoque) {
-      Logger.log("getUltimosLancamentos: Planilha ESTOQUE não encontrada");
-      return [];
-    }
-
-    var lastRow = sheetEstoque.getLastRow();
-    if (lastRow <= 1) {
-      return [];
-    }
-
-    // Busca TODAS as linhas da planilha (começando da linha 2, pois 1 é cabeçalho)
-    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
-
-    // Filtra apenas lançamentos do item especificado
-    var lancamentos = [];
-    for (var i = 0; i < data.length; i++) {
-      var row = data[i];
-      var itemRow = row[1]; // Coluna B (Item)
-
-      // Compara ignorando case e espaços
-      if (itemRow.trim().toUpperCase() === itemNome.trim().toUpperCase()) {
-        var dataStr = row[3]; // Coluna D (Data)
-        var dataObj = parseDateString(dataStr);
-
-        lancamentos.push({
-          grupo: row[0],
-          item: row[1],
-          unidade: row[2],
-          data: dataStr,
-          dataObj: dataObj || new Date(0),
-          nf: row[4],
-          obs: row[5],
-          pedido: row[6],
-          entrada: row[7],
-          saida: row[8],
-          saldo: row[9],
-          valorUnitario: row[10],
-          alteradoEm: row[11],
-          alteradoPor: row[12]
-        });
-      }
-    }
-
-    // Ordena por data (mais recente primeiro)
-    lancamentos.sort(function(a, b) {
-      return b.dataObj.getTime() - a.dataObj.getTime();
-    });
-
-    // Retorna apenas os últimos 20
-    var ultimos20 = lancamentos.slice(0, 20);
-
-    Logger.log("getUltimosLancamentos: Item '" + itemNome + "' - Encontrados " + lancamentos.length + " lançamentos, retornando " + ultimos20.length);
-    return ultimos20;
-
-  } catch (e) {
-    Logger.log("getUltimosLancamentos: Erro - " + e.message);
-    return [];
-  }
-}
-
-/**
- * showEstoqueSidebar: Abre o formulário de cadastro de estoque na sidebar.
- */
-function showEstoqueSidebar() {
-  var nextRow = updateUnprotectedRange();
-  Logger.log("showEstoqueSidebar: Próxima linha para cadastro: " + nextRow);
-
-  // OTIMIZADO: 1 busca em vez de 4
-  var autocompleteData = getAllAutocompleteData();
-
-  var template = HtmlService.createTemplateFromFile("DialogEstoque");
-  template.itemList = JSON.stringify(autocompleteData.items);
-  template.groupList = JSON.stringify(autocompleteData.groups);
-  template.nfList = JSON.stringify(autocompleteData.nfs);
-  template.obsList = JSON.stringify(autocompleteData.obs);
-  template.currentRow = nextRow;
-
-  var htmlOutput = template.evaluate().setTitle("CADASTRO DE ESTOQUE");
-  SpreadsheetApp.getUi().showSidebar(htmlOutput);
-}
-
-/**
- * updateUnprotectedRange: Retorna a próxima linha livre na aba ESTOQUE.
- */
-function updateUnprotectedRange() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("ESTOQUE");
-  var nextRow = sheet.getLastRow() + 1;
-  return nextRow;
-}
-
-/**
- * setActiveNextEmptyCell: Seleciona a célula da coluna A que está 15 linhas abaixo da última preenchida.
- */
-function setActiveNextEmptyCell() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("ESTOQUE");
-  if (sheet) {
-    var nextRow = sheet.getLastRow() + 15;
-    sheet.activate();
-    sheet.setActiveSelection("A" + nextRow);
-    Logger.log("setActiveNextEmptyCell: Célula A" + nextRow + " selecionada.");
-  }
-}
-
-/**
- * select4RowsBelow: Seleciona a célula da coluna A que está 4 linhas abaixo da última linha preenchida.
- */
-function select4RowsBelow() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("ESTOQUE");
-  if (sheet) {
-    var nextRow = sheet.getLastRow() + 4;
-    sheet.activate();
-    sheet.setActiveSelection("A" + nextRow);
-    Logger.log("select4RowsBelow: Célula A" + nextRow + " selecionada.");
-  }
-}
-
-/**
- * select10RowsBelow: Seleciona a célula da coluna A que está 10 linhas abaixo da última linha preenchida.
- */
-function select10RowsBelow() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("ESTOQUE");
-  if (sheet) {
-    var nextRow = sheet.getLastRow() + 10;
-    sheet.activate();
-    sheet.setActiveSelection("A" + nextRow);
-    Logger.log("select10RowsBelow: Célula A" + nextRow + " selecionada.");
-  }
-}
-
-/**
- * getItemList: Retorna a lista única de itens da aba DADOS (Coluna A).
- */
-function getItemList() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetDados = ss.getSheetByName("DADOS");
-  if (!sheetDados) return [];
-  var lastRow = sheetDados.getLastRow();
-  if (lastRow < 1) return [];
-  var values = sheetDados.getRange(1, 1, lastRow, 1).getValues().flat();
-  var items = [];
-  for (var i = 0; i < values.length; i++) {
-    if (values[i] && values[i].toString().trim() !== "") {
-      items.push(values[i].toString().trim());
-    }
-  }
-  return Array.from(new Set(items));
-}
-
-/**
- * getGroupList: Retorna a lista única de grupos da aba DADOS (Coluna D).
- */
-function getGroupList() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetDados = ss.getSheetByName("DADOS");
-  if (!sheetDados) return [];
-  var lastRow = sheetDados.getLastRow();
-  if (lastRow < 1) return [];
-  var values = sheetDados.getRange(1, 4, lastRow, 1).getValues().flat();
-  var groups = [];
-  for (var i = 0; i < values.length; i++) {
-    if (values[i] && values[i].toString().trim() !== "") {
-      groups.push(values[i].toString().trim());
-    }
-  }
-  return Array.from(new Set(groups));
-}
-
-/**
- * getNfList: Retorna a lista única de valores da coluna D da aba ESTOQUE (Nota Fiscal/Pedido).
- */
-function getNfList() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("ESTOQUE");
-  if (!sheet) return [];
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-  var values = sheet.getRange(2, 4, lastRow - 1, 1).getValues().flat();
-  var nfList = values.filter(function(v) {
-    return v.toString().trim() !== "";
-  });
-  return Array.from(new Set(nfList));
-}
-
-/**
- * getObsList: Retorna a lista única de valores da coluna E da aba ESTOQUE (Cliente/Observações).
- */
-function getObsList() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("ESTOQUE");
-  if (!sheet) return [];
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-  var values = sheet.getRange(2, 5, lastRow - 1, 1).getValues().flat();
-  var obsList = values.filter(function(v) {
-    return v.toString().trim() !== "";
-  });
-  return Array.from(new Set(obsList));
-}
-
-/**
- * getMedidasList: Retorna a lista de unidades de medida.
- * Combina opções da aba DADOS (coluna MEDIDAS) com opções já usadas na aba ESTOQUE (coluna C).
- */
-function getMedidasList() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var medidasSet = new Set();
-
-  // 1. Busca na aba DADOS (coluna MEDIDAS)
-  var sheetDados = ss.getSheetByName("DADOS");
-  if (sheetDados) {
-    var headers = sheetDados.getRange(1, 1, 1, sheetDados.getLastColumn()).getValues()[0];
-    var medidasCol = -1;
-    for (var i = 0; i < headers.length; i++) {
-      var headerUpper = headers[i].toString().toUpperCase().trim();
-      if (headerUpper === "MEDIDAS" || headerUpper === "MEDIDA" || headerUpper === "UNIDADE" || headerUpper === "UNIDADES") {
-        medidasCol = i + 1;
-        break;
-      }
-    }
-
-    if (medidasCol !== -1) {
-      var lastRow = sheetDados.getLastRow();
-      if (lastRow >= 2) {
-        var values = sheetDados.getRange(2, medidasCol, lastRow - 1, 1).getValues().flat();
-        values.forEach(function(v) {
-          var val = v.toString().trim();
-          if (val !== "") medidasSet.add(val);
-        });
-      }
-    }
-  }
-
-  // 2. Busca na aba ESTOQUE (coluna C - Unidade) para incluir opções já usadas
-  var sheetEstoque = ss.getSheetByName("ESTOQUE");
-  if (sheetEstoque) {
-    var lastRowEstoque = sheetEstoque.getLastRow();
-    if (lastRowEstoque >= 2) {
-      var valuesEstoque = sheetEstoque.getRange(2, 3, lastRowEstoque - 1, 1).getValues().flat();
-      valuesEstoque.forEach(function(v) {
-        var val = v.toString().trim();
-        if (val !== "") medidasSet.add(val);
-      });
-    }
-  }
-
-  // Converte Set para Array e ordena
-  var medidasList = Array.from(medidasSet).sort();
-  return medidasList;
-}
-
-/**
- * getObservacoesList: Retorna a lista de observações.
- * Busca da aba DADOS, coluna F (OBSERVAÇÃO).
- */
-function getObservacoesList() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var obsSet = new Set();
-
-  // Busca na aba DADOS, coluna F (índice 6)
-  var sheetDados = ss.getSheetByName("DADOS");
-  if (sheetDados) {
-    var lastRow = sheetDados.getLastRow();
-    if (lastRow >= 2) {
-      // Coluna F = índice 6
-      var values = sheetDados.getRange(2, 6, lastRow - 1, 1).getDisplayValues().flat();
-      values.forEach(function(v) {
-        var val = v.toString().trim();
-        if (val !== "") obsSet.add(val);
-      });
-    }
-  }
-
-  // Converte Set para Array e ordena
-  var obsList = Array.from(obsSet).sort();
-  return obsList;
-}
-
-/**
- * normalize: Função auxiliar para normalizar texto.
- */
-function normalize(text) {
-  if (!text) return "";
-  return text.toString().trim().toLowerCase().replace(/\s+/g, " ");
-}
-
 /* ================================
    FUNÇÕES DE CACHE E AUTOCOMPLETE
    ================================ */
 
-/**
- * getCachedData: Busca dados no cache ou executa função e armazena no cache.
- */
-function getCachedData(key, fetchFunction, ttl) {
-  ttl = ttl || 120; // 2 minutos padrão
-  var cache = CacheService.getScriptCache();
-  var cached = cache.get(key);
-
-  if (cached) {
-    try {
-      return JSON.parse(cached);
-    } catch (e) {
-      Logger.log("Cache parse error: " + key);
-    }
-  }
-
-  var data = fetchFunction();
-  try {
-    var jsonData = JSON.stringify(data);
-    if (jsonData.length < 100000) {
-      cache.put(key, jsonData, ttl);
-    }
-  } catch (e) {
-    Logger.log("Cache save error: " + e.message);
-  }
-
-  return data;
-}
-
-/**
- * invalidateCache: Invalida caches.
- */
-function invalidateCache(keys) {
-  var cache = CacheService.getScriptCache();
-  var keysToInvalidate = typeof keys === 'string' ? [keys] : (keys || []);
-  keysToInvalidate.forEach(function(key) { cache.remove(key); });
-  cache.remove("autocompleteData");
-}
-
-/**
- * invalidateAllAutocompleteCache: Invalida todos os caches de autocomplete.
- */
-function invalidateAllAutocompleteCache() {
-  invalidateCache(["itemList", "groupList", "nfList", "obsList", "autocompleteData"]);
-}
-
-/**
- * getAllAutocompleteData: Busca todos os dados de autocomplete em uma única operação.
- * OTIMIZADO: Usa cache de 10 minutos
- */
-function getAllAutocompleteData() {
-  return getCachedData("autocompleteData", function() {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-
-    // 1ª Leitura: DADOS (apenas grupos)
-    var sheetDados = ss.getSheetByName("DADOS");
-    var groups = [];
-    if (sheetDados) {
-      var lastRowDados = sheetDados.getLastRow();
-      if (lastRowDados >= 1) {
-        var dadosData = sheetDados.getRange(1, 4, lastRowDados, 1).getDisplayValues();
-        for (var i = 0; i < dadosData.length; i++) {
-          if (dadosData[i][0] && dadosData[i][0].toString().trim() !== "") {
-            groups.push(dadosData[i][0].toString().trim());
-          }
-        }
-      }
-    }
-
-    // 2ª Leitura: ESTOQUE (itens da coluna B e NFs da coluna E)
-    // Estrutura: A=Grupo, B=Item, C=Unidade, D=Data, E=NF, F=Obs
-    var sheetEstoque = ss.getSheetByName("ESTOQUE");
-    var items = [], nfs = [];
-    if (sheetEstoque) {
-      var lastRowEstoque = sheetEstoque.getLastRow();
-      if (lastRowEstoque >= 2) {
-        // Lê colunas B até E (4 colunas: B, C, D, E)
-        var estoqueData = sheetEstoque.getRange(2, 2, lastRowEstoque - 1, 4).getDisplayValues();
-        for (var j = 0; j < estoqueData.length; j++) {
-          // Coluna B (índice 0) = Item
-          if (estoqueData[j][0] && estoqueData[j][0].toString().trim() !== "") {
-            items.push(estoqueData[j][0].toString().trim());
-          }
-          // Coluna E (índice 3) = NF (já em formato texto com getDisplayValues)
-          if (estoqueData[j][3] && estoqueData[j][3].toString().trim() !== "") {
-            nfs.push(estoqueData[j][3].toString().trim());
-          }
-        }
-      }
-    }
-
-    return {
-      items: Array.from(new Set(items)),
-      groups: Array.from(new Set(groups)),
-      nfs: Array.from(new Set(nfs)),
-      medidas: getMedidasList(),
-      observacoes: getObservacoesList()
-    };
-  }, 120); // 2 minutos
-}
-
-/**
- * getLastRegistration: Retorna o último registro de um item (data, estoque e grupo).
- * OTIMIZADO: Lê apenas as últimas 2000 linhas da planilha ESTOQUE
- */
-function getLastRegistration(item, currentRow) {
-  Logger.log("=== getLastRegistration INICIADO ===");
-  Logger.log("Item buscado: '" + item + "'");
-  Logger.log("CurrentRow: " + currentRow);
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetEstoque = ss.getSheetByName("ESTOQUE");
-  if (!sheetEstoque) {
-    Logger.log("ERRO: Aba ESTOQUE não encontrada!");
-    return { lastDate: null, lastStock: 0, lastGroup: null };
-  }
-
-  var lastRow = sheetEstoque.getLastRow();
-  Logger.log("Última linha da planilha: " + lastRow);
-  if (lastRow < 2) {
-    Logger.log("Planilha vazia - sem dados");
-    return { lastDate: null, lastStock: 0, lastGroup: null };
-  }
-
-  // Lê TODA a planilha como TEXTO (getDisplayValues) para evitar problemas de formato
-  var startRow = 2;
-  var numRows = lastRow - startRow + 1;
-  Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow + " (" + numRows + " linhas)");
-
-  // USA getDisplayValues() para forçar conversão para texto
-  // Lê 10 colunas (A-J) para incluir o Saldo que está na coluna J
-  var data = sheetEstoque.getRange(startRow, 1, numRows, 10).getDisplayValues();
-  Logger.log("Usando getDisplayValues() para forçar formato de TEXTO");
-
-  var result = { lastDate: null, lastStock: 0, lastGroup: null };
-  var itemUpper = item.toString().trim().toUpperCase();
-  Logger.log("Item buscado (maiúsculas): '" + itemUpper + "'");
-
-  var encontrados = 0;
-  for (var i = data.length - 1; i >= 0; i--) {
-    var rowNum = startRow + i;
-    if (rowNum >= currentRow) continue;
-
-    var currentItem = data[i][1]; // Coluna B (Item) - agora em formato TEXTO
-    if (currentItem && currentItem.toString().trim() !== "") {
-      var currentItemUpper = currentItem.toString().trim().toUpperCase();
-
-      // CORRESPONDÊNCIA EXATA: compara strings em maiúsculas
-      if (currentItemUpper === itemUpper) {
-        encontrados++;
-        result.lastGroup = data[i][0];  // Coluna A (Grupo)
-        result.lastDate = data[i][3];   // Coluna D (Data) - como texto
-        result.lastStock = data[i][9];  // Coluna J (Saldo) - como texto
-        Logger.log("✓ ENCONTRADO na linha " + rowNum);
-        Logger.log("  Grupo: '" + result.lastGroup + "'");
-        Logger.log("  Data: " + result.lastDate);
-        Logger.log("  Estoque: " + result.lastStock);
-        Logger.log("  Item raw: '" + currentItem + "'");
-        Logger.log("  Correspondência EXATA com: '" + itemUpper + "'");
-        break;
-      }
-    }
-  }
-
-  if (encontrados === 0) {
-    Logger.log("✗ NENHUM REGISTRO ENCONTRADO para o item '" + item + "'");
-  }
-
-  Logger.log("=== getLastRegistration FINALIZADO ===");
-  return result;
-}
-
-/**
- * hasAtualizacaoInPreviousEntries: Verifica se há alguma entrada com "ATUALIZAÇÃO"
- * nas últimas entradas do item dentro do período especificado (últimos 20 dias antes do novo lançamento).
- * @param {string} item - Nome do item
- * @param {Date} startDate - Data inicial (20 dias antes do novo lançamento)
- * @param {Date} endDate - Data final (data do último registro antes do novo lançamento)
- * @param {number} currentRow - Linha atual para excluir da busca
- * @return {boolean} - true se encontrou "ATUALIZAÇÃO" ou "ACERTO", false caso contrário
- */
-function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
-  Logger.log("=== hasAtualizacaoInPreviousEntries INICIADO ===");
-  Logger.log("Item: '" + item + "'");
-  Logger.log("Data inicial: " + startDate);
-  Logger.log("Data final: " + endDate);
-  Logger.log("CurrentRow: " + currentRow);
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetEstoque = ss.getSheetByName("ESTOQUE");
-  if (!sheetEstoque) {
-    Logger.log("ERRO: Aba ESTOQUE não encontrada!");
-    return false;
-  }
-
-  var lastRow = sheetEstoque.getLastRow();
-  Logger.log("Última linha da planilha: " + lastRow);
-  if (lastRow < 2) {
-    Logger.log("Planilha vazia - sem dados");
-    return false;
-  }
-
-  // Lê TODA a planilha
-  var startRow = 2;
-  var numRows = lastRow - startRow + 1;
-  Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow);
-
-  // Lê 6 colunas (A-F): Grupo, Item, Unidade, Data, NF, Obs
-  var data = sheetEstoque.getRange(startRow, 1, numRows, 6).getDisplayValues();
-
-  var itemUpper = item.toString().trim().toUpperCase();
-  Logger.log("Item buscado (maiúsculas): '" + itemUpper + "'");
-
-  var encontrados = 0;
-  // Percorre de trás para frente (mais recentes primeiro)
-  for (var i = data.length - 1; i >= 0; i--) {
-    var rowNum = startRow + i;
-
-    // Pula a linha atual (novo registro)
-    if (rowNum >= currentRow) continue;
-
-    var currentItem = data[i][1]; // Coluna B (Item)
-    if (!currentItem || currentItem.toString().trim() === "") continue;
-
-    var currentItemUpper = currentItem.toString().trim().toUpperCase();
-
-    // Verifica se é o mesmo item
-    if (currentItemUpper === itemUpper) {
-      // Verifica a data do registro
-      var dataRegistroStr = data[i][3]; // Coluna D (Data)
-      if (!dataRegistroStr || dataRegistroStr === "") continue;
-
-      // Converte string para Date
-      var dataRegistro = parseDateString(dataRegistroStr);
-      if (!dataRegistro) continue;
-
-      // Verifica se está dentro do período de 20 dias
-      if (dataRegistro >= startDate && dataRegistro <= endDate) {
-        encontrados++;
-        var obs = data[i][5]; // Coluna F (Obs)
-        Logger.log("Analisando linha " + rowNum + " - Data: " + dataRegistroStr + " - Obs: '" + obs + "'");
-
-        // Verifica se contém "ATUALIZAÇÃO" ou "ACERTO"
-        if (obs && obs.toString().trim() !== "") {
-          var obsLower = obs.toString().toLowerCase();
-          var temKeyword = /acerto|atualiz/i.test(obsLower);
-          if (temKeyword) {
-            Logger.log("✓ ENCONTRADO 'ATUALIZAÇÃO' na linha " + rowNum);
-            Logger.log("=== hasAtualizacaoInPreviousEntries FINALIZADO: true ===");
-            return true;
-          }
-        }
-      }
-    }
-  }
-
-  Logger.log("Total de entradas analisadas no período: " + encontrados);
-  Logger.log("=== hasAtualizacaoInPreviousEntries FINALIZADO: false ===");
-  return false;
-}
-
-/**
- * parseDateString: Converte string dd/mm/yyyy ou formato de data para objeto Date
- */
-function parseDateString(dateStr) {
-  if (!dateStr) return null;
-
-  var str = dateStr.toString().trim();
-
-  // Se já é um formato de data completo (ex: "25/11/2025 14:30:00"), extrai apenas a parte da data
-  if (str.includes(" ")) {
-    str = str.split(" ")[0];
-  }
-
-  // Formato dd/mm/yyyy ou d/m/yyyy
-  var parts = str.split("/");
-  if (parts.length !== 3) return null;
-
-  var day = parseInt(parts[0], 10);
-  var month = parseInt(parts[1], 10) - 1; // Meses em JS são 0-11
-  var year = parseInt(parts[2], 10);
-
-  if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
-
-  return new Date(year, month, day);
-}
-
-/**
- * getLastInfoFromDados: Retorna a última informação não vazia da coluna C da aba DADOS para um produto.
- */
-function getLastInfoFromDados(product) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetDados = ss.getSheetByName("DADOS");
-  if (!sheetDados) return "";
-  var lastRow = sheetDados.getLastRow();
-  if (lastRow < 2) return "";
-  var data = sheetDados.getRange(2, 1, lastRow - 1, sheetDados.getLastColumn()).getValues();
-  var lastInfo = "";
-  for (var i = 0; i < data.length; i++) {
-    if (data[i][0].toString().trim() === product && data[i][2].toString().trim() !== "") {
-      lastInfo = data[i][2];
-    }
-  }
-  return lastInfo;
-}
-
-/**
- * showCustomDialog: Exibe um diálogo HTML customizado com uma mensagem.
- */
-function showCustomDialog(message) {
-  var template = HtmlService.createTemplateFromFile("CustomDialog");
-  template.message = message;
-  var html = template.evaluate().setWidth(400).setHeight(200);
-  SpreadsheetApp.getUi().showModalDialog(html, "AVISO");
-}
-
-/**
- * localizarProduto: Abre o diálogo para localizar um produto.
- */
-function localizarProduto() {
-  var template = HtmlService.createTemplateFromFile("DialogLocalizarProduto");
-  template.produtos = JSON.stringify(getProdutosEstoque());
-  var htmlOutput = template.evaluate().setWidth(400).setHeight(300);
-  SpreadsheetApp.getUi().showModalDialog(htmlOutput, "LOCALIZAR PRODUTO");
-}
-
-/**
- * getProdutosEstoque: Retorna a lista única de produtos da aba ESTOQUE (Coluna B).
- */
-function getProdutosEstoque() {
-  var cache = CacheService.getScriptCache();
-  var cached = cache.get("produtosEstoque");
-  if (cached) {
-    return JSON.parse(cached);
-  }
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("ESTOQUE");
-  if (!sheet) return [];
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-  var range = sheet.getRange("B2:B" + lastRow);
-  var values = range.getDisplayValues().flat();
-  var produtos = values.filter(function(v) {
-    return v.toString().trim() !== "";
-  });
-  var unique = Array.from(new Set(produtos));
-  cache.put("produtosEstoque", JSON.stringify(unique), 300);
-  return unique;
-}
-
-/**
- * filtrarProduto: Aplica um filtro na aba ESTOQUE para exibir apenas as linhas cujo valor da coluna B seja igual ao produto.
- */
-function filtrarProduto(produto) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("ESTOQUE");
-  if (sheet.getFilter()) {
-    sheet.getFilter().remove();
-  }
-  var range = sheet.getDataRange();
-  var filter = range.createFilter();
-  var criteria = SpreadsheetApp.newFilterCriteria().whenTextEqualTo(produto).build();
-  filter.setColumnFilterCriteria(2, criteria);
-}
-
-/**
- * mostrarTodos: Remove o filtro, ordena a aba ESTOQUE pela data (Coluna C) e seleciona uma célula.
- */
-function mostrarTodos() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("ESTOQUE");
-  if (sheet.getFilter()) {
-    sheet.getFilter().remove();
-  }
-  var lastRow = sheet.getLastRow();
-  var lastColumn = sheet.getLastColumn();
-  if (lastRow > 1) {
-    sheet.getRange(2, 1, lastRow - 1, lastColumn).sort({ column: 3, ascending: true });
-  }
-  setActiveNextEmptyCell();
-}
-
-/**
- * abrirDialogRelatorioEstoque: Abre o diálogo para definir a faixa de data do relatório.
- */
-function abrirDialogRelatorioEstoque() {
-  var html = HtmlService.createTemplateFromFile("DialogRelatorioEstoque")
-      .evaluate()
-      .setWidth(400)
-      .setHeight(300);
-  SpreadsheetApp.getUi().showModalDialog(html, "RELATÓRIO DE ESTOQUE");
-}
-
-/**
- * gerarRelatorioEstoque: Gera o relatório geral para o período definido.
- */
-function gerarRelatorioEstoque(dataInicio, dataFim) {
-  Logger.log("gerarRelatorioEstoque: Início " + dataInicio + " - Fim " + dataFim);
-  var partsInicio = dataInicio.split("/");
-  var partsFim = dataFim.split("/");
-  var startDate = new Date(partsInicio[2], partsInicio[1] - 1, partsInicio[0], 0, 0, 0);
-  var endDate = new Date(partsFim[2], partsFim[1] - 1, partsFim[0], 23, 59, 59);
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetEstoque = ss.getSheetByName("ESTOQUE");
-  if (!sheetEstoque) throw new Error("A aba ESTOQUE não foi encontrada.");
-
-  var lastRow = sheetEstoque.getLastRow();
-  if (lastRow < 2) throw new Error("Não há dados na aba ESTOQUE.");
-
-  var lastColumn = sheetEstoque.getLastColumn();
-  var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, lastColumn);
-  var dataValues = dataRange.getValues();
-  var dataBackgrounds = dataRange.getBackgrounds();
-
-  var filtered = [];
-  for (var i = 0; i < dataValues.length; i++) {
-    var dt = new Date(dataValues[i][2]);
-    if (dt >= startDate && dt <= endDate) {
-      filtered.push({
-        row: dataValues[i],
-        background: dataBackgrounds[i][0] || "#ffffff"
-      });
-    }
-  }
-
-  var grupos = {};
-  for (var j = 0; j < filtered.length; j++) {
-    var item = filtered[j];
-    var prod = item.row[1];
-    if (!grupos[prod]) {
-      grupos[prod] = item;
-    } else {
-      var currentDate = new Date(item.row[2]);
-      var storedDate = new Date(grupos[prod].row[2]);
-      if (currentDate > storedDate) {
-        grupos[prod] = item;
-      }
-    }
-  }
-
-  var reportData = [];
-  var reportBackgrounds = [];
-  for (var prod in grupos) {
-    var item = grupos[prod];
-    var row = item.row;
-    var bg = item.background.toLowerCase();
-
-    // Determina o motivo baseado na cor
-    var motivo = "";
-    if (bg.indexOf("yellow") >= 0 || bg === "#ffff00" || bg === "#ffff") {
-      motivo = "⚠️ ENTRADA - Atualizar estoque";
-    } else if (bg.indexOf("red") >= 0 || bg === "#ff0000" || bg.indexOf("#f00") >= 0) {
-      motivo = "🔴 DESATUALIZADO (+20 dias)";
-    } else {
-      motivo = "OK";
-    }
-
-    reportData.push([prod, row[8], row[4], row[2], motivo]);
-    reportBackgrounds.push(item.background);
-  }
-
-  reportData.sort(function(a, b) {
-    return new Date(a[3]) - new Date(b[3]);
-  });
-
-  var sheetRelatorio = ss.getSheetByName("RELATORIO");
-  if (!sheetRelatorio) {
-    sheetRelatorio = ss.insertSheet("RELATORIO");
-    sheetRelatorio.getRange("J1").setValue(0);
-  }
-  var threshold = parseFloat(sheetRelatorio.getRange("J1").getValue());
-  if (isNaN(threshold)) {
-    threshold = 0;
-  }
-
-  for (var k = 0; k < reportData.length; k++) {
-    var novoSaldo = parseFloat(reportData[k][1]);
-    if (novoSaldo < threshold) {
-      reportData[k].push("URGENTE");
-    } else {
-      reportData[k].push("ESTOQUE");
-    }
-  }
-
-  sheetRelatorio.clearContents();
-  sheetRelatorio.getRange("J1").setValue(threshold);
-  sheetRelatorio.getRange(1, 1, 1, 6).setValues([["PRODUTO", "NOVO SALDO", "OBS", "DATA/HORA", "MOTIVO", "STATUS"]]);
-  if (reportData.length > 0) {
-    var reportRange = sheetRelatorio.getRange(2, 1, reportData.length, 6);
-    reportRange.setValues(reportData);
-
-    // Aplica as cores de fundo nas linhas do relatório
-    for (var m = 0; m < reportBackgrounds.length; m++) {
-      var bgColor = reportBackgrounds[m];
-      if (bgColor && bgColor !== "#ffffff" && bgColor !== "white") {
-        sheetRelatorio.getRange(m + 2, 1, 1, 6).setBackground(bgColor);
-      }
-    }
-  }
-
-  var relFilter = sheetRelatorio.getFilter();
-  if (relFilter) {
-    relFilter.remove();
-  }
-  sheetRelatorio.getRange(1, 1, sheetRelatorio.getLastRow(), 6).createFilter();
-
-  Logger.log("gerarRelatorioEstoque: Relatório gerado com " + reportData.length + " registros.");
-  return "Relatório gerado com sucesso!";
-}
-
-/**
- * abrirDialogRelatorioPorGrupo: Abre o diálogo para definir o grupo do relatório.
- */
-function abrirDialogRelatorioPorGrupo() {
-  var template = HtmlService.createTemplateFromFile("DialogRelatorioPorGrupo");
-  template.grupos = JSON.stringify(getGruposEstoque());
-  var htmlOutput = template.evaluate().setWidth(400).setHeight(300);
-  SpreadsheetApp.getUi().showModalDialog(htmlOutput, "RELATÓRIO POR GRUPO");
-}
-
-/**
- * getGruposEstoque: Retorna os grupos únicos da aba ESTOQUE (Coluna A).
- */
-function getGruposEstoque() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("ESTOQUE");
-  if (!sheet) return [];
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-  var values = sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat();
-  var grupos = values.filter(function(v) {
-    return v.toString().trim() !== "";
-  });
-  return Array.from(new Set(grupos));
-}
-
-/**
- * gerarRelatorioPorGrupo: Gera o relatório para um grupo específico.
- */
-function gerarRelatorioPorGrupo(grupoSelecionado) {
-  Logger.log("gerarRelatorioPorGrupo: Grupo selecionado: " + grupoSelecionado);
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetEstoque = ss.getSheetByName("ESTOQUE");
-  if (!sheetEstoque) throw new Error("A aba ESTOQUE não foi encontrada.");
-  
-  var lastRow = sheetEstoque.getLastRow();
-  if (lastRow < 2) throw new Error("Não há dados na aba ESTOQUE.");
-  
-  var lastColumn = sheetEstoque.getLastColumn();
-  var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, lastColumn);
-  var dataValues = dataRange.getValues();
-  
-  var filtered = dataValues.filter(function(row) {
-    return row[0].toString().trim() === grupoSelecionado;
-  });
-  
-  var gruposItens = {};
-  filtered.forEach(function(row) {
-    var item = row[1];
-    if (!gruposItens[item]) {
-      gruposItens[item] = row;
-    } else {
-      var currentDate = new Date(row[2]);
-      var storedDate = new Date(gruposItens[item][2]);
-      if (currentDate > storedDate) {
-        gruposItens[item] = row;
-      }
-    }
-  });
-  
-  var reportData = [];
-  for (var item in gruposItens) {
-    var row = gruposItens[item];
-    reportData.push([row[0], row[1], row[8], row[2]]);
-  }
-  
-  reportData.sort(function(a, b) {
-    return new Date(a[3]) - new Date(b[3]);
-  });
-  
-  var sheetRelatorio = ss.getSheetByName("RELATORIO POR GRUPO DE ITEM");
-  if (!sheetRelatorio) {
-    sheetRelatorio = ss.insertSheet("RELATORIO POR GRUPO DE ITEM");
-  }
-  sheetRelatorio.clearContents();
-  sheetRelatorio.getRange(1, 1, 1, 4).setValues([["GRUPO", "ITEM", "NOVO SALDO", "DATA/HORA"]]);
-  if (reportData.length > 0) {
-    sheetRelatorio.getRange(2, 1, reportData.length, 4).setValues(reportData);
-  }
-  
-  Logger.log("gerarRelatorioPorGrupo: Relatório gerado com " + reportData.length + " registros.");
-  return "Relatório por grupo gerado com sucesso!";
-}
-
-/**
- * showListagemEstoqueSidebar: Abre a sidebar para a listagem de estoque.
- */
-function showListagemEstoqueSidebar() {
-  var template = HtmlService.createTemplateFromFile('DialogListagemEstoque');
-  template.produtos = JSON.stringify(getProdutosEstoque());
-  var html = template.evaluate()
-    .setTitle('Listagem de Estoque')
-    .setWidth(350);
-  SpreadsheetApp.getUi().showSidebar(html);
-}
 
 /**
  * gerarListagemEstoque: Processa os itens da sidebar e gera/atualiza a aba "LISTAGEM DE ESTOQUE".
@@ -1906,136 +471,10 @@ function processEstoque(formData) {
    NOVAS FUNÇÕES: Estoque por Período e Limpar Filtro
    ================================ */
 
-/**
- * abrirDialogEstoquePorPeriodo: Abre um diálogo para que o usuário informe as datas de início e fim.
- */
-function abrirDialogEstoquePorPeriodo() {
-  var html = HtmlService.createTemplateFromFile("DialogEstoquePorPeriodo")
-    .evaluate()
-    .setWidth(350)
-    .setHeight(250);
-  SpreadsheetApp.getUi().showModalDialog(html, "Filtrar Estoque por Período");
-}
-
-/**
- * filtrarEstoquePorPeriodo: Copia as linhas da aba ESTOQUE, cuja data na coluna C
- * esteja entre dataInicio e dataFim (formato dd/mm/yyyy), e as cola na aba "FILTRO POR PERIODO".
- * Antes de colar, apaga o conteúdo anterior da aba.
- */
-function filtrarEstoquePorPeriodo(dataInicio, dataFim) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetEstoque = ss.getSheetByName("ESTOQUE");
-  if (!sheetEstoque) throw new Error("A aba ESTOQUE não foi encontrada.");
-  
-  var lastRow = sheetEstoque.getLastRow();
-  if (lastRow < 2) throw new Error("Não há dados na aba ESTOQUE.");
-  
-  // Divide as datas informadas (formato dd/mm/yyyy) em partes e cria objetos Date.
-  var partsInicio = dataInicio.split("/");
-  var partsFim = dataFim.split("/");
-  if (partsInicio.length !== 3 || partsFim.length !== 3) {
-    throw new Error("Formato de data inválido. Use dd/mm/yyyy");
-  }
-  
-  var startDate = new Date(
-    parseInt(partsInicio[2], 10), 
-    parseInt(partsInicio[1], 10) - 1, 
-    parseInt(partsInicio[0], 10)
-  );
-  
-  var endDate = new Date(
-    parseInt(partsFim[2], 10), 
-    parseInt(partsFim[1], 10) - 1, 
-    parseInt(partsFim[0], 10),
-    23, 59, 59, 999
-  );
-  
-  // Obtém os dados da aba ESTOQUE (assumindo que a primeira linha é o cabeçalho)
-  var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, sheetEstoque.getLastColumn());
-  var dataValues = dataRange.getValues();
-  
-  // Prepara a aba de destino "FILTRO POR PERIODO"
-  var sheetFiltro = ss.getSheetByName("FILTRO POR PERIODO");
-  if (!sheetFiltro) {
-    sheetFiltro = ss.insertSheet("FILTRO POR PERIODO");
-  } else {
-    sheetFiltro.clear();
-  }
-  
-  // Copia o cabeçalho da aba ESTOQUE para a aba "FILTRO POR PERIODO"
-  var header = sheetEstoque.getRange(1, 1, 1, sheetEstoque.getLastColumn()).getValues();
-  sheetFiltro.getRange(1, 1, 1, header[0].length).setValues(header);
-  
-  var targetData = [];
-  
-  // Percorre cada linha e copia as que tiverem data na coluna C (índice 2) dentro do período
-  for (var i = 0; i < dataValues.length; i++) {
-    var row = dataValues[i];
-    var dateValue = row[2];
-    if (!(dateValue instanceof Date)) continue;
-    if (dateValue >= startDate && dateValue <= endDate) {
-      targetData.push(row);
-    }
-  }
-  
-  if (targetData.length > 0) {
-    sheetFiltro.getRange(2, 1, targetData.length, targetData[0].length).setValues(targetData);
-  }
-  
-  var targetLastRow = sheetFiltro.getLastRow();
-  if (targetLastRow > 1) {
-    sheetFiltro.getRange(2, 1, targetLastRow - 1, sheetFiltro.getLastColumn())
-              .sort({ column: 3, ascending: true });
-  }
-  
-  return "Dados do período de " + dataInicio + " a " + dataFim + " foram copiados para a aba 'FILTRO POR PERIODO'.";
-}
-
-/**
- * limparFiltroEstoque: Remove o filtro da aba ESTOQUE, ordena pela coluna C (datas) de forma ascendente
- * e seleciona a célula 4 linhas abaixo da última linha preenchida.
- */
-function limparFiltroEstoque() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("ESTOQUE");
-  if (!sheet) throw new Error("A aba ESTOQUE não foi encontrada.");
-  
-  if (sheet.getFilter()) {
-    sheet.getFilter().remove();
-  }
-  
-  var lastRow = sheet.getLastRow();
-  if (lastRow > 1) {
-    sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).sort({ column: 3, ascending: true });
-  }
-  
-  select4RowsBelow();
-  
-  return "Filtro removido e planilha ordenada por data.";
-}
-
-/**
- * convertDateFormat: Converte uma data do formato dd/mm/yyyy para mm/dd/yyyy.
- */
-function convertDateFormat(dateStr) {
-  var parts = dateStr.split("/");
-  if (parts.length !== 3) throw new Error("Data inválida: " + dateStr);
-  return parts[1] + "/" + parts[0] + "/" + parts[2];
-}
 
 /* ================================
    NOVAS FUNÇÕES: Estoque 3 Meses
    ================================ */
-
-function showEstoque3MesesSidebar() {
-  var template = HtmlService.createTemplateFromFile("DialogEstoque3Meses");
-  template.itemList = JSON.stringify(getItemList());
-  template.evaluate()
-          .setTitle("Estoque 3 Meses")
-          .setWidth(350)
-          .setHeight(400);
-  SpreadsheetApp.getUi().showSidebar(template);
-}
 
 
 /* ================================
@@ -2584,8 +1023,11 @@ function getUltimosLancamentos(itemNome) {
       return [];
     }
 
-    // Busca TODAS as linhas da planilha (começando da linha 2, pois 1 é cabeçalho)
-    var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
+    // OTIMIZAÇÃO: lê apenas as últimas 5000 linhas (lançamentos são cronológicos;
+    // os últimos 20 de um item ativo estão no fim da planilha). Antes lia 40k+
+    // linhas a CADA lançamento, contribuindo para a lentidão geral.
+    var startRow = Math.max(2, lastRow - 5000 + 1);
+    var data = sheetEstoque.getRange(startRow, 1, lastRow - startRow + 1, 13).getDisplayValues();
 
     // Filtra apenas lançamentos do item especificado
     var lancamentos = [];
@@ -2624,6 +1066,12 @@ function getUltimosLancamentos(itemNome) {
 
     // Retorna apenas os últimos 20
     var ultimos20 = lancamentos.slice(0, 20);
+
+    // CORREÇÃO: google.script.run NÃO aceita objetos Date no retorno — a chamada
+    // falhava silenciosamente no cliente. Converte para timestamp (número).
+    for (var u = 0; u < ultimos20.length; u++) {
+      ultimos20[u].dataObj = ultimos20[u].dataObj.getTime();
+    }
 
     Logger.log("getUltimosLancamentos: Item '" + itemNome + "' - Encontrados " + lancamentos.length + " lançamentos, retornando " + ultimos20.length);
     return ultimos20;
@@ -3069,13 +1517,28 @@ function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
     return false;
   }
 
-  // Lê TODA a planilha
-  var startRow = 2;
+  // OTIMIZAÇÃO: a janela de busca é de apenas 20 dias e os lançamentos são
+  // cronológicos (append no fim da planilha). Ler as últimas linhas basta —
+  // antes lia TODA a planilha (40k+ linhas) para CADA item de um lote,
+  // estourando o tempo de execução e deixando o usuário sem confirmação.
+  // O memo por execução garante UMA leitura para o lote inteiro.
+  var maxLinhasRecentes = 5000;
+  var startRow = Math.max(2, lastRow - maxLinhasRecentes + 1);
   var numRows = lastRow - startRow + 1;
-  Logger.log("Lendo TODA a planilha - linhas de " + startRow + " até " + lastRow);
 
-  // Lê 6 colunas (A-F): Grupo, Item, Unidade, Data, NF, Obs
-  var data = sheetEstoque.getRange(startRow, 1, numRows, 6).getDisplayValues();
+  // Memo dura só esta execução (globals não persistem entre execuções no Apps Script).
+  // Linhas inseridas durante a própria execução ficam de fora do memo — correto,
+  // pois são "entradas novas" e devem ser ignoradas pela verificação (currentRow).
+  if (!hasAtualizacaoInPreviousEntries._memo) {
+    Logger.log("Lendo linhas recentes - de " + startRow + " até " + lastRow);
+    // Lê 6 colunas (A-F): Grupo, Item, Unidade, Data, NF, Obs
+    hasAtualizacaoInPreviousEntries._memo = {
+      startRow: startRow,
+      data: sheetEstoque.getRange(startRow, 1, numRows, 6).getDisplayValues()
+    };
+  }
+  var data = hasAtualizacaoInPreviousEntries._memo.data;
+  startRow = hasAtualizacaoInPreviousEntries._memo.startRow;
 
   var itemUpper = item.toString().trim().toUpperCase();
   Logger.log("Item buscado (maiúsculas): '" + itemUpper + "'");
@@ -3487,83 +1950,6 @@ function abrirDialogEstoquePorPeriodo() {
   SpreadsheetApp.getUi().showModalDialog(html, "Filtrar Estoque por Período");
 }
 
-/**
- * filtrarEstoquePorPeriodo: Copia as linhas da aba ESTOQUE, cuja data na coluna C
- * esteja entre dataInicio e dataFim (formato dd/mm/yyyy), e as cola na aba "FILTRO POR PERIODO".
- * Antes de colar, apaga o conteúdo anterior da aba.
- */
-function filtrarEstoquePorPeriodo(dataInicio, dataFim) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetEstoque = ss.getSheetByName("ESTOQUE");
-  if (!sheetEstoque) throw new Error("A aba ESTOQUE não foi encontrada.");
-  
-  var lastRow = sheetEstoque.getLastRow();
-  if (lastRow < 2) throw new Error("Não há dados na aba ESTOQUE.");
-  
-  // Divide as datas informadas (formato dd/mm/yyyy) em partes e cria objetos Date.
-  var partsInicio = dataInicio.split("/");
-  var partsFim = dataFim.split("/");
-  if (partsInicio.length !== 3 || partsFim.length !== 3) {
-    throw new Error("Formato de data inválido. Use dd/mm/yyyy");
-  }
-  
-  var startDate = new Date(
-    parseInt(partsInicio[2], 10), 
-    parseInt(partsInicio[1], 10) - 1, 
-    parseInt(partsInicio[0], 10)
-  );
-  
-  var endDate = new Date(
-    parseInt(partsFim[2], 10), 
-    parseInt(partsFim[1], 10) - 1, 
-    parseInt(partsFim[0], 10),
-    23, 59, 59, 999
-  );
-  
-  // Obtém os dados da aba ESTOQUE (assumindo que a primeira linha é o cabeçalho)
-  var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, sheetEstoque.getLastColumn());
-  var dataValues = dataRange.getValues();
-  
-  // Prepara a aba de destino "FILTRO POR PERIODO"
-  var sheetFiltro = ss.getSheetByName("FILTRO POR PERIODO");
-  if (!sheetFiltro) {
-    sheetFiltro = ss.insertSheet("FILTRO POR PERIODO");
-  } else {
-    // Apaga todo o conteúdo da aba, inclusive formatação e filtros antigos.
-    sheetFiltro.clear();
-  }
-  
-  // Copia o cabeçalho da aba ESTOQUE para a aba "FILTRO POR PERIODO"
-  var header = sheetEstoque.getRange(1, 1, 1, sheetEstoque.getLastColumn()).getValues();
-  sheetFiltro.getRange(1, 1, 1, header[0].length).setValues(header);
-  
-  var targetData = [];
-  
-  // Percorre cada linha e copia as que tiverem data na coluna C (índice 2) dentro do período
-  for (var i = 0; i < dataValues.length; i++) {
-    var row = dataValues[i];
-    var dateValue = row[2]; // Coluna C
-    // Verifica se o valor é uma data válida
-    if (!(dateValue instanceof Date)) continue;
-    if (dateValue >= startDate && dateValue <= endDate) {
-      targetData.push(row);
-    }
-  }
-  
-  // Copia os dados filtrados para a aba "FILTRO POR PERIODO", a partir da linha 2
-  if (targetData.length > 0) {
-    sheetFiltro.getRange(2, 1, targetData.length, targetData[0].length).setValues(targetData);
-  }
-  
-  // Ordena os dados (exceto o cabeçalho) pela coluna C em ordem crescente
-  var targetLastRow = sheetFiltro.getLastRow();
-  if (targetLastRow > 1) {
-    sheetFiltro.getRange(2, 1, targetLastRow - 1, sheetFiltro.getLastColumn())
-              .sort({ column: 3, ascending: true });
-  }
-  
-  return "Dados do período de " + dataInicio + " a " + dataFim + " foram copiados para a aba 'FILTRO POR PERIODO'.";
-}
 
 /**
  * limparFiltroEstoque: Remove o filtro da aba ESTOQUE, ordena pela coluna C (datas) de forma ascendente
@@ -3700,18 +2086,6 @@ function processCoresDesatualizadas(startDateStr) {
   return "Valores da coluna B para os itens em vermelho a partir de " + startDateStr + " foram copiados para a aba 'CORES DESATUALIZADAS' na coluna E, e a data foi registrada em F1.";
 }
 
-/**
- * parseDateBR: Converte uma string no formato dd/mm/yyyy para um objeto Date.
- */
-function parseDateBR(dateStr) {
-  if (typeof dateStr === 'string') {
-    var parts = dateStr.split("/");
-    if (parts.length === 3) {
-      return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
-    }
-  }
-  return new Date(dateStr);
-}
 
 /* ================================
    NOVAS FUNÇÕES: Cores Desatualizadas - Diálogo
@@ -3814,18 +2188,6 @@ function processRepeticoesCoresDesatualizadas() {
 }
 
 /**
- * parseDateBR: Converte uma string no formato dd/mm/yyyy para um objeto Date.
- */
-function parseDateBR(dateStr) {
-  if (typeof dateStr === 'string') {
-    var parts = dateStr.split("/");
-    if (parts.length === 3) {
-      return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
-    }
-  }
-  return new Date(dateStr);
-}
-/**
  * processConsultaAtualizacoes:
  * Lê a data de corte da célula F1 da aba CORES DESATUALIZADAS e os itens (cadastros) da coluna E.
  * Em seguida, na aba ESPELHO DO ESTOQUE, para cada registro, se o cadastro (coluna B)
@@ -3917,13 +2279,30 @@ function processConsultaAtualizacoes() {
  * parseDateBR: Converte uma string no formato dd/mm/yyyy para um objeto Date.
  */
 function parseDateBR(dateStr) {
-  if (typeof dateStr === 'string') {
-    var parts = dateStr.split("/");
-    if (parts.length === 3) {
-      return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
-    }
+  if (!dateStr) return new Date(0);
+
+  // Se já for um objeto Date válido
+  if (dateStr instanceof Date && !isNaN(dateStr)) {
+    return dateStr;
   }
-  return new Date(dateStr);
+
+  var str = dateStr.toString().trim();
+
+  // Tenta formato DD/MM/YYYY HH:MM:SS ou DD/MM/YYYY
+  var match = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (match) {
+    var day = parseInt(match[1], 10);
+    var month = parseInt(match[2], 10) - 1; // Mês é 0-indexed
+    var year = parseInt(match[3], 10);
+    var hour = match[4] ? parseInt(match[4], 10) : 0;
+    var min = match[5] ? parseInt(match[5], 10) : 0;
+    var sec = match[6] ? parseInt(match[6], 10) : 0;
+    return new Date(year, month, day, hour, min, sec);
+  }
+
+  // Fallback: tenta parse padrão
+  var parsed = new Date(str);
+  return isNaN(parsed) ? new Date(0) : parsed;
 }
 /**
  * consultaAtualizacao: Para cada item informado via formulário (até 10),
@@ -4633,38 +3012,60 @@ function buscarProduto(item, dataInicio, dataFim) {
     }
 
     var data = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getDisplayValues();
-    var dataValues = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getValues(); // Para pegar datas como Date
-    var backgrounds = sheetEstoque.getRange(2, 1, lastRow - 1, 13).getBackgrounds();
-    var results = [];
-    var itemUpper = item.toString().trim().toUpperCase();
+    // OTIMIZAÇÃO: lê apenas a coluna D como Date (antes lia as 13 colunas de novo)
+    var dateValues = sheetEstoque.getRange(2, 4, lastRow - 1, 1).getValues();
+    var backgrounds = sheetEstoque.getRange(2, 1, lastRow - 1, 1).getBackgrounds();
 
-    // Filtra por item e data (se fornecida) - CORRESPONDÊNCIA EXATA
-    for (var i = 0; i < data.length; i++) {
-      var currentItemUpper = data[i][1].toString().trim().toUpperCase();
-      if (currentItemUpper === itemUpper) {
-        // Pega a data como objeto Date (não string) - Coluna D (índice 3)
-        var dataMovimento = dataValues[i][3];
-
-        // Verifica filtro de data
-        if (dataInicio && dataFim) {
-          var inicio = new Date(dataInicio);
-          var fim = new Date(dataFim);
-          inicio.setHours(0, 0, 0, 0);
-          fim.setHours(23, 59, 59, 999);
-
-          if (dataMovimento < inicio || dataMovimento > fim) {
-            continue; // Pula este registro
-          }
-        }
-
-        // Adiciona dados com cor de fundo
-        results.push({
-          row: data[i],
-          background: backgrounds[i][0], // Cor da primeira coluna (toda linha tem mesma cor)
-          date: dataMovimento // Para ordenação (usa Date object real)
-        });
-      }
+    // Normaliza removendo acentos para a busca não falhar por acentuação
+    function normalizarBusca(texto) {
+      return texto.toString().trim().toUpperCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ');
     }
+
+    var termoBusca = normalizarBusca(item);
+    var exatos = [];
+    var parciais = [];
+
+    var inicio = null, fim = null;
+    if (dataInicio && dataFim) {
+      inicio = new Date(dataInicio);
+      fim = new Date(dataFim);
+      inicio.setHours(0, 0, 0, 0);
+      fim.setHours(23, 59, 59, 999);
+    }
+
+    for (var i = 0; i < data.length; i++) {
+      if (!data[i][1]) continue;
+      var itemNormalizado = normalizarBusca(data[i][1]);
+
+      // Correspondência exata tem prioridade; parcial (contém) é o fallback
+      var ehExato = (itemNormalizado === termoBusca);
+      var ehParcial = !ehExato && itemNormalizado.indexOf(termoBusca) >= 0;
+      if (!ehExato && !ehParcial) continue;
+
+      // Data como objeto Date (coluna D); usa parseDateBR se não for Date válido
+      var dataMovimento = dateValues[i][0];
+      if (!(dataMovimento instanceof Date) || isNaN(dataMovimento.getTime())) {
+        dataMovimento = parseDateBR(data[i][3]);
+      }
+
+      // Verifica filtro de data
+      if (inicio && fim && (dataMovimento < inicio || dataMovimento > fim)) {
+        continue; // Pula este registro
+      }
+
+      var registro = {
+        row: data[i],
+        background: backgrounds[i][0], // Cor da primeira coluna (toda linha tem mesma cor)
+        date: dataMovimento // Para ordenação (usa Date object real)
+      };
+      if (ehExato) exatos.push(registro);
+      else parciais.push(registro);
+    }
+
+    // Se há correspondência exata, mostra só ela; senão lista as parciais
+    var results = exatos.length > 0 ? exatos : parciais;
 
     if (results.length === 0) {
       return { success: false, message: "Produto não encontrado" };
@@ -4766,9 +3167,16 @@ function carregarTodosOsDadosEstoque() {
     var dateColIndex = (numCols === 13) ? 3 : 2;  // Coluna D (índice 3) para 13 cols, C (índice 2) para 11 cols
 
     for (var i = 0; i < data.length; i++) {
+      // CORREÇÃO: envia timestamp (número) — objetos Date não são aceitos como
+      // retorno de google.script.run e faziam a carga falhar no cliente
+      var dataCell = dataValues[i][dateColIndex];
+      var timestamp = (dataCell instanceof Date && !isNaN(dataCell.getTime()))
+        ? dataCell.getTime()
+        : parseDateBR(data[i][dateColIndex]).getTime();
+
       allData.push({
         row: data[i],
-        date: dataValues[i][dateColIndex],
+        date: timestamp,
         background: backgrounds[i][0]
       });
     }
