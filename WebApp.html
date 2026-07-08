@@ -2109,8 +2109,16 @@
 
     /**
      * Atualiza o índice em background (não bloqueia a UI)
+     * THROTTLE: no máximo 1 chamada a cada 2 minutos — antes, CADA busca
+     * disparava uma releitura completa da planilha no servidor
      */
+    let ultimoRefreshIndice = 0;
     function refreshHistoryIndexInBackground() {
+      const agora = Date.now();
+      if (agora - ultimoRefreshIndice < 120000) {
+        return; // atualizado há menos de 2 min — não recarrega
+      }
+      ultimoRefreshIndice = agora;
       google.script.run
         .withSuccessHandler(function(index) {
           if (index && Object.keys(index).length > 0) {
@@ -2159,14 +2167,19 @@
         return itemHistoryIndex[itemKey];
       }
 
-      // Busca parcial (para autocomplete)
+      // Busca parcial: só retorna se houver UM ÚNICO candidato.
+      // CORREÇÃO: antes retornava o primeiro match parcial arbitrário, o que
+      // podia exibir o histórico do item ERRADO (ex: "FIO 10" acertando "FIO 100").
+      // Com 0 ou 2+ candidatos, retorna null e a busca completa no servidor resolve.
+      let candidato = null;
       for (const key in itemHistoryIndex) {
-        if (key.indexOf(itemKey) >= 0 || itemKey.indexOf(key) >= 0) {
-          return itemHistoryIndex[key];
+        if (key.indexOf(itemKey) >= 0) {
+          if (candidato) return null; // ambíguo → deixa o servidor decidir
+          candidato = itemHistoryIndex[key];
         }
       }
 
-      return null;
+      return candidato;
     }
 
     /**
@@ -2767,17 +2780,23 @@
         return { success: false, message: 'Dados ainda não carregados. Aguarde...' };
       }
 
-      const itemUpper = itemFilter ? itemFilter.toString().trim().toUpperCase() : '';
-      let results = [];
+      const termoBusca = itemFilter ? normalizeString(itemFilter).trim().replace(/\s+/g, ' ') : '';
+      const exatos = [];
+      const parciais = [];
 
-      // Filtra por item e data - CORRESPONDÊNCIA EXATA
+      // Filtra por item (exato primeiro, parcial como fallback) e por data
       for (let i = 0; i < allEstoqueData.length; i++) {
         const record = allEstoqueData[i];
-        const currentItemUpper = record.row[1].toString().trim().toUpperCase(); // Coluna Item
+        if (!record.row[1]) continue;
+        const itemNormalizado = normalizeString(record.row[1]).trim().replace(/\s+/g, ' '); // Coluna Item
 
-        // Verifica se o item corresponde EXATAMENTE (se filtro foi fornecido)
-        if (itemUpper !== '' && currentItemUpper !== itemUpper) {
-          continue;
+        let ehExato = true;
+        if (termoBusca !== '') {
+          ehExato = (itemNormalizado === termoBusca);
+          // CORREÇÃO: antes só listava correspondência exata; agora busca parcial também encontra
+          if (!ehExato && itemNormalizado.indexOf(termoBusca) < 0) {
+            continue;
+          }
         }
 
         // Verifica filtro de data
@@ -2793,8 +2812,11 @@
           }
         }
 
-        results.push(record);
+        (ehExato ? exatos : parciais).push(record);
       }
+
+      // Com correspondência exata, mostra só ela; senão mostra as parciais
+      let results = exatos.length > 0 ? exatos : parciais;
 
       if (results.length === 0) {
         return { success: false, message: 'Nenhum resultado encontrado' };
@@ -2880,10 +2902,23 @@
           // Se não digitou nada, mostra as primeiras 15 opções
           filtered = data.slice(0, 15);
         } else {
-          // Filtra itens que COMEÇAM com o texto digitado
-          filtered = data.filter(item =>
-            item && item.toUpperCase().startsWith(value)
-          ).slice(0, 15); // Limita a 15 resultados
+          // CORREÇÃO: antes só sugeria itens que COMEÇAM com o texto — quem
+          // digitava uma palavra do meio do nome não encontrava o item.
+          // Agora: prefixo primeiro, depois itens que CONTÊM o texto (sem acentos).
+          const valueNorm = normalizeString(value);
+          const comecam = [];
+          const contem = [];
+          for (const item of data) {
+            if (!item) continue;
+            const itemNorm = normalizeString(item);
+            if (itemNorm.startsWith(valueNorm)) {
+              comecam.push(item);
+            } else if (itemNorm.indexOf(valueNorm) >= 0) {
+              contem.push(item);
+            }
+            if (comecam.length >= 15) break;
+          }
+          filtered = comecam.concat(contem).slice(0, 15);
         }
 
         if (filtered.length === 0) {

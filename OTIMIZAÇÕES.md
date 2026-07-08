@@ -248,6 +248,24 @@ for (var i = 0; i < 20; i++) {
 
 ## 📝 Changelog
 
+### **v2.1 - Correções de Busca, Lote e Performance (2026-07-08)**
+
+**Correções de busca (itens que "não eram listados"):**
+- ✅ Datas em formato brasileiro (dd/mm/aaaa) eram parseadas com `new Date()` → datas inválidas quebravam o índice de histórico e a sincronização incremental (registros novos nunca chegavam ao cliente). Agora usa `parseDateBR`.
+- ✅ Busca de produto exigia nome EXATO — agora aceita busca parcial e ignora acentos (exato tem prioridade).
+- ✅ Autocomplete só sugeria por prefixo — agora também encontra por trecho no meio do nome.
+- ✅ Busca rápida podia exibir o histórico do item ERRADO (match parcial ambíguo) — agora só usa o cache local quando o match é inequívoco.
+
+**Correções de lançamento:**
+- ✅ Saldos com ruído de ponto flutuante (ex: `-5.000000000000064`) — arredondamento em todos os cálculos.
+- ✅ Lote sem confirmação: leituras de 40k+ linhas POR ITEM estouravam o tempo de execução; agora a planilha é lida 1 vez por lote (apenas linhas recentes) e falhas pós-inserção não descartam mais a confirmação.
+- ✅ Vários retornos de servidor continham objetos `Date` (ilegais no `google.script.run`), fazendo chamadas falharem silenciosamente — convertidos para string/timestamp.
+
+**Performance:**
+- ✅ `Código.gs` estava com o conteúdo praticamente duplicado (57 funções repetidas, edições na 1ª cópia eram ignoradas) — deduplicado mantendo as definições efetivas.
+- ✅ Índice de histórico, últimos lançamentos e verificação de atualização agora leem só as últimas 5000 linhas em vez da planilha inteira.
+- ✅ Atualização do índice em background limitada a 1x a cada 2 minutos (antes: a cada busca).
+
 ### **v2.0 - Otimizações Massivas (2025-11-28)**
 
 - ✅ Implementado sistema de índice permanente (ÍNDICE_ITENS)
