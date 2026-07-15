@@ -501,6 +501,7 @@ function updateMenus() {
     .addItem("Relatório por Grupo", "abrirDialogRelatorioPorGrupo")
     .addItem("Listagem de Estoque", "showListagemEstoqueSidebar")
     .addItem("Atualizar Compra de Fio e Histórico", "atualizarCompraDeFioEHistorico")
+    .addItem("Atualizar Data Limite de Embarque", "atualizarDataLimiteEmbarque")
     .addSeparator()
     .addItem("Atualizar Total Embarcado", "atualizarTotalEmbarcado")
     .addItem("Alternar Restauração", "toggleRestore")
@@ -909,6 +910,53 @@ function copyCompraToHistorico() {
 function atualizarCompraDeFioEHistorico() {
   atualizarCompraDeFio();
   copyCompraToHistorico();
+}
+
+/**
+ * atualizarDataLimiteEmbarque: Força o recálculo da coluna "Data Limite de Embarque" na aba
+ * COMPRA DE FIO. Essa coluna é alimentada por fórmula vinda de outra planilha e pode não
+ * refletir alterações feitas na origem enquanto este relatório já está aberto, então a
+ * fórmula é reescrita (mesmo valor) para forçar o Google Sheets a recalculá-la agora.
+ */
+function atualizarDataLimiteEmbarque() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("COMPRA DE FIO");
+  if (!sheet) {
+    throw new Error("A aba COMPRA DE FIO não foi encontrada.");
+  }
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 2) {
+    SpreadsheetApp.getUi().alert("Não há dados na aba COMPRA DE FIO para atualizar.");
+    return;
+  }
+
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var col = -1;
+  for (var i = 0; i < headers.length; i++) {
+    var header = headers[i] ? headers[i].toString().trim().toUpperCase() : "";
+    if (header.indexOf("DATA LIMITE") !== -1) {
+      col = i + 1;
+      break;
+    }
+  }
+
+  if (col === -1) {
+    throw new Error('Coluna "Data Limite de Embarque" não foi encontrada na aba COMPRA DE FIO.');
+  }
+
+  var range = sheet.getRange(2, col, lastRow - 1, 1);
+  var formulas = range.getFormulas();
+  var temFormula = formulas.some(function(row) { return row[0]; });
+
+  if (temFormula) {
+    range.setFormulas(formulas);
+  }
+  SpreadsheetApp.flush();
+
+  SpreadsheetApp.getUi().alert("Data Limite de Embarque atualizada com sucesso!");
+  return "Data Limite de Embarque atualizada com sucesso!";
 }
 
 /**
