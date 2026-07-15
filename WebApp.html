@@ -653,11 +653,43 @@
       justify-content: center;
       align-items: center;
       z-index: 9999;
-      backdrop-filter: blur(3px);
     }
 
     #loadingOverlay.show {
       display: flex;
+    }
+
+    /* Global Error Banner */
+    #globalErrorBanner {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 10000;
+      background: #c0392b;
+      color: #fff;
+      padding: 12px 16px;
+      font-size: 0.85rem;
+      line-height: 1.4;
+      max-height: 40vh;
+      overflow-y: auto;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+
+    #globalErrorBanner.show {
+      display: block;
+    }
+
+    #globalErrorBanner button {
+      margin-left: 10px;
+      background: rgba(255,255,255,0.2);
+      border: 1px solid rgba(255,255,255,0.5);
+      color: #fff;
+      border-radius: 4px;
+      padding: 2px 10px;
+      cursor: pointer;
+      font-size: 0.8rem;
     }
 
     .loading-content {
@@ -993,6 +1025,12 @@
   </style>
 </head>
 <body>
+  <!-- Global Error Banner: torna erros de JS visíveis em campo (tablets sem acesso a devtools) -->
+  <div id="globalErrorBanner">
+    <span id="globalErrorText"></span>
+    <button onclick="document.getElementById('globalErrorBanner').classList.remove('show')">Fechar</button>
+  </div>
+
   <!-- Login Screen -->
   <div id="loginScreen" class="login-container">
     <div class="login-card">
@@ -1539,6 +1577,34 @@
   </div>
 
   <script>
+    // ========================================
+    // TRATAMENTO GLOBAL DE ERROS
+    // Sem isso, qualquer exceção após o login falha 100% em silêncio
+    // (só aparece no console, inacessível em um tablet em campo).
+    // ========================================
+    function showGlobalError(message) {
+      const banner = document.getElementById('globalErrorBanner');
+      const text = document.getElementById('globalErrorText');
+      if (!banner || !text) return;
+      text.textContent = '⚠️ Erro: ' + message;
+      banner.classList.add('show');
+      // Garante que a tela não fique "presa" no overlay de carregamento
+      const overlay = document.getElementById('loadingOverlay');
+      if (overlay) overlay.classList.remove('show');
+      document.body.style.overflow = '';
+    }
+
+    window.addEventListener('error', function(event) {
+      console.error('Erro global capturado:', event.error || event.message);
+      showGlobalError((event.message || 'erro desconhecido') + (event.filename ? ' (' + event.filename + ':' + event.lineno + ')' : ''));
+    });
+
+    window.addEventListener('unhandledrejection', function(event) {
+      const reason = event.reason && event.reason.message ? event.reason.message : String(event.reason);
+      console.error('Promise rejeitada sem tratamento:', event.reason);
+      showGlobalError(reason);
+    });
+
     // Global variables
     let currentUser = null;
     let autocompleteData = null;
