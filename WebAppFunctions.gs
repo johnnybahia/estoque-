@@ -2819,3 +2819,191 @@ function getUltimas20Entradas() {
     return { success: false, message: "Erro ao buscar últimas entradas: " + error.message };
   }
 }
+
+// ========================================
+// ITENS COM SALDO NEGATIVO POR PERÍODO
+// ========================================
+
+/**
+ * _saldoNumericoDaLinha: Extrai o saldo (coluna J) de forma segura.
+ * Prefere o valor nativo da planilha (número) e só cai para o texto exibido
+ * quando a célula nativa vier vazia — assim evita quebrar em valores
+ * formatados como "1.234,56".
+ */
+function _saldoNumericoDaLinha(valorNativo, valorExibido) {
+  if (typeof valorNativo === 'number' && !isNaN(valorNativo)) {
+    return _arredondarSaldo(valorNativo);
+  }
+  if (valorNativo !== null && valorNativo !== undefined && valorNativo !== '') {
+    return _arredondarSaldo(valorNativo);
+  }
+  if (valorExibido === null || valorExibido === undefined || valorExibido === '') {
+    return 0;
+  }
+  // Texto exibido: remove separador de milhar e usa vírgula como decimal
+  var texto = valorExibido.toString().trim().replace(/\s/g, '');
+  if (texto.indexOf(',') >= 0) {
+    texto = texto.replace(/\./g, '').replace(',', '.');
+  }
+  return _arredondarSaldo(texto);
+}
+
+/**
+ * buscarItensSaldoNegativoPorPeriodo: Lista os itens que tiveram lançamento
+ * dentro do período informado e cujo saldo ficou negativo.
+ *
+ * Para cada item considera o ÚLTIMO lançamento dentro do período (saldo com que
+ * o item terminou o período) e também traz o saldo atual (último lançamento
+ * geral), para mostrar se a negativação já foi corrigida depois do período.
+ *
+ * @param {string} dataInicio - Data inicial no formato YYYY-MM-DD (input type=date)
+ * @param {string} dataFim - Data final no formato YYYY-MM-DD (input type=date)
+ * @return {object} - { success, data: { headers, rows, colors }, copyRows, totalItens }
+ */
+function buscarItensSaldoNegativoPorPeriodo(dataInicio, dataFim) {
+  try {
+    if (!dataInicio || !dataFim) {
+      return { success: false, message: "Informe a data de início e a data final" };
+    }
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetEstoque = ss.getSheetByName("ESTOQUE");
+
+    if (!sheetEstoque) {
+      return { success: false, message: "Sheet ESTOQUE não encontrada" };
+    }
+
+    var lastRow = sheetEstoque.getLastRow();
+    if (lastRow < 2) {
+      return { success: false, message: "Nenhum dado encontrado" };
+    }
+
+    // Mesmo tratamento de timezone usado em gerarRelatorioEstoqueWebApp:
+    // new Date("YYYY-MM-DD") seria interpretado como UTC e erraria 1 dia
+    var partesInicio = dataInicio.split('-');
+    var partesFim = dataFim.split('-');
+    var inicio = new Date(parseInt(partesInicio[0], 10), parseInt(partesInicio[1], 10) - 1, parseInt(partesInicio[2], 10), 0, 0, 0, 0);
+    var fim = new Date(parseInt(partesFim[0], 10), parseInt(partesFim[1], 10) - 1, parseInt(partesFim[2], 10), 0, 0, 0, 0);
+
+    if (isNaN(inicio.getTime()) || isNaN(fim.getTime())) {
+      return { success: false, message: "Datas inválidas" };
+    }
+
+    if (inicio > fim) {
+      return { success: false, message: "A data de início não pode ser maior que a data final" };
+    }
+
+    var dataRange = sheetEstoque.getRange(2, 1, lastRow - 1, 13);
+    var display = dataRange.getDisplayValues();
+    var values = dataRange.getValues();
+    var backgrounds = dataRange.getBackgrounds();
+
+    var noPeriodo = {}; // último lançamento de cada item DENTRO do período
+    var saldoAtual = {}; // último lançamento de cada item em TODA a planilha
+
+    for (var i = 0; i < display.length; i++) {
+      var itemName = display[i][1] ? display[i][1].toString().trim() : '';
+      if (!itemName) continue;
+
+      var chave = itemName.toUpperCase();
+
+      // Data do movimento: usa o Date nativo e só cai para o texto se necessário
+      var dataMovimento = values[i][3];
+      if (!(dataMovimento instanceof Date) || isNaN(dataMovimento.getTime())) {
+        dataMovimento = parseDateBR(display[i][3]);
+      }
+      if (!dataMovimento || isNaN(dataMovimento.getTime()) || dataMovimento.getTime() === 0) {
+        continue;
+      }
+
+      var dataNormalizada = new Date(dataMovimento.getFullYear(), dataMovimento.getMonth(), dataMovimento.getDate(), 0, 0, 0, 0);
+      var saldo = _saldoNumericoDaLinha(values[i][9], display[i][9]);
+
+      // Saldo atual = último lançamento geral (data mais recente, desempate pela linha)
+      if (!saldoAtual[chave] ||
+          dataNormalizada > saldoAtual[chave].data ||
+          (dataNormalizada.getTime() === saldoAtual[chave].data.getTime() && i > saldoAtual[chave].linha)) {
+        saldoAtual[chave] = { data: dataNormalizada, linha: i, saldo: saldo };
+      }
+
+      // Último lançamento dentro do período
+      if (dataNormalizada >= inicio && dataNormalizada <= fim) {
+        if (!noPeriodo[chave] ||
+            dataNormalizada > noPeriodo[chave].data ||
+            (dataNormalizada.getTime() === noPeriodo[chave].data.getTime() && i > noPeriodo[chave].linha)) {
+          noPeriodo[chave] = {
+            data: dataNormalizada,
+            linha: i,
+            saldo: saldo,
+            item: itemName,
+            row: display[i],
+            background: backgrounds[i][0] || null
+          };
+        }
+      }
+    }
+
+    // Mantém apenas os itens que terminaram o período com saldo negativo
+    var negativos = [];
+    var chaves = Object.keys(noPeriodo);
+    for (var j = 0; j < chaves.length; j++) {
+      var registro = noPeriodo[chaves[j]];
+      if (registro.saldo < 0) {
+        registro.saldoAtual = saldoAtual[chaves[j]] ? saldoAtual[chaves[j]].saldo : registro.saldo;
+        negativos.push(registro);
+      }
+    }
+
+    if (negativos.length === 0) {
+      return { success: false, message: "Nenhum item ficou com saldo negativo no período informado" };
+    }
+
+    // Mais negativo primeiro (prioridade de correção)
+    negativos.sort(function(a, b) {
+      if (a.saldo !== b.saldo) return a.saldo - b.saldo;
+      return a.item.localeCompare(b.item);
+    });
+
+    var rows = [];
+    var colors = [];
+    var copyRows = [];
+
+    for (var k = 0; k < negativos.length; k++) {
+      var n = negativos[k];
+      rows.push([
+        n.row[0],  // Grupo
+        n.row[1],  // Item
+        n.row[2],  // Unidade
+        n.row[3],  // Data do último lançamento no período
+        n.row[4],  // NF
+        n.row[5],  // Obs
+        n.row[6],  // Saldo Anterior
+        n.row[7],  // Entrada
+        n.row[8],  // Saída
+        n.saldo,   // Saldo no período (numérico, já arredondado)
+        n.saldoAtual // Saldo atual do item hoje
+      ]);
+      colors.push(n.background);
+      copyRows.push([n.item, n.saldo]);
+    }
+
+    var headers = ["Grupo", "Item", "Unidade", "Data", "NF", "Obs", "Saldo Anterior", "Entrada", "Saída", "Saldo no Período", "Saldo Atual"];
+
+    Logger.log("buscarItensSaldoNegativoPorPeriodo: " + rows.length + " itens negativos entre " + dataInicio + " e " + dataFim);
+
+    return {
+      success: true,
+      data: {
+        headers: headers,
+        rows: rows,
+        colors: colors
+      },
+      copyRows: copyRows,
+      totalItens: rows.length
+    };
+
+  } catch (error) {
+    Logger.log("Erro buscarItensSaldoNegativoPorPeriodo: " + error);
+    return { success: false, message: "Erro ao buscar itens com saldo negativo: " + error.message };
+  }
+}
