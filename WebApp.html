@@ -1092,6 +1092,7 @@
             <li class="section-title">Consultas</li>
             <li><a href="#" onclick="showModule('localizar-produto')" data-module="localizar-produto">🔍 Localizar Produto</a></li>
             <li><a href="#" onclick="showModule('listagem-estoque')" data-module="listagem-estoque">📋 Listagem de Estoque</a></li>
+            <li><a href="#" onclick="showModule('saldo-negativo')" data-module="saldo-negativo">📉 Saldo Negativo por Período</a></li>
 
             <li class="separator"></li>
             <li class="section-title">Relatórios</li>
@@ -1492,6 +1493,52 @@
                 <button class="btn btn-primary" onclick="printRelatorio()" style="padding: 0.5rem 1rem;">🖨️ Imprimir</button>
               </div>
               <div id="relatorioTableContainer"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Saldo Negativo por Período Module -->
+        <div id="module-saldo-negativo" class="module-container">
+          <div class="content-card">
+            <h2>📉 Saldo Negativo por Período</h2>
+            <p style="font-size: 0.9rem; color: #666; margin-bottom: 15px;">Lista os itens lançados no período informado que terminaram com saldo negativo</p>
+            <div id="saldoNegativoMessage" class="message"></div>
+
+            <form id="saldoNegativoForm" onsubmit="return handleSaldoNegativo(event)">
+              <div class="form-group">
+                <label for="saldoNegativoDataInicio">Data Início *</label>
+                <input type="date" id="saldoNegativoDataInicio" required>
+              </div>
+              <div class="form-group">
+                <label for="saldoNegativoDataFim">Data Fim *</label>
+                <input type="date" id="saldoNegativoDataFim" required>
+              </div>
+              <div class="btn-group">
+                <button type="submit" class="btn btn-primary">🔍 Buscar Saldos Negativos</button>
+              </div>
+            </form>
+
+            <div id="saldoNegativoResults" class="table-container" style="display: none;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
+                <h3 style="margin: 0;">Itens com Saldo Negativo - <span id="saldoNegativoTotal">0</span> itens</h3>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                  <button class="btn btn-primary" onclick="copiarListaSaldoNegativo()" style="padding: 0.5rem 1rem; background: #28a745;">📋 Copiar Lista</button>
+                  <button class="btn btn-primary" onclick="printSaldoNegativo()" style="padding: 0.5rem 1rem;">🖨️ Imprimir</button>
+                </div>
+              </div>
+
+              <div id="saldoNegativoCopyArea" style="background: #f5f5f5; border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin-bottom: 15px;">
+                <p style="margin: 0 0 8px 0; font-size: 0.85rem; color: #666;">
+                  Clique em <strong>Copiar Lista</strong> e cole direto numa planilha (Excel ou Google Planilhas): o item fica numa coluna e o saldo na coluna ao lado.
+                  Se o botão não funcionar no seu navegador, selecione o texto abaixo e copie manualmente.
+                </p>
+                <textarea id="saldoNegativoCopyText" readonly rows="6" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 0.85rem; padding: 8px; border: 1px solid #ccc; border-radius: 4px; background: #fff; white-space: pre; overflow-x: auto;"></textarea>
+                <label style="display: block; margin-top: 8px; font-size: 0.85rem; color: #555;">
+                  <input type="checkbox" id="saldoNegativoIncluirCabecalho" onchange="atualizarTextoCopiaSaldoNegativo()"> Incluir cabeçalho (Item / Saldo)
+                </label>
+              </div>
+
+              <div id="saldoNegativoTableContainer"></div>
             </div>
           </div>
         </div>
@@ -4938,6 +4985,184 @@
         <body>
           <h1>Cores Desatualizadas (Mais de 15 dias)</h1>
           <p class="info">Total: ${document.getElementById('coresTotal').textContent} itens - Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+          ${tableHTML}
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => printWindow.print(), 500);
+    }
+
+    // ========================================
+    // SALDO NEGATIVO POR PERÍODO - Funções
+    // ========================================
+
+    // Guarda os pares [item, saldo] retornados pela última busca
+    let saldoNegativoCopyRows = [];
+
+    // Formata número no padrão brasileiro (vírgula decimal), sem separador de milhar
+    function formatarNumeroBR(valor) {
+      if (valor === null || valor === undefined || valor === '') return '';
+      const numero = typeof valor === 'number' ? valor : parseFloat(String(valor).replace(',', '.'));
+      if (isNaN(numero)) return String(valor);
+      // Remove zeros à direita mantendo até 4 casas decimais
+      return String(parseFloat(numero.toFixed(4))).replace('.', ',');
+    }
+
+    function handleSaldoNegativo(event) {
+      event.preventDefault();
+
+      const dataInicio = document.getElementById('saldoNegativoDataInicio').value;
+      const dataFim = document.getElementById('saldoNegativoDataFim').value;
+
+      if (!dataInicio || !dataFim) {
+        showMessage('saldoNegativoMessage', 'Informe a data de início e a data final', 'warning');
+        return false;
+      }
+
+      if (dataInicio > dataFim) {
+        showMessage('saldoNegativoMessage', 'A data de início não pode ser maior que a data final', 'warning');
+        return false;
+      }
+
+      showMessage('saldoNegativoMessage', 'Buscando itens com saldo negativo...', 'info');
+      document.getElementById('saldoNegativoResults').style.display = 'none';
+      saldoNegativoCopyRows = [];
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success && result.data) {
+            saldoNegativoCopyRows = result.copyRows || [];
+
+            // Formata as colunas numéricas (Saldo no Período e Saldo Atual) para exibição
+            const dadosFormatados = {
+              headers: result.data.headers,
+              colors: result.data.colors,
+              rows: result.data.rows.map(function(row) {
+                const copia = row.slice();
+                copia[9] = formatarNumeroBR(copia[9]);
+                copia[10] = formatarNumeroBR(copia[10]);
+                return copia;
+              })
+            };
+
+            displayTable('saldoNegativoTableContainer', dadosFormatados);
+            document.getElementById('saldoNegativoTotal').textContent = saldoNegativoCopyRows.length;
+            document.getElementById('saldoNegativoResults').style.display = 'block';
+            atualizarTextoCopiaSaldoNegativo();
+            showMessage('saldoNegativoMessage', 'Encontrados ' + saldoNegativoCopyRows.length + ' itens com saldo negativo no período', 'success');
+          } else {
+            showMessage('saldoNegativoMessage', result.message || 'Nenhum item com saldo negativo no período', 'warning');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showMessage('saldoNegativoMessage', 'Erro: ' + error.message, 'error');
+        })
+        .buscarItensSaldoNegativoPorPeriodo(dataInicio, dataFim);
+
+      return false;
+    }
+
+    // Monta o texto separado por TAB (item + saldo), que o Excel/Google Planilhas
+    // distribui automaticamente em duas colunas ao colar
+    function montarTextoCopiaSaldoNegativo() {
+      const incluirCabecalho = document.getElementById('saldoNegativoIncluirCabecalho').checked;
+      const linhas = [];
+
+      if (incluirCabecalho) {
+        linhas.push('Item\tSaldo');
+      }
+
+      saldoNegativoCopyRows.forEach(function(par) {
+        const item = (par[0] === null || par[0] === undefined) ? '' : String(par[0]).trim();
+        linhas.push(item + '\t' + formatarNumeroBR(par[1]));
+      });
+
+      return linhas.join('\n');
+    }
+
+    function atualizarTextoCopiaSaldoNegativo() {
+      const textarea = document.getElementById('saldoNegativoCopyText');
+      if (textarea) {
+        textarea.value = montarTextoCopiaSaldoNegativo();
+      }
+    }
+
+    function copiarListaSaldoNegativo() {
+      if (!saldoNegativoCopyRows.length) {
+        showMessage('saldoNegativoMessage', 'Nenhum item para copiar. Faça a busca primeiro.', 'warning');
+        return;
+      }
+
+      atualizarTextoCopiaSaldoNegativo();
+
+      const textarea = document.getElementById('saldoNegativoCopyText');
+      const texto = textarea.value;
+
+      function copiaManual() {
+        // Fallback para navegadores/iframes que bloqueiam a Clipboard API
+        try {
+          textarea.removeAttribute('readonly');
+          textarea.focus();
+          textarea.select();
+          textarea.setSelectionRange(0, texto.length);
+          const ok = document.execCommand('copy');
+          textarea.setAttribute('readonly', 'readonly');
+          if (ok) {
+            showMessage('saldoNegativoMessage', saldoNegativoCopyRows.length + ' itens copiados! Cole na planilha (Ctrl+V).', 'success');
+          } else {
+            showMessage('saldoNegativoMessage', 'Não foi possível copiar automaticamente. O texto já está selecionado, use Ctrl+C.', 'warning');
+          }
+        } catch (e) {
+          textarea.setAttribute('readonly', 'readonly');
+          showMessage('saldoNegativoMessage', 'Não foi possível copiar automaticamente. Selecione o texto abaixo e use Ctrl+C.', 'warning');
+        }
+      }
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(texto)
+          .then(function() {
+            showMessage('saldoNegativoMessage', saldoNegativoCopyRows.length + ' itens copiados! Cole na planilha (Ctrl+V).', 'success');
+          })
+          .catch(function() {
+            copiaManual();
+          });
+      } else {
+        copiaManual();
+      }
+    }
+
+    function printSaldoNegativo() {
+      const resultsDiv = document.getElementById('saldoNegativoResults');
+      if (!resultsDiv || resultsDiv.style.display === 'none') {
+        alert('Nenhum resultado para imprimir');
+        return;
+      }
+
+      const dataInicio = document.getElementById('saldoNegativoDataInicio').value;
+      const dataFim = document.getElementById('saldoNegativoDataFim').value;
+      const tableHTML = document.getElementById('saldoNegativoTableContainer').innerHTML;
+      const printWindow = window.open('', '_blank');
+
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Itens com Saldo Negativo</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; }
+            h1 { text-align: center; margin-bottom: 20px; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            th, td { border: 1px solid #333; padding: 5px 8px; text-align: left; }
+            th { background-color: #c62828; color: white; }
+            tr:nth-child(even) { background-color: #f2f2f2; }
+            .info { text-align: center; margin-bottom: 10px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <h1>Itens com Saldo Negativo</h1>
+          <p class="info">Período: ${dataInicio} a ${dataFim} | Total: ${document.getElementById('saldoNegativoTotal').textContent} itens | Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
           ${tableHTML}
         </body>
         </html>
