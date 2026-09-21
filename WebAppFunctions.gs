@@ -212,6 +212,10 @@ function getOrCreateIndiceItensSheet() {
     sheet.setColumnWidth(5, 120); // Linha
     sheet.setColumnWidth(6, 150); // Atualização
 
+    // CORREÇÃO: força texto na coluna Item para o Sheets não converter
+    // códigos tipo "6300/1" em data/número ao gravar via setValues()
+    sheet.getRange(2, 1, sheet.getMaxRows() - 1, 1).setNumberFormat("@");
+
     Logger.log("Aba ÍNDICE_ITENS criada com sucesso");
   }
 
@@ -291,6 +295,9 @@ function buildIndiceItensInitial() {
     sheetIndice.getRange(2, 1, lastRowIndice - 1, 6).clear();
   }
 
+  // CORREÇÃO: garante texto na coluna Item antes de gravar (reconstrução completa)
+  sheetIndice.getRange(2, 1, sheetIndice.getMaxRows() - 1, 1).setNumberFormat("@");
+
   // Escreve TUDO de uma vez (muito mais rápido)
   if (indiceArray.length > 0) {
     sheetIndice.getRange(2, 1, indiceArray.length, 6).setValues(indiceArray);
@@ -343,28 +350,25 @@ function _loadIndiceItensFromSheet() {
     return {};
   }
 
-  var data = sheetIndice.getRange(2, 1, lastRow - 1, 5).getValues();
+  // CORREÇÃO: getDisplayValues() em vez de getValues() — o valor exibido é
+  // sempre a string real do item (ex.: "6300/1"), mesmo quando a célula foi
+  // corrompida para Data/Número pelo auto-detector do Sheets em alguma gravação
+  // anterior. Também evita o problema de objetos Date quebrando o retorno de
+  // google.script.run em getLastRegistrationFromIndex.
+  var data = sheetIndice.getRange(2, 1, lastRow - 1, 5).getDisplayValues();
   var indice = {};
-  var tz = Session.getScriptTimeZone();
 
   for (var i = 0; i < data.length; i++) {
     var item = data[i][0];
-    if (!item) continue;
-
-    // CORREÇÃO: converte Date para string — objetos Date quebram o retorno de
-    // google.script.run (getLastRegistrationFromIndex) quando o cache está frio
-    var dataItem = data[i][2];
-    if (dataItem instanceof Date) {
-      dataItem = Utilities.formatDate(dataItem, tz, "dd/MM/yyyy HH:mm:ss");
-    }
+    if (!item || item.trim() === '') continue;
 
     var itemKey = item.toString().trim().toUpperCase();
     indice[itemKey] = {
       item: data[i][0],
-      saldo: data[i][1],
-      data: dataItem,
+      saldo: _parseNumeroSeguro(data[i][1], 0),
+      data: data[i][2] || null,
       grupo: data[i][3],
-      linha: data[i][4]
+      linha: parseInt(data[i][4], 10) || 0
     };
   }
 
@@ -393,7 +397,9 @@ function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque, invalidate
       var mapa = {};
       var lastRow = sheetIndice.getLastRow();
       if (lastRow > 1) {
-        var items = sheetIndice.getRange(2, 1, lastRow - 1, 1).getValues();
+        // CORREÇÃO: getDisplayValues() para reconhecer itens já indexados
+        // mesmo em linhas legadas com a célula corrompida para Data/Número
+        var items = sheetIndice.getRange(2, 1, lastRow - 1, 1).getDisplayValues();
         for (var i = 0; i < items.length; i++) {
           if (items[i][0]) {
             mapa[items[i][0].toString().trim().toUpperCase()] = i + 2;
@@ -723,9 +729,12 @@ function verificarERepararIndice() {
   Logger.log("ESTOQUE: " + (lastRowEstoque - 1) + " linhas | ÍNDICE: " + (lastRowIndice - 1) + " itens");
 
   // Lê itens do índice
+  // CORREÇÃO: getDisplayValues() nas duas leituras abaixo — com getValues()
+  // uma célula corrompida (Data/Número) nunca bate com a chave de texto,
+  // e o reparo automático ficava recriando o mesmo item como "faltante".
   var indiceItems = {};
   if (lastRowIndice > 1) {
-    var indiceData = sheetIndice.getRange(2, 1, lastRowIndice - 1, 1).getValues();
+    var indiceData = sheetIndice.getRange(2, 1, lastRowIndice - 1, 1).getDisplayValues();
     for (var i = 0; i < indiceData.length; i++) {
       if (indiceData[i][0]) {
         indiceItems[indiceData[i][0].toString().trim().toUpperCase()] = true;
@@ -735,7 +744,7 @@ function verificarERepararIndice() {
 
   // Lê últimos 1000 itens do ESTOQUE para verificar se há itens novos
   var checkRows = Math.min(1000, lastRowEstoque - 1);
-  var estoqueData = sheetEstoque.getRange(lastRowEstoque - checkRows + 1, 2, checkRows, 1).getValues();
+  var estoqueData = sheetEstoque.getRange(lastRowEstoque - checkRows + 1, 2, checkRows, 1).getDisplayValues();
 
   var itemsFaltantes = [];
   for (var i = 0; i < estoqueData.length; i++) {
@@ -763,6 +772,94 @@ function verificarERepararIndice() {
   var result = buildIndiceItensInitial();
   result.repaired = true;
   return result;
+}
+
+/**
+ * SCRIPT MANUAL: Corrige a causa raiz do bug de itens tipo "6300/1" sendo
+ * lidos como item novo. Força formato TEXTO nas colunas Item de ESTOQUE e
+ * ÍNDICE_ITENS, para o Sheets parar de auto-converter códigos "número/número"
+ * em data/número ao gravar via setValues().
+ * Rodar UMA VEZ manualmente pelo editor do Apps Script. Idempotente.
+ */
+function corrigirFormatoColunaItem() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var resultado = [];
+
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (sheetEstoque && sheetEstoque.getMaxRows() > 1) {
+    sheetEstoque.getRange(2, 2, sheetEstoque.getMaxRows() - 1, 1).setNumberFormat("@");
+    resultado.push("ESTOQUE!B formatada como texto (" + (sheetEstoque.getMaxRows() - 1) + " linhas).");
+  }
+
+  var sheetIndice = getOrCreateIndiceItensSheet();
+  if (sheetIndice.getMaxRows() > 1) {
+    sheetIndice.getRange(2, 1, sheetIndice.getMaxRows() - 1, 1).setNumberFormat("@");
+    resultado.push("ÍNDICE_ITENS!A formatada como texto (" + (sheetIndice.getMaxRows() - 1) + " linhas).");
+  }
+
+  Logger.log(resultado.join(" \n"));
+  return resultado.join(" \n");
+}
+
+/**
+ * SCRIPT MANUAL: Audita a coluna Item da ESTOQUE em busca de células que o
+ * Sheets converteu para Data/Número (a causa do bug "6300/1" virar item novo).
+ * NÃO corrige os dados sozinho — a reversão pode ser ambígua, então só sugere.
+ * Grava o relatório na aba AUDITORIA_ITENS_CORROMPIDOS para revisão manual.
+ * Custo: 2 leituras em lote (getValues + getDisplayValues), sem loop por linha
+ * via API — seguro para 40k+ linhas dentro do limite de 6 min de execução.
+ */
+function auditarItensCorrompidos() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetEstoque = ss.getSheetByName("ESTOQUE");
+  if (!sheetEstoque) return { success: false, message: "Aba ESTOQUE não encontrada" };
+
+  var lastRow = sheetEstoque.getLastRow();
+  if (lastRow < 2) return { success: true, message: "Planilha vazia", encontrados: 0 };
+
+  // Tipos nativos (para detectar Date/Number) e valores exibidos (para o relatório)
+  var valoresCrus = sheetEstoque.getRange(2, 2, lastRow - 1, 1).getValues();
+  var valoresExibidos = sheetEstoque.getRange(2, 2, lastRow - 1, 1).getDisplayValues();
+
+  var achados = [];
+  for (var i = 0; i < valoresCrus.length; i++) {
+    var cru = valoresCrus[i][0];
+    if (cru === "" || cru === null) continue;
+
+    var tipo = (cru instanceof Date) ? "DATA" : (typeof cru === "number" ? "NUMERO" : null);
+    if (!tipo) continue; // string normal, não corrompido
+
+    var sugestao = "";
+    if (tipo === "DATA") {
+      // Hipótese mais provável para valores "AAAA/M": o Sheets leu o código
+      // como ano/mês. Não é garantia — exige confirmação manual.
+      sugestao = cru.getFullYear() + "/" + (cru.getMonth() + 1);
+    }
+
+    achados.push([
+      i + 2,                 // Linha na ESTOQUE
+      tipo,                  // Tipo detectado
+      String(cru),           // Valor cru (para conferência)
+      valoresExibidos[i][0], // Valor hoje exibido na célula
+      sugestao                // Sugestão de reversão (revisar antes de aplicar)
+    ]);
+  }
+
+  var sheetAuditoria = ss.getSheetByName("AUDITORIA_ITENS_CORROMPIDOS");
+  if (!sheetAuditoria) {
+    sheetAuditoria = ss.insertSheet("AUDITORIA_ITENS_CORROMPIDOS");
+  }
+  sheetAuditoria.clearContents();
+  sheetAuditoria.getRange(1, 1, 1, 5).setValues([[
+    "Linha ESTOQUE", "Tipo Detectado", "Valor Cru", "Valor Exibido Hoje", "Sugestão de Reversão (CONFIRME ANTES DE APLICAR)"
+  ]]);
+  if (achados.length > 0) {
+    sheetAuditoria.getRange(2, 1, achados.length, 5).setValues(achados);
+  }
+
+  var msg = achados.length + " célula(s) corrompida(s) encontrada(s) na coluna Item da ESTOQUE. Ver aba AUDITORIA_ITENS_CORROMPIDOS.";
+  Logger.log(msg);
+  return { success: true, message: msg, encontrados: achados.length };
 }
 
 /**
