@@ -1,20 +1,12 @@
 // ========================================
 // FORNECEDORES - Cadastro via CNPJ
-// Consulta o CNPJ em várias fontes públicas, confirma por consenso (>= 2 fontes)
-// e grava o nome na aba DADOS, coluna F (lista de Observações) e o CNPJ em
-// coluna auxiliar ("CNPJ FORNECEDOR", criada automaticamente se não existir).
+// A consulta do CNPJ (>= 2 fontes) é feita no navegador (WebApp.html).
+// Aqui apenas se grava o nome em DADOS!F (lista de Observações) e o CNPJ
+// em coluna auxiliar ("CNPJ FORNECEDOR", criada automaticamente se não existir).
 // ========================================
 
 var FORN_COL_NOME = 6; // DADOS!F
 var FORN_HEADER_CNPJ = "CNPJ FORNECEDOR";
-var FORN_CACHE_TTL_OK = 21600; // 6 horas
-
-var FORN_FONTES = [
-  { id: "BrasilAPI", url: "https://brasilapi.com.br/api/cnpj/v1/" },
-  { id: "MinhaReceita", url: "https://minhareceita.org/" },
-  { id: "ReceitaWS", url: "https://receitaws.com.br/v1/cnpj/" },
-  { id: "CNPJ.ws", url: "https://publica.cnpj.ws/cnpj/" }
-];
 
 /**
  * Remove máscara e normaliza o CNPJ (aceita o formato alfanumérico vigente desde 07/2026).
@@ -46,157 +38,13 @@ function fornCnpjValido_(cnpj) {
   return d1 === parseInt(cnpj.charAt(12), 10) && d2 === parseInt(cnpj.charAt(13), 10);
 }
 
-function fornNormalizar_(texto) {
-  return String(texto == null ? "" : texto).toUpperCase()
-    .normalize("NFD").replace(/[̀-ͯ]/g, "")
-    .replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
-}
-
 /**
  * Chave de comparação: ignora acento, pontuação e espaços ("S.A." == "SA").
  */
 function fornChave_(texto) {
-  return fornNormalizar_(texto).replace(/ /g, "");
-}
-
-/**
- * Extrai razão social, nome fantasia e situação de qualquer uma das fontes.
- * Retorna null se a resposta for inválida ou for de outro CNPJ.
- */
-function fornExtrairDados_(texto, cnpj) {
-  var d;
-  try { d = JSON.parse(texto); } catch (e) { return null; }
-  if (!d || typeof d !== "object" || d.status === "ERROR") return null;
-
-  var est = d.estabelecimento || {};
-  var cnpjResposta = fornLimparCnpj_(d.cnpj || est.cnpj || "");
-  if (cnpjResposta && cnpjResposta !== cnpj) return null;
-
-  var razao = String(d.razao_social || d.nome || "").trim();
-  if (!razao) return null;
-
-  var fantasia = String(d.nome_fantasia || d.fantasia || est.nome_fantasia || "").trim();
-  if (/^[*\s]*$/.test(fantasia)) fantasia = "";
-
-  var situacao = String(d.descricao_situacao_cadastral || d.situacao || est.situacao_cadastral || "")
-    .trim().toUpperCase();
-
-  return { razaoSocial: razao, fantasia: fantasia, situacao: situacao };
-}
-
-/**
- * Entre as fontes que concordam, usa o nome fantasia mais frequente;
- * sem fantasia, usa a razão social.
- */
-function fornEscolherNome_(grupo) {
-  var contagem = {}, original = {}, melhor = "", max = 0;
-  grupo.forEach(function(c) {
-    if (!c.fantasia) return;
-    var k = fornChave_(c.fantasia);
-    contagem[k] = (contagem[k] || 0) + 1;
-    if (!original[k]) original[k] = c.fantasia;
-    if (contagem[k] > max) { max = contagem[k]; melhor = k; }
-  });
-  return melhor ? original[melhor] : grupo[0].razaoSocial;
-}
-
-/**
- * buscarCnpjFornecedor: consulta o CNPJ em todas as fontes em paralelo.
- * status: ok (>= 2 fontes coincidem) | parcial (1 fonte) | divergente | nao_encontrado | erro
- */
-function buscarCnpjFornecedor(cnpjBruto) {
-  try {
-    var cnpj = fornLimparCnpj_(cnpjBruto);
-    if (!fornCnpjValido_(cnpj)) {
-      return { success: false, message: "CNPJ inválido. Confira os dígitos." };
-    }
-
-    var cache = CacheService.getScriptCache();
-    var chave = "forn_cnpj_" + cnpj;
-    var emCache = cache.get(chave);
-    if (emCache) {
-      try { return JSON.parse(emCache); } catch (e) {}
-    }
-
-    var opcoes = {
-      method: "get",
-      muteHttpExceptions: true,
-      followRedirects: true,
-      headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0 (compatible; EstoqueBahia/1.0)" }
-    };
-    var requisicoes = FORN_FONTES.map(function(f) {
-      return { url: f.url + cnpj, method: opcoes.method, muteHttpExceptions: true,
-               followRedirects: true, headers: opcoes.headers };
-    });
-
-    var respostas;
-    try {
-      respostas = UrlFetchApp.fetchAll(requisicoes);
-    } catch (e) {
-      // fetchAll falha por inteiro se uma fonte cair na rede; refaz uma a uma
-      respostas = FORN_FONTES.map(function(f) {
-        try { return UrlFetchApp.fetch(f.url + cnpj, opcoes); } catch (err) { return null; }
-      });
-    }
-
-    var candidatos = [], falhas = [], naoEncontrado = 0;
-    respostas.forEach(function(resp, i) {
-      var fonte = FORN_FONTES[i].id;
-      if (!resp) { falhas.push(fonte + " (sem resposta)"); return; }
-      var codigo = resp.getResponseCode();
-      if (codigo === 404) { naoEncontrado++; return; }
-      if (codigo !== 200) { falhas.push(fonte + " (HTTP " + codigo + ")"); return; }
-      var dados = fornExtrairDados_(resp.getContentText(), cnpj);
-      if (!dados) { falhas.push(fonte + " (resposta inválida)"); return; }
-      dados.fonte = fonte;
-      candidatos.push(dados);
-    });
-
-    var resultado = {
-      success: true,
-      cnpj: cnpj,
-      cnpjFormatado: fornFormatarCnpj_(cnpj),
-      falhas: falhas,
-      candidatos: candidatos.map(function(c) {
-        return { fonte: c.fonte, razaoSocial: c.razaoSocial, fantasia: c.fantasia, nome: c.fantasia || c.razaoSocial };
-      })
-    };
-
-    if (!candidatos.length) {
-      resultado.status = (naoEncontrado >= 2 || (naoEncontrado >= 1 && !falhas.length)) ? "nao_encontrado" : "erro";
-      return resultado;
-    }
-
-    var grupos = {}, base = null;
-    candidatos.forEach(function(c) {
-      var k = fornChave_(c.razaoSocial);
-      (grupos[k] = grupos[k] || []).push(c);
-    });
-    Object.keys(grupos).forEach(function(k) {
-      if (!base || grupos[k].length > base.length) base = grupos[k];
-    });
-
-    if (base.length >= 2) resultado.status = "ok";
-    else if (candidatos.length === 1) resultado.status = "parcial";
-    else resultado.status = "divergente";
-
-    var situacao = "";
-    base.forEach(function(c) { if (!situacao && c.situacao) situacao = c.situacao; });
-
-    resultado.nome = fornEscolherNome_(base);
-    resultado.razaoSocial = base[0].razaoSocial;
-    resultado.situacao = situacao;
-    resultado.ativa = situacao ? situacao === "ATIVA" : null;
-    resultado.fontesConfirmadas = base.map(function(c) { return c.fonte; });
-
-    if (resultado.status === "ok") {
-      try { cache.put(chave, JSON.stringify(resultado), FORN_CACHE_TTL_OK); } catch (e) {}
-    }
-    return resultado;
-  } catch (error) {
-    Logger.log("Erro buscarCnpjFornecedor: " + error);
-    return { success: false, message: "Erro ao consultar CNPJ: " + error.message };
-  }
+  return String(texto == null ? "" : texto).toUpperCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^A-Z0-9]/g, "");
 }
 
 /**
@@ -206,7 +54,7 @@ function fornColunaCnpj_(sheet) {
   var ultimaColuna = Math.max(sheet.getLastColumn(), 1);
   var cabecalho = sheet.getRange(1, 1, 1, ultimaColuna).getDisplayValues()[0];
   for (var i = 0; i < cabecalho.length; i++) {
-    if (fornNormalizar_(cabecalho[i]) === FORN_HEADER_CNPJ) return i + 1;
+    if (fornChave_(cabecalho[i]) === fornChave_(FORN_HEADER_CNPJ)) return i + 1;
   }
   var nova = ultimaColuna + 1;
   if (nova > sheet.getMaxColumns()) sheet.insertColumnAfter(sheet.getMaxColumns());

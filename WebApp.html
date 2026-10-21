@@ -3548,8 +3548,145 @@
       setStatusForn('');
     }
 
+    // Fontes públicas (mesmas já usadas em produção no projeto comprasmarco); consulta direto do navegador
+    const FORN_FONTES = [
+      { id: 'BrasilAPI', url: c => 'https://brasilapi.com.br/api/cnpj/v1/' + c },
+      { id: 'ReceitaWS', url: c => 'https://www.receitaws.com.br/v1/cnpj/' + c },
+      { id: 'CNPJ.ws', url: c => 'https://publica.cnpj.ws/cnpj/' + c }
+    ];
+    const FORN_CACHE_PREFIXO = 'forn_cnpj_';
+    const FORN_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+    function limparCnpjForn(v) {
+      return String(v == null ? '' : v).replace(/[^0-9a-zA-Z]/g, '').toUpperCase();
+    }
+
+    // Dígitos verificadores (módulo 11; letras valem código ASCII - 48 no CNPJ alfanumérico)
+    function cnpjValidoForn(cnpj) {
+      if (!/^[0-9A-Z]{12}[0-9]{2}$/.test(cnpj) || /^(.)\1{13}$/.test(cnpj)) return false;
+      const digito = function(base) {
+        const pesos = base.length === 12
+          ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+          : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+        let soma = 0;
+        for (let i = 0; i < base.length; i++) soma += (base.charCodeAt(i) - 48) * pesos[i];
+        const resto = soma % 11;
+        return resto < 2 ? 0 : 11 - resto;
+      };
+      const d1 = digito(cnpj.slice(0, 12));
+      const d2 = digito(cnpj.slice(0, 12) + d1);
+      return d1 === parseInt(cnpj[12], 10) && d2 === parseInt(cnpj[13], 10);
+    }
+
+    // Ignora acento, pontuação e espaços ("S.A." == "SA")
+    function chaveNomeForn(t) {
+      return String(t == null ? '' : t).toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9]/g, '');
+    }
+
+    // Extrai dados de qualquer das fontes; null se a resposta for inválida ou de outro CNPJ
+    function extrairDadosForn(d, cnpj) {
+      if (!d || typeof d !== 'object') return null;
+      const est = d.estabelecimento || {};
+      const cnpjResp = limparCnpjForn(d.cnpj || est.cnpj || '');
+      if (cnpjResp && cnpjResp !== cnpj) return null;
+
+      const razao = String(d.razao_social || d.nome || '').trim();
+      if (!razao) return null;
+
+      let fantasia = String(d.nome_fantasia || d.fantasia || est.nome_fantasia || '').trim();
+      if (/^[*\s]*$/.test(fantasia)) fantasia = '';
+
+      const situacao = String(d.descricao_situacao_cadastral || d.situacao || est.situacao_cadastral || '').trim().toUpperCase();
+      return { razaoSocial: razao, fantasia: fantasia, situacao: situacao };
+    }
+
+    function consultarFonteForn(fonte, cnpj) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(function() { ctrl.abort(); }, 15000);
+      return fetch(fonte.url(cnpj), { signal: ctrl.signal })
+        .then(function(r) {
+          if (r.status === 429) return { fonte: fonte.id, erro: 'limite de consultas' };
+          if (r.status === 404) return { fonte: fonte.id, erro: 'nao-encontrado' };
+          if (!r.ok) return { fonte: fonte.id, erro: 'HTTP ' + r.status };
+          return r.json().then(function(d) {
+            if (d && d.status === 'ERROR') return { fonte: fonte.id, erro: 'nao-encontrado' };
+            const dados = extrairDadosForn(d, cnpj);
+            return dados ? Object.assign({ fonte: fonte.id }, dados) : { fonte: fonte.id, erro: 'resposta inválida' };
+          });
+        })
+        .catch(function() { return { fonte: fonte.id, erro: 'sem resposta' }; })
+        .finally(function() { clearTimeout(timer); });
+    }
+
+    // Consenso: ok (>= 2 fontes coincidem na razão social) | parcial (1 fonte) | divergente | nao_encontrado | erro
+    function consolidarForn(resultados, cnpj) {
+      const candidatos = resultados.filter(function(r) { return !r.erro; });
+      const falhas = resultados.filter(function(r) { return r.erro && r.erro !== 'nao-encontrado'; })
+        .map(function(r) { return r.fonte + ' (' + r.erro + ')'; });
+      const naoEncontrado = resultados.filter(function(r) { return r.erro === 'nao-encontrado'; }).length;
+
+      const resultado = {
+        success: true,
+        cnpj: cnpj,
+        falhas: falhas,
+        candidatos: candidatos.map(function(c) {
+          return { fonte: c.fonte, razaoSocial: c.razaoSocial, fantasia: c.fantasia, nome: c.fantasia || c.razaoSocial };
+        })
+      };
+
+      if (!candidatos.length) {
+        resultado.status = (naoEncontrado >= 2 || (naoEncontrado >= 1 && !falhas.length)) ? 'nao_encontrado' : 'erro';
+        return resultado;
+      }
+
+      const grupos = {};
+      candidatos.forEach(function(c) {
+        const k = chaveNomeForn(c.razaoSocial);
+        (grupos[k] = grupos[k] || []).push(c);
+      });
+      let base = null;
+      Object.keys(grupos).forEach(function(k) {
+        if (!base || grupos[k].length > base.length) base = grupos[k];
+      });
+
+      resultado.status = base.length >= 2 ? 'ok' : (candidatos.length === 1 ? 'parcial' : 'divergente');
+
+      // Nome: fantasia mais frequente entre as fontes que concordam; sem fantasia, razão social
+      const contagem = {}, original = {};
+      let melhor = '', max = 0;
+      base.forEach(function(c) {
+        if (!c.fantasia) return;
+        const k = chaveNomeForn(c.fantasia);
+        contagem[k] = (contagem[k] || 0) + 1;
+        if (!original[k]) original[k] = c.fantasia;
+        if (contagem[k] > max) { max = contagem[k]; melhor = k; }
+      });
+      const comSituacao = base.find(function(c) { return c.situacao; });
+      const situacao = comSituacao ? comSituacao.situacao : '';
+
+      resultado.nome = melhor ? original[melhor] : base[0].razaoSocial;
+      resultado.razaoSocial = base[0].razaoSocial;
+      resultado.situacao = situacao;
+      resultado.ativa = situacao ? situacao === 'ATIVA' : null;
+      resultado.fontesConfirmadas = base.map(function(c) { return c.fonte; });
+      return resultado;
+    }
+
+    function lerCacheForn(cnpj) {
+      try {
+        const bruto = sessionStorage.getItem(FORN_CACHE_PREFIXO + cnpj);
+        if (!bruto) return null;
+        const c = JSON.parse(bruto);
+        return (Date.now() - c.t < FORN_CACHE_TTL_MS) ? c.r : null;
+      } catch (e) { return null; }
+    }
+
+    function gravarCacheForn(cnpj, r) {
+      try { sessionStorage.setItem(FORN_CACHE_PREFIXO + cnpj, JSON.stringify({ t: Date.now(), r: r })); } catch (e) {}
+    }
+
     function buscarFornecedorCnpj() {
-      const cnpj = document.getElementById('nfFornCnpj').value.replace(/[^0-9a-zA-Z]/g, '');
+      const cnpj = limparCnpjForn(document.getElementById('nfFornCnpj').value);
       const btn = document.getElementById('nfFornBuscar');
       nfFornResultadoAtual = null;
       document.getElementById('nfFornResultado').style.display = 'none';
@@ -3558,20 +3695,28 @@
         setStatusForn('Informe os 14 caracteres do CNPJ.', '#c62828');
         return;
       }
+      if (!cnpjValidoForn(cnpj)) {
+        setStatusForn('CNPJ inválido. Confira os dígitos.', '#c62828');
+        return;
+      }
+
+      const emCache = lerCacheForn(cnpj);
+      if (emCache) {
+        mostrarResultadoFornecedor(emCache);
+        return;
+      }
 
       btn.disabled = true;
       setStatusForn('Consultando fontes...', '#555');
 
-      google.script.run
-        .withSuccessHandler(function(r) {
-          btn.disabled = false;
-          mostrarResultadoFornecedor(r);
-        })
-        .withFailureHandler(function(error) {
-          btn.disabled = false;
-          setStatusForn('Erro: ' + error.message, '#c62828');
-        })
-        .buscarCnpjFornecedor(cnpj);
+      Promise.all(FORN_FONTES.map(function(f) { return consultarFonteForn(f, cnpj); })).then(function(resultados) {
+        btn.disabled = false;
+        // Ignora se o usuário trocou o CNPJ durante a consulta
+        if (limparCnpjForn(document.getElementById('nfFornCnpj').value) !== cnpj) return;
+        const r = consolidarForn(resultados, cnpj);
+        if (r.status === 'ok') gravarCacheForn(cnpj, r);
+        mostrarResultadoFornecedor(r);
+      });
     }
 
     function mostrarResultadoFornecedor(r) {
