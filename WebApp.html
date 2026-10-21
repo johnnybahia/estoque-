@@ -1323,6 +1323,26 @@
                     </select>
                   </div>
                 </div>
+
+                <!-- Cadastro de novo fornecedor via CNPJ -->
+                <a href="#" id="nfFornToggle" onclick="toggleNovoFornecedor(event)" style="font-size: 0.8rem; color: #1976d2;">＋ Cadastrar novo fornecedor (por CNPJ)</a>
+                <div id="nfFornBox" style="display: none; margin-top: 8px; background: #fff; padding: 10px; border-radius: 6px; border: 1px solid #bbdefb;">
+                  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <input type="text" id="nfFornCnpj" maxlength="18" autocomplete="off" placeholder="00.000.000/0000-00"
+                           style="padding: 6px; flex: 1; min-width: 160px; border: 1px solid #ccc; border-radius: 4px;"
+                           oninput="mascararCnpjForn(this)"
+                           onkeydown="if (event.key === 'Enter') { event.preventDefault(); buscarFornecedorCnpj(); }">
+                    <button type="button" class="btn btn-primary" id="nfFornBuscar" onclick="buscarFornecedorCnpj()" style="padding: 6px 14px; font-size: 0.85rem;">🔍 Buscar</button>
+                  </div>
+                  <div id="nfFornStatus" style="font-size: 0.8rem; margin-top: 6px;"></div>
+                  <div id="nfFornResultado" style="display: none; margin-top: 8px;">
+                    <label style="font-size: 0.85rem; display: block; margin-bottom: 4px;">Nome do fornecedor (editável)</label>
+                    <input type="text" id="nfFornNome" maxlength="120" autocomplete="off"
+                           style="padding: 6px; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px;">
+                    <div id="nfFornCandidatos" style="font-size: 0.75rem; color: #555; margin-top: 6px;"></div>
+                    <button type="button" class="btn btn-success" id="nfFornSalvar" onclick="salvarFornecedor()" style="margin-top: 8px; padding: 6px 14px; font-size: 0.85rem;">✓ Salvar fornecedor</button>
+                  </div>
+                </div>
               </div>
 
               <!-- Lista de Itens -->
@@ -3485,6 +3505,161 @@
       document.getElementById('nfItensContainer').innerHTML = '';
       nfItemCounter = 0;
       showMessage('nfMessage', '', '');
+      resetNovoFornecedor();
+    }
+
+    // ===== Cadastro de fornecedor por CNPJ (grava em DADOS!F) =====
+    let nfFornResultadoAtual = null;
+
+    function toggleNovoFornecedor(event) {
+      if (event) event.preventDefault();
+      const box = document.getElementById('nfFornBox');
+      const abrir = box.style.display === 'none';
+      box.style.display = abrir ? 'block' : 'none';
+      if (abrir) document.getElementById('nfFornCnpj').focus();
+    }
+
+    function mascararCnpjForn(input) {
+      const v = input.value.replace(/[^0-9a-zA-Z]/g, '').toUpperCase().slice(0, 14);
+      let m = v;
+      if (v.length > 12) m = v.slice(0, 2) + '.' + v.slice(2, 5) + '.' + v.slice(5, 8) + '/' + v.slice(8, 12) + '-' + v.slice(12);
+      else if (v.length > 8) m = v.slice(0, 2) + '.' + v.slice(2, 5) + '.' + v.slice(5, 8) + '/' + v.slice(8);
+      else if (v.length > 5) m = v.slice(0, 2) + '.' + v.slice(2, 5) + '.' + v.slice(5);
+      else if (v.length > 2) m = v.slice(0, 2) + '.' + v.slice(2);
+      input.value = m;
+    }
+
+    function setStatusForn(texto, cor) {
+      const el = document.getElementById('nfFornStatus');
+      el.textContent = texto || '';
+      el.style.color = cor || '#555';
+    }
+
+    function resetNovoFornecedor() {
+      nfFornResultadoAtual = null;
+      const box = document.getElementById('nfFornBox');
+      if (!box) return;
+      box.style.display = 'none';
+      document.getElementById('nfFornCnpj').value = '';
+      document.getElementById('nfFornNome').value = '';
+      document.getElementById('nfFornCandidatos').textContent = '';
+      document.getElementById('nfFornResultado').style.display = 'none';
+      document.getElementById('nfFornBuscar').disabled = false;
+      setStatusForn('');
+    }
+
+    function buscarFornecedorCnpj() {
+      const cnpj = document.getElementById('nfFornCnpj').value.replace(/[^0-9a-zA-Z]/g, '');
+      const btn = document.getElementById('nfFornBuscar');
+      nfFornResultadoAtual = null;
+      document.getElementById('nfFornResultado').style.display = 'none';
+
+      if (cnpj.length !== 14) {
+        setStatusForn('Informe os 14 caracteres do CNPJ.', '#c62828');
+        return;
+      }
+
+      btn.disabled = true;
+      setStatusForn('Consultando fontes...', '#555');
+
+      google.script.run
+        .withSuccessHandler(function(r) {
+          btn.disabled = false;
+          mostrarResultadoFornecedor(r);
+        })
+        .withFailureHandler(function(error) {
+          btn.disabled = false;
+          setStatusForn('Erro: ' + error.message, '#c62828');
+        })
+        .buscarCnpjFornecedor(cnpj);
+    }
+
+    function mostrarResultadoFornecedor(r) {
+      if (!r || !r.success) {
+        setStatusForn((r && r.message) || 'Falha na consulta.', '#c62828');
+        return;
+      }
+
+      const falhas = (r.falhas && r.falhas.length) ? ' Sem resposta: ' + r.falhas.join(', ') + '.' : '';
+
+      if (r.status === 'nao_encontrado') {
+        setStatusForn('CNPJ não encontrado nas fontes consultadas.' + falhas, '#c62828');
+        return;
+      }
+      if (r.status === 'erro') {
+        setStatusForn('Nenhuma fonte respondeu. Tente novamente em instantes.' + falhas, '#c62828');
+        return;
+      }
+
+      nfFornResultadoAtual = r;
+      document.getElementById('nfFornNome').value = r.nome || '';
+
+      let msg, cor;
+      if (r.status === 'ok') {
+        msg = '✓ Confirmado por ' + r.fontesConfirmadas.length + ' fontes (' + r.fontesConfirmadas.join(', ') + ').';
+        cor = '#2e7d32';
+      } else if (r.status === 'parcial') {
+        msg = '⚠ Apenas 1 fonte respondeu (' + r.candidatos[0].fonte + '). Confira o nome antes de salvar.';
+        cor = '#e65100';
+      } else {
+        msg = '⚠ As fontes divergem. Escolha/ajuste o nome manualmente antes de salvar.';
+        cor = '#e65100';
+      }
+      if (r.ativa === false) {
+        msg += ' Situação cadastral: ' + r.situacao + '.';
+        cor = '#c62828';
+      }
+      setStatusForn(msg + falhas, cor);
+
+      const cand = document.getElementById('nfFornCandidatos');
+      cand.textContent = 'Razão social: ' + (r.razaoSocial || '') + (r.status === 'ok' ? '' : ' | ' +
+        r.candidatos.map(function(c) { return c.fonte + ': ' + c.nome; }).join(' | '));
+
+      document.getElementById('nfFornResultado').style.display = 'block';
+    }
+
+    function salvarFornecedor() {
+      const r = nfFornResultadoAtual;
+      const nome = document.getElementById('nfFornNome').value.trim();
+      if (!r) return;
+      if (!nome) {
+        setStatusForn('Informe o nome do fornecedor.', '#c62828');
+        return;
+      }
+      if (r.status !== 'ok' && !confirm('Esse nome NÃO foi confirmado por 2 fontes. Salvar mesmo assim?')) return;
+      if (r.ativa === false && !confirm('Situação cadastral: ' + r.situacao + '. Salvar mesmo assim?')) return;
+
+      showLoading('Salvando fornecedor...');
+
+      google.script.run
+        .withSuccessHandler(function(res) {
+          hideLoading();
+          if (!res || !res.success) {
+            setStatusForn((res && res.message) || 'Erro ao salvar fornecedor.', '#c62828');
+            return;
+          }
+          if (autocompleteData) {
+            autocompleteData.observacoes = res.observacoes || [];
+            setClientCache(CLIENT_CACHE.AUTOCOMPLETE_KEY, autocompleteData);
+          }
+          ['estoqueObs', 'nfObs', 'loteObs'].forEach(function(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const atual = el.value;
+            populateSelect(id, res.observacoes || []);
+            el.value = atual;
+          });
+          document.getElementById('nfObs').value = res.nome;
+          resetNovoFornecedor();
+          showMessage('nfMessage', res.jaExistia
+            ? 'Fornecedor já cadastrado: "' + res.nome + '" selecionado.'
+            : 'Fornecedor "' + res.nome + '" cadastrado e selecionado.', 'success');
+        })
+        .withFailureHandler(function(error) {
+          hideLoading();
+          setStatusForn('Erro: ' + error.message, '#c62828');
+        })
+        .cadastrarFornecedor(nome, r.cnpj);
     }
 
     // Voltar para formulário NF após inserção
