@@ -7,6 +7,7 @@
 
 var FORN_COL_NOME = 6; // DADOS!F
 var FORN_HEADER_CNPJ = "CNPJ FORNECEDOR";
+var SEM_ACENTO_FORN_ = new RegExp("[" + String.fromCharCode(768) + "-" + String.fromCharCode(879) + "]", "g");
 
 /**
  * Remove máscara e normaliza o CNPJ (aceita o formato alfanumérico vigente desde 07/2026).
@@ -23,7 +24,7 @@ function fornFormatarCnpj_(cnpj) {
  * Valida estrutura e dígitos verificadores (módulo 11; letras valem código ASCII - 48).
  */
 function fornCnpjValido_(cnpj) {
-  if (!/^[0-9A-Z]{12}[0-9]{2}$/.test(cnpj) || /^(.)\1{13}$/.test(cnpj)) return false;
+  if (!/^[0-9A-Z]{12}[0-9]{2}$/.test(cnpj) || cnpj.split("").every(function(c) { return c === cnpj.charAt(0); })) return false;
   var digito = function(base) {
     var pesos = base.length === 12
       ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
@@ -43,7 +44,7 @@ function fornCnpjValido_(cnpj) {
  */
 function fornChave_(texto) {
   return String(texto == null ? "" : texto).toUpperCase()
-    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .normalize("NFD").replace(SEM_ACENTO_FORN_, "")
     .replace(/[^A-Z0-9]/g, "");
 }
 

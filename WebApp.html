@@ -1325,7 +1325,7 @@
                 </div>
 
                 <!-- Cadastro de novo fornecedor via CNPJ -->
-                <a href="#" id="nfFornToggle" onclick="toggleNovoFornecedor(event)" style="font-size: 0.8rem; color: #1976d2;">＋ Cadastrar novo fornecedor (por CNPJ)</a>
+                <a href="#" id="nfFornToggle" onclick="toggleNovoFornecedor(event)" style="font-size: 0.8rem; color: #1976d2;">+ Cadastrar novo fornecedor (por CNPJ)</a>
                 <div id="nfFornBox" style="display: none; margin-top: 8px; background: #fff; padding: 10px; border-radius: 6px; border: 1px solid #bbdefb;">
                   <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                     <input type="text" id="nfFornCnpj" maxlength="18" autocomplete="off" placeholder="00.000.000/0000-00"
@@ -3554,6 +3554,7 @@
       { id: 'ReceitaWS', url: c => 'https://www.receitaws.com.br/v1/cnpj/' + c },
       { id: 'CNPJ.ws', url: c => 'https://publica.cnpj.ws/cnpj/' + c }
     ];
+    const SEM_ACENTO_FORN = new RegExp('[' + String.fromCharCode(768) + '-' + String.fromCharCode(879) + ']', 'g');
     const FORN_CACHE_PREFIXO = 'forn_cnpj_';
     const FORN_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
@@ -3563,7 +3564,7 @@
 
     // Dígitos verificadores (módulo 11; letras valem código ASCII - 48 no CNPJ alfanumérico)
     function cnpjValidoForn(cnpj) {
-      if (!/^[0-9A-Z]{12}[0-9]{2}$/.test(cnpj) || /^(.)\1{13}$/.test(cnpj)) return false;
+      if (!/^[0-9A-Z]{12}[0-9]{2}$/.test(cnpj) || cnpj.split('').every(function(c) { return c === cnpj.charAt(0); })) return false;
       const digito = function(base) {
         const pesos = base.length === 12
           ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
@@ -3580,7 +3581,7 @@
 
     // Ignora acento, pontuação e espaços ("S.A." == "SA")
     function chaveNomeForn(t) {
-      return String(t == null ? '' : t).toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9]/g, '');
+      return String(t == null ? '' : t).toUpperCase().normalize('NFD').replace(SEM_ACENTO_FORN, '').replace(/[^A-Z0-9]/g, '');
     }
 
     // Extrai dados de qualquer das fontes; null se a resposta for inválida ou de outro CNPJ
