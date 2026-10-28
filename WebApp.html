@@ -1180,8 +1180,9 @@
                     <input type="number" id="estoqueValorUnitario" step="0.01" min="0" required style="padding: 6px;">
                   </div>
                 </div>
+                <div id="avisoBloqueioAtualizacao" style="display: none; margin-top: 10px; background: #ffebee; color: #c62828; border: 3px solid #f44336; border-radius: 6px; padding: 10px; font-size: 0.9rem; line-height: 1.4;"></div>
                 <div class="btn-group" style="margin-top: 10px;">
-                  <button type="submit" class="btn btn-success">✓ Confirmar</button>
+                  <button type="submit" id="btnConfirmarEstoque" class="btn btn-success">✓ Confirmar</button>
                   <button type="button" class="btn btn-warning" onclick="resetEstoqueForm()">↻ Limpar</button>
                   <button type="button" class="btn btn-primary" onclick="abrirLancamentoLote()" title="Inserir múltiplos itens de uma vez">📦 Movimentação em Lote</button>
                 </div>
@@ -1223,11 +1224,11 @@
                     <label style="font-size: 0.85rem;">Tipo de Operação *</label>
                     <div style="display: flex; gap: 15px; padding: 8px 0;">
                       <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                        <input type="radio" name="loteOperacao" value="entrada" checked style="width: auto;">
+                        <input type="radio" name="loteOperacao" value="entrada" checked style="width: auto;" onchange="aplicarBloqueioLote()">
                         <span style="color: #28a745; font-weight: 600;">📥 Entrada</span>
                       </label>
                       <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                        <input type="radio" name="loteOperacao" value="saida" style="width: auto;">
+                        <input type="radio" name="loteOperacao" value="saida" style="width: auto;" onchange="aplicarBloqueioLote()">
                         <span style="color: #dc3545; font-weight: 600;">📤 Saída</span>
                       </label>
                     </div>
@@ -1246,7 +1247,7 @@
                   </div>
                   <div class="form-group" style="margin-bottom: 8px;">
                     <label style="font-size: 0.85rem;">Observação</label>
-                    <select id="loteObs" style="padding: 6px;">
+                    <select id="loteObs" style="padding: 6px;" onchange="aplicarBloqueioLote()">
                       <option value="">Selecione...</option>
                     </select>
                   </div>
@@ -1261,6 +1262,7 @@
               <!-- Lista de Itens do Lote -->
               <div style="background: #fff8e1; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
                 <h4 style="margin: 0 0 10px 0; color: #f57c00;">📋 Itens do Lote</h4>
+                <div id="avisoBloqueioLote" style="display: none; margin-bottom: 10px;"></div>
                 <div id="loteItensContainer">
                   <!-- Itens serão adicionados aqui -->
                 </div>
@@ -2668,14 +2670,265 @@
       console.log('Autocomplete aplicado - itens:', (data.items || []).length, ', grupos:', (data.groups || []).length);
     }
 
+    // ===== BLOQUEIO POR ATUALIZAÇÃO (validade de 20 dias) =====
+    // O servidor é a autoridade; aqui só se antecipa o aviso e se trava o botão Confirmar.
+    var BLOQUEIO_TTL_MS = 120000; // passou disso, a resposta do servidor é considerada velha e reconsultada
+    var bloqueioEstoque = { item: '', bloqueado: false, bloqueio: null, ts: 0 };
+
+    // Qualquer falha na parte de bloqueio é só registrada: nunca pode quebrar o lançamento
+    function tentarBloqueio(fn) {
+      try { fn(); } catch (e) { console.log('Bloqueio por atualização (ignorado):', e); }
+    }
+
+    function limparEstadoBloqueioEstoque() {
+      bloqueioEstoque = { item: '', bloqueado: false, bloqueio: null, ts: 0 };
+      tentarBloqueio(aplicarBloqueioEstoque);
+    }
+
+    function normalizarObsBloqueio(obs) {
+      return String(obs || '').toUpperCase()
+        .replace(/[\u00C0-\u00C5]/g, 'A').replace(/\u00C7/g, 'C')
+        .replace(/[\u00C8-\u00CB]/g, 'E').replace(/[\u00CC-\u00CF]/g, 'I')
+        .replace(/[\u00D2-\u00D6]/g, 'O').replace(/[\u00D9-\u00DC]/g, 'U')
+        .replace(/[^A-Z0-9]+/g, ' ').trim();
+    }
+
+    // Obs que liberam um item bloqueado (mesma lista do servidor)
+    function obsLiberaBloqueio(obs) {
+      return ['ATUALIZACAO', 'ACERTO', 'ATUAL SAIDA'].indexOf(normalizarObsBloqueio(obs)) >= 0;
+    }
+
+    // Obs que dispensam o valor unitário
+    function obsSemValorUnitario(obs) {
+      return ['ATUALIZACAO', 'ATUAL SAIDA'].indexOf(normalizarObsBloqueio(obs)) >= 0;
+    }
+
+    function escHtmlBloqueio(texto) {
+      return String(texto == null ? '' : texto)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // Consulta o servidor (uma vez por item digitado) e atualiza o aviso
+    function verificarBloqueioEstoque(nomeItem) {
+      const item = (nomeItem || '').trim();
+      if (!item) {
+        limparEstadoBloqueioEstoque();
+        return;
+      }
+      if (bloqueioEstoque.item.toUpperCase() === item.toUpperCase() && (Date.now() - bloqueioEstoque.ts) < BLOQUEIO_TTL_MS) {
+        aplicarBloqueioEstoque();
+        return;
+      }
+      // Item diferente do último consultado (ou resposta velha): some com o aviso até a resposta chegar
+      limparEstadoBloqueioEstoque();
+      google.script.run
+        .withSuccessHandler(function(res) {
+          // Ignora resposta atrasada se o usuário já trocou de item
+          if (document.getElementById('estoqueItem').value.trim().toUpperCase() !== item.toUpperCase()) return;
+          bloqueioEstoque = {
+            item: item,
+            bloqueado: !!(res && res.bloqueado),
+            bloqueio: (res && res.bloqueio) || null,
+            ts: Date.now()
+          };
+          tentarBloqueio(aplicarBloqueioEstoque);
+        })
+        .withFailureHandler(function(err) {
+          console.log('Erro ao verificar bloqueio de atualização:', err);
+        })
+        .verificarBloqueioItemWebApp(item);
+    }
+
+    // Mostra/oculta o aviso vermelho e trava o Confirmar enquanto a obs não liberar o item
+    function aplicarBloqueioEstoque() {
+      const aviso = document.getElementById('avisoBloqueioAtualizacao');
+      const btn = document.getElementById('btnConfirmarEstoque');
+      if (!aviso || !btn) return;
+
+      // Resposta velha (ex.: a atualização foi lançada por outro caminho): descarta e reconsulta
+      if (bloqueioEstoque.bloqueado && (Date.now() - bloqueioEstoque.ts) >= BLOQUEIO_TTL_MS) {
+        const itemAtual = document.getElementById('estoqueItem').value;
+        limparEstadoBloqueioEstoque();
+        verificarBloqueioEstoque(itemAtual);
+        return;
+      }
+
+      const obs = document.getElementById('estoqueObs').value;
+      const saidaDigitada = parseFloat(document.getElementById('estoqueSaida').value) || 0;
+      // Só SAÍDA é bloqueada; entrada passa livre
+      const itemBloqueado = bloqueioEstoque.bloqueado && !obsLiberaBloqueio(obs);
+
+      if (itemBloqueado) {
+        const motivo = bloqueioEstoque.bloqueio && bloqueioEstoque.bloqueio.motivo
+          ? escHtmlBloqueio(bloqueioEstoque.bloqueio.motivo) : 'sem ATUALIZAÇÃO nos últimos 20 dias';
+        const comoLiberar = 'selecione em Observação <strong>ATUALIZAÇÃO</strong>, <strong>ACERTO</strong> ou ' +
+          '<strong>ATUAL. SAIDA</strong> e informe a contagem física.';
+
+        if (saidaDigitada > 0) {
+          // Saída digitada: bloqueio de fato (vermelho, Confirmar travado)
+          aviso.innerHTML =
+            '<strong>🚫 SAÍDA BLOQUEADA - ' + motivo + '</strong><br>' +
+            'O saldo deste item não está conferido. Para lançar a saída, ' + comoLiberar;
+          aviso.style.background = '#ffebee';
+          aviso.style.borderColor = '#f44336';
+          aviso.style.color = '#c62828';
+          btn.disabled = true;
+        } else {
+          // Ainda sem saída: só informa já na seleção do item (entrada segue livre)
+          aviso.innerHTML =
+            '<strong>⚠️ SAÍDAS BLOQUEADAS PARA ESTE ITEM - ' + motivo + '</strong><br>' +
+            'Entradas seguem livres. Para lançar uma saída, ' + comoLiberar;
+          aviso.style.background = '#fff3cd';
+          aviso.style.borderColor = '#ffc107';
+          aviso.style.color = '#856404';
+          btn.disabled = false;
+        }
+        aviso.style.display = 'block';
+      } else {
+        aviso.style.display = 'none';
+        aviso.innerHTML = '';
+        btn.disabled = false;
+      }
+    }
+
+    // ===== Lote: aviso por linha ANTES do envio (a saída não é impedida, só sinalizada) =====
+    var bloqueioLoteCache = {}; // NOME EM MAIÚSCULAS -> { bloqueado, bloqueio, ts }
+
+    // Consulta o servidor só para os itens ainda não conhecidos (ou com cache vencido)
+    function consultarBloqueioLote(nomes, aoTerminar) {
+      const agora = Date.now();
+      const pendentes = nomes.filter(function(n) {
+        const c = bloqueioLoteCache[n];
+        return n && (!c || (agora - c.ts) > BLOQUEIO_TTL_MS);
+      });
+      if (pendentes.length === 0) {
+        if (aoTerminar) aoTerminar();
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(function(res) {
+          const achados = (res && res.bloqueados) || {};
+          pendentes.forEach(function(n) {
+            bloqueioLoteCache[n] = { bloqueado: !!achados[n], bloqueio: achados[n] || null, ts: Date.now() };
+          });
+          if (aoTerminar) aoTerminar();
+        })
+        .withFailureHandler(function(err) {
+          console.log('Erro ao verificar bloqueio do lote:', err);
+          if (aoTerminar) aoTerminar();
+        })
+        .verificarBloqueioItensWebApp(pendentes);
+    }
+
+    // Só vale para lote de SAÍDA com obs que não libera
+    function loteSujeitoAoBloqueio() {
+      const marcado = document.querySelector('input[name="loteOperacao"]:checked');
+      return !!marcado && marcado.value === 'saida' && !obsLiberaBloqueio(document.getElementById('loteObs').value);
+    }
+
+    function bloqueioLoteDoItem(nomeUpper) {
+      const c = bloqueioLoteCache[nomeUpper];
+      return (c && c.bloqueado) ? c.bloqueio : null;
+    }
+
+    // Marca em vermelho as linhas cuja saída será recusada e mostra o resumo acima da lista
+    function aplicarBloqueioLote() {
+      const resumo = document.getElementById('avisoBloqueioLote');
+      if (!resumo) return;
+      const sujeito = loteSujeitoAoBloqueio();
+      const recusados = [];
+
+      document.querySelectorAll('#loteItensContainer .lote-item-row').forEach(function(row) {
+        const nome = row.querySelector('.lote-item-nome').value.trim().toUpperCase();
+        const aviso = row.querySelector('.lote-item-bloqueio-aviso');
+        const b = (sujeito && nome) ? bloqueioLoteDoItem(nome) : null;
+        if (b) {
+          recusados.push(b);
+          row.style.background = '#ffebee';
+          row.style.outline = '2px solid #f44336';
+          if (aviso) {
+            aviso.textContent = '🚫 Saída será recusada: ' + b.motivo;
+            aviso.style.display = 'block';
+          }
+        } else {
+          row.style.background = '';
+          row.style.outline = '';
+          if (aviso) {
+            aviso.textContent = '';
+            aviso.style.display = 'none';
+          }
+        }
+      });
+
+      if (recusados.length > 0) {
+        resumo.innerHTML = htmlItensRecusados(recusados, true);
+        resumo.style.display = 'block';
+      } else {
+        resumo.innerHTML = '';
+        resumo.style.display = 'none';
+      }
+    }
+
+    // No modal de confirmação do lote: marca as linhas que serão recusadas
+    function marcarBloqueadosModalLote(obs) {
+      const marcado = document.querySelector('input[name="loteOperacao"]:checked');
+      if (!marcado || marcado.value !== 'saida' || obsLiberaBloqueio(obs)) return;
+
+      const recusados = [];
+      itensParaConfirmarLote.forEach(function(item, idx) {
+        const b = bloqueioLoteDoItem(String(item.item).trim().toUpperCase());
+        if (!b) return;
+        recusados.push(b);
+        const row = document.querySelector('.confirm-item-row-lote[data-index="' + idx + '"]');
+        if (!row) return;
+        row.style.background = '#ffebee';
+        row.style.borderLeft = '4px solid #f44336';
+        const nomeEl = row.querySelector('.item-nome');
+        if (nomeEl) {
+          nomeEl.insertAdjacentHTML('beforeend',
+            '<span style="background: #f44336; color: #fff; border-radius: 3px; padding: 1px 6px; font-size: 0.7rem; margin-left: 6px;">SERÁ RECUSADO</span>');
+        }
+      });
+
+      if (recusados.length > 0) {
+        document.getElementById('infoLoteModal').insertAdjacentHTML('beforeend', htmlItensRecusados(recusados, true));
+      }
+    }
+
+    // HTML da lista de saídas recusadas (lote parcial). previa=true: aviso ANTES do envio ("serão recusadas")
+    function htmlItensRecusados(bloqueados, previa) {
+      if (!bloqueados || bloqueados.length === 0) return '';
+      const titulo = previa ? 'SAÍDA(S) SERÁ(Ã) RECUSADA(S)' : 'SAÍDA(S) RECUSADA(S)';
+      const rodape = previa
+        ? 'Para liberar, escolha em Observação ATUALIZAÇÃO, ACERTO ou ATUAL. SAIDA. Os demais itens serão gravados normalmente.'
+        : 'Lance ATUALIZAÇÃO, ACERTO ou ATUAL. SAIDA para esses itens e reenvie <u>somente eles</u>.';
+      return '<div style="margin-top: 10px; background: #ffebee; color: #c62828; border: 2px solid #f44336; border-radius: 6px; padding: 10px;">' +
+        '<strong>🚫 ' + bloqueados.length + ' ' + titulo + ' - item sem ATUALIZAÇÃO nos últimos 20 dias</strong>' +
+        '<ul style="margin: 6px 0 0 18px;">' +
+        bloqueados.map(function(b) {
+          return '<li><strong>' + escHtmlBloqueio(b.item) + '</strong> - ' + escHtmlBloqueio(b.motivo) + '</li>';
+        }).join('') +
+        '</ul>' +
+        '<div style="margin-top: 6px;">' + rodape + '</div>' +
+        '</div>';
+    }
+
+    // Mensagem de recusa que NÃO some sozinha (showMessage apaga em 5s)
+    function mostrarRecusaPersistente(elementId, texto) {
+      const el = document.getElementById(elementId);
+      if (!el) return;
+      el.textContent = texto;
+      el.className = 'message error show';
+    }
+
     // Toggle valor unitário visibility based on rules
     function toggleValorUnitario() {
-      const obs = document.getElementById('estoqueObs').value.toUpperCase();
+      const obs = document.getElementById('estoqueObs').value;
       const valorGroup = document.getElementById('valorUnitarioGroup');
       const valorInput = document.getElementById('estoqueValorUnitario');
 
-      // Regra: Valor unitário obrigatório SE obs ≠ "ATUALIZAÇÃO"
-      if (obs !== 'ATUALIZAÇÃO') {
+      // Regra: Valor unitário obrigatório SE obs ≠ "ATUALIZAÇÃO" / "ATUAL. SAIDA"
+      if (!obsSemValorUnitario(obs)) {
         valorGroup.style.display = 'block';
         valorInput.required = true;
       } else {
@@ -2683,6 +2936,8 @@
         valorInput.required = false;
         valorInput.value = ''; // Limpa o valor
       }
+
+      tentarBloqueio(aplicarBloqueioEstoque);
     }
 
     // Timeout para verificação de item novo (evita disparar durante seleção do autocomplete)
@@ -2748,11 +3003,15 @@
           grupoContainer.style.background = '';
           grupoContainer.style.padding = '';
           grupoContainer.style.border = '';
+          tentarBloqueio(function() { verificarBloqueioEstoque(''); });
           return;
         }
 
         // Pré-carrega o saldo do item em background (para acelerar resultado)
         preCarregarSaldo(itemInput.value.trim());
+
+        // Avisa já na digitação se o item está bloqueado por falta de ATUALIZAÇÃO
+        tentarBloqueio(function() { verificarBloqueioEstoque(itemInput.value); });
 
         // Verifica se item existe na lista de autocomplete
         const itemExiste = autocompleteData && autocompleteData.items &&
@@ -3143,6 +3402,9 @@
         itemInput.addEventListener('change', function() {
           const item = this.value;
           if (item) {
+            // Avisa na hora (seleção no autocomplete dispara 'change', não 'blur') se as saídas do item estão bloqueadas
+            tentarBloqueio(function() { verificarBloqueioEstoque(item); });
+
             google.script.run
               .withSuccessHandler(function(result) {
                 if (result.lastGroup) {
@@ -3226,15 +3488,22 @@
         return false;
       }
 
-      // Validação de valor unitário (regra: obrigatório se obs ≠ "ATUALIZAÇÃO")
+      // Validação de valor unitário (regra: obrigatório se obs ≠ "ATUALIZAÇÃO" / "ATUAL. SAIDA")
       const valorUnitario = parseFloat(formData.valorUnitario) || 0;
-      if (formData.obs.toUpperCase() !== 'ATUALIZAÇÃO' && valorUnitario <= 0) {
-        showMessage('estoqueMessage', 'Valor unitário é obrigatório (exceto quando Obs = ATUALIZAÇÃO).', 'error');
+      if (!obsSemValorUnitario(formData.obs) && valorUnitario <= 0) {
+        showMessage('estoqueMessage', 'Valor unitário é obrigatório (exceto quando Obs = ATUALIZAÇÃO ou ATUAL. SAIDA).', 'error');
         return false;
       }
 
       // Verifica se é item novo
       const nomeItemUpper = formData.item.trim().toUpperCase();
+
+      // Saída de item bloqueado: só segue com ATUALIZAÇÃO / ACERTO / ATUAL. SAIDA (servidor revalida)
+      if (saida > 0 && bloqueioEstoque.bloqueado && (Date.now() - bloqueioEstoque.ts) < BLOQUEIO_TTL_MS &&
+          bloqueioEstoque.item.toUpperCase() === nomeItemUpper && !obsLiberaBloqueio(formData.obs)) {
+        tentarBloqueio(aplicarBloqueioEstoque);
+        return false;
+      }
       const isItemNovo = !(autocompleteData && autocompleteData.items &&
         autocompleteData.items.some(item => item.toUpperCase() === nomeItemUpper));
 
@@ -3320,6 +3589,16 @@
             clearClientCache();
             loadDashboardData();
             loadAutocompleteData();
+          } else if (result.bloqueado) {
+            // Servidor recusou (ex.: a pré-checagem da tela estava desatualizada): fixa o aviso e trava o botão
+            bloqueioEstoque = {
+              item: formData.item.trim(),
+              bloqueado: true,
+              bloqueio: (result.bloqueados && result.bloqueados[0]) || null,
+              ts: Date.now()
+            };
+            tentarBloqueio(aplicarBloqueioEstoque);
+            mostrarRecusaPersistente('estoqueMessage', result.message);
           } else {
             showMessage('estoqueMessage', result.message || 'Erro ao inserir estoque', 'error');
           }
@@ -3362,6 +3641,10 @@
       // Esconde campos condicionais
       document.getElementById('valorUnitarioGroup').style.display = 'none';
       document.getElementById('estoqueHistorico').style.display = 'none';
+
+      // Limpa o estado de bloqueio por ATUALIZAÇÃO (religa o botão Confirmar)
+      bloqueioLoteCache = {}; // um lançamento pode ter renovado a ATUALIZAÇÃO de algum item
+      limparEstadoBloqueioEstoque();
 
       // Limpa avisos de item novo
       document.getElementById('avisoItemNovoEstoque').style.display = 'none';
@@ -3729,6 +4012,7 @@
             document.getElementById('nfFormArea').style.display = 'none';
             document.getElementById('nfResultArea').style.display = 'block';
 
+            limparEstadoBloqueioEstoque(); // a NF pode ter sido lançada com obs de atualização
             // Mostra mensagem e tabela de itens inseridos
             document.getElementById('nfResultMessage').innerHTML =
               '<strong>' + itensParaEnviar.length + '</strong> item(ns) inserido(s) com sucesso na NF <strong>' + nfNumero + '</strong>';
@@ -3870,9 +4154,10 @@
       itemDiv.innerHTML = `
         <div class="form-group" style="margin-bottom: 0;">
           <label style="font-size: 0.75rem;">Produto *</label>
-          <input type="text" class="lote-item-nome" list="loteItemDatalist-${loteItemCounter}" required style="padding: 6px;" placeholder="Nome do produto" onblur="verificarItemNovoLote(this, ${loteItemCounter})">
+          <input type="text" class="lote-item-nome" list="loteItemDatalist-${loteItemCounter}" required style="padding: 6px;" placeholder="Nome do produto" onblur="verificarItemNovoLote(this, ${loteItemCounter})" onchange="verificarItemNovoLote(this, ${loteItemCounter})">
           <datalist id="loteItemDatalist-${loteItemCounter}"></datalist>
           <small class="lote-item-novo-aviso" style="display: none; color: #dc3545; font-size: 0.7rem;">⚠️ Item NOVO!</small>
+          <small class="lote-item-bloqueio-aviso" style="display: none; color: #c62828; font-size: 0.7rem; font-weight: 600;"></small>
         </div>
         <div class="form-group" style="margin-bottom: 0;">
           <label style="font-size: 0.75rem;">${labelQtd}</label>
@@ -3906,6 +4191,7 @@
 
         if (!nomeItem) {
           avisoNovo.style.display = 'none';
+          tentarBloqueio(aplicarBloqueioLote);
           return;
         }
 
@@ -3917,6 +4203,9 @@
         } else {
           avisoNovo.style.display = 'none';
         }
+
+        // Sinaliza na linha se a saída deste item será recusada por falta de ATUALIZAÇÃO
+        tentarBloqueio(function() { consultarBloqueioLote([nomeItem], aplicarBloqueioLote); });
       }, 400);
     }
 
@@ -3926,6 +4215,7 @@
       if (itemDiv) {
         itemDiv.remove();
       }
+      tentarBloqueio(aplicarBloqueioLote);
     }
 
     // Limpa formulário do lote
@@ -3937,6 +4227,8 @@
       document.getElementById('loteNF').value = '';
       document.getElementById('loteItensContainer').innerHTML = '';
       loteItemCounter = 0;
+      bloqueioLoteCache = {};
+      tentarBloqueio(aplicarBloqueioLote);
       showMessage('estoqueLoteMessage', '', '');
     }
 
@@ -4064,6 +4356,19 @@
       // Mostra modal (mantém loading até carregar saldos)
       document.getElementById('modalConfirmacaoLote').classList.add('show');
 
+      // Marca no modal as saídas que serão recusadas (depois da lista pronta; consulta só o que não está em cache)
+      tentarBloqueio(function() {
+        consultarBloqueioLote(
+          itensParaConfirmarLote.map(function(it) { return String(it.item).trim().toUpperCase(); }),
+          function() {
+            tentarBloqueio(function() {
+              marcarBloqueadosModalLote(obs);
+              aplicarBloqueioLote();
+            });
+          }
+        );
+      });
+
       // Busca saldos de todos os itens
       carregarSaldosLote(operacao);
     }
@@ -4180,11 +4485,16 @@
             document.getElementById('estoqueLoteArea').style.display = 'none';
             document.getElementById('estoqueLoteResultArea').style.display = 'block';
 
+            bloqueioLoteCache = {}; // atualizações gravadas neste lote renovam o prazo dos itens
+            limparEstadoBloqueioEstoque();
             const tipoOp = operacao === 'entrada' ? 'ENTRADAS' : 'SAÍDAS';
-            const itemText = itensParaEnviar.length === 1 ? 'ITEM' : 'ITENS';
+            // Só conta o que foi gravado (itens recusados por falta de ATUALIZAÇÃO ficam de fora)
+            const qtdInseridosLote = (result.itensProcessados || itensParaEnviar).length;
+            const itemText = qtdInseridosLote === 1 ? 'ITEM' : 'ITENS';
             document.getElementById('estoqueLoteResultMessage').innerHTML =
-              '<strong style="font-size: 1.2rem;">✅ ' + itensParaEnviar.length + ' ' + itemText + ' INSERIDO(S) COM SUCESSO NO SISTEMA DE ESTOQUE!</strong><br>' +
-              '<span style="font-size: 0.95rem;">Operação: ' + tipoOp + '</span>';
+              '<strong style="font-size: 1.2rem;">✅ ' + qtdInseridosLote + ' ' + itemText + ' INSERIDO(S) COM SUCESSO NO SISTEMA DE ESTOQUE!</strong><br>' +
+              '<span style="font-size: 0.95rem;">Operação: ' + tipoOp + '</span>' +
+              htmlItensRecusados(result.bloqueados);
 
             // Mostra tabela com saldos
             mostrarTabelaSaldosLote(result.itensProcessados || itensParaEnviar, operacao);
@@ -4195,6 +4505,8 @@
             loadAutocompleteData();
 
             showMessage('estoqueLoteMessage', '', '');
+          } else if (result.bloqueado) {
+            mostrarRecusaPersistente('estoqueLoteMessage', result.message);
           } else {
             showMessage('estoqueLoteMessage', result.message || 'Erro ao inserir itens', 'error');
           }

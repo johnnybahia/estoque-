@@ -216,10 +216,161 @@ function getOrCreateIndiceItensSheet() {
     // códigos tipo "6300/1" em data/número ao gravar via setValues()
     sheet.getRange(2, 1, sheet.getMaxRows() - 1, 1).setNumberFormat("@");
 
+    _garantirColunaAtualizacaoIndice(sheet);
+
     Logger.log("Aba ÍNDICE_ITENS criada com sucesso");
   }
 
   return sheet;
+}
+
+// ========================================
+// BLOQUEIO POR ATUALIZAÇÃO (validade de 20 dias) — SÓ PARA SAÍDAS
+// A saída do item só é aceita se ele teve ATUALIZAÇÃO / ACERTO / ATUAL. SAIDA nos
+// últimos 20 dias — ou se a própria saída é uma dessas observações.
+// Entradas (NF, lote de entrada, entrada unitária) não são bloqueadas.
+// A data da última atualização fica na coluna G da aba ÍNDICE_ITENS.
+// A regra só passa a valer depois de rodar reconstruirIndiceCompleto()
+// (que preenche a coluna G e liga a flag BLOQUEIO_ATUALIZACAO_ATIVO).
+// Para desligar: apague essa propriedade do script.
+// ========================================
+var DIAS_VALIDADE_ATUALIZACAO = 20;
+var OBS_LIBERA_BLOQUEIO = ["ATUALIZACAO", "ACERTO", "ATUAL SAIDA"];
+var PROP_BLOQUEIO_ATIVO = "BLOQUEIO_ATUALIZACAO_ATIVO";
+var COL_INDICE_ULT_ATUALIZACAO = 7;
+
+/**
+ * _garantirColunaAtualizacaoIndice: cabeçalho, largura e formato texto da coluna G.
+ * Texto puro evita o Sheets reinterpretar "dd/MM/yyyy HH:mm:ss" conforme o locale.
+ */
+function _garantirColunaAtualizacaoIndice(sheet) {
+  if (sheet.getMaxColumns() < COL_INDICE_ULT_ATUALIZACAO) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), COL_INDICE_ULT_ATUALIZACAO - sheet.getMaxColumns());
+  }
+  var cab = sheet.getRange(1, COL_INDICE_ULT_ATUALIZACAO);
+  cab.setValue("Últ. ATUALIZAÇÃO (Obs)");
+  cab.setFontWeight("bold").setBackground("#4285f4").setFontColor("white");
+  sheet.setColumnWidth(COL_INDICE_ULT_ATUALIZACAO, 170);
+  if (sheet.getMaxRows() > 1) {
+    sheet.getRange(2, COL_INDICE_ULT_ATUALIZACAO, sheet.getMaxRows() - 1, 1).setNumberFormat("@");
+  }
+}
+
+/**
+ * _normalizarObs: maiúsculas, sem acento e sem pontuação ("ATUAL. SAÍDA" -> "ATUAL SAIDA").
+ * Escapes \u mantêm o arquivo ASCII-safe.
+ */
+function _normalizarObs(obs) {
+  return String(obs === null || obs === undefined ? "" : obs).toUpperCase()
+    .replace(/[\u00C0-\u00C5]/g, "A").replace(/\u00C7/g, "C")
+    .replace(/[\u00C8-\u00CB]/g, "E").replace(/[\u00CC-\u00CF]/g, "I")
+    .replace(/[\u00D2-\u00D6]/g, "O").replace(/[\u00D9-\u00DC]/g, "U")
+    .replace(/[^A-Z0-9]+/g, " ").replace(/^ +| +$/g, "");
+}
+
+/** _obsLiberaBloqueio: texto EXATO (normalizado) — nome de fornecedor "ATUAL ..." não libera. */
+function _obsLiberaBloqueio(obs) {
+  return OBS_LIBERA_BLOQUEIO.indexOf(_normalizarObs(obs)) >= 0;
+}
+
+/** _bloqueioAtivo: lê a flag uma vez por execução. */
+function _bloqueioAtivo() {
+  if (_bloqueioAtivo._v === undefined) {
+    _bloqueioAtivo._v = PropertiesService.getScriptProperties().getProperty(PROP_BLOQUEIO_ATIVO) === "1";
+  }
+  return _bloqueioAtivo._v;
+}
+
+/** _diasDesde: dias corridos (por data, sem hora) entre dataStr (dd/mm/aaaa...) e hoje. null se inválida. */
+function _diasDesde(dataStr, agora) {
+  var d = parseDateString(dataStr);
+  if (!d || isNaN(d.getTime())) return null;
+  var hoje = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate());
+  return Math.round((hoje.getTime() - d.getTime()) / 86400000);
+}
+
+/**
+ * _bloqueioItem: null se o lançamento pode seguir; objeto {item, ultimaAtualizacao, dias, motivo} se bloqueado.
+ * Só SAÍDAS são bloqueadas (consumo de pedido calculado sobre saldo não conferido).
+ * Entradas (NF, lote de entrada, entrada unitária) nunca são bloqueadas.
+ * Item novo (sem entrada no índice) nunca é bloqueado.
+ */
+function _bloqueioItem(indice, itemNome, obs, agora, saida) {
+  try {
+    if (!(saida > 0)) return null;
+    if (!itemNome || !_bloqueioAtivo()) return null;
+    var entrada = indice ? indice[itemNome.toString().trim().toUpperCase()] : null;
+    if (!entrada) return null;
+    if (_obsLiberaBloqueio(obs)) return null;
+
+    // "ua" = data (dd/mm/aaaa) da última atualização; nome curto para o índice em cache caber no limite de 100 KB
+    var ult = entrada.ua ? entrada.ua.toString() : "";
+    var dias = ult ? _diasDesde(ult, agora) : null;
+    if (dias !== null && dias <= DIAS_VALIDADE_ATUALIZACAO) return null;
+
+    var motivo;
+    if (!ult) motivo = "sem ATUALIZAÇÃO registrada";
+    else if (dias === null) motivo = "data da última ATUALIZAÇÃO inválida (" + ult + ")";
+    else motivo = "sem ATUALIZAÇÃO há " + dias + " dias (desde " + ult.split(" ")[0] + ")";
+
+    return { item: itemNome, ultimaAtualizacao: ult ? ult.split(" ")[0] : null, dias: dias, motivo: motivo };
+  } catch (e) {
+    // Falha na regra NUNCA pode impedir um lançamento: libera e registra no log
+    Logger.log("_bloqueioItem: ERRO (lançamento liberado): " + e);
+    return null;
+  }
+}
+
+/** _respostaBloqueio: resposta padrão quando nenhum item do pedido pôde ser gravado. */
+function _respostaBloqueio(bloqueados) {
+  var nomes = bloqueados.map(function(b) { return b.item + " (" + b.motivo + ")"; }).join("; ");
+  return {
+    success: false,
+    bloqueado: true,
+    bloqueados: bloqueados,
+    message: "🚫 SAÍDA RECUSADA (validade de " + DIAS_VALIDADE_ATUALIZACAO + " dias): " + nomes +
+      ". Lance uma ATUALIZAÇÃO, ACERTO ou ATUAL. SAIDA para o item antes de continuar."
+  };
+}
+
+/** _anexarBloqueios: em lote parcial, acrescenta os itens recusados ao resultado dos gravados. */
+function _anexarBloqueios(resultado, bloqueados) {
+  if (!bloqueados || bloqueados.length === 0) return resultado;
+  resultado.bloqueados = bloqueados;
+  resultado.message += " | 🚫 SAÍDA(S) RECUSADA(S) por falta de ATUALIZAÇÃO nos últimos " + DIAS_VALIDADE_ATUALIZACAO + " dias: " +
+    bloqueados.map(function(b) { return b.item; }).join(", ");
+  return resultado;
+}
+
+/**
+ * verificarBloqueioItensWebApp: pré-checagem em lote (várias linhas de uma vez).
+ * Retorna { bloqueados: { "NOME EM MAIÚSCULAS": {item, motivo, ...} } } só com os itens que teriam a saída recusada.
+ */
+function verificarBloqueioItensWebApp(itens) {
+  try {
+    var indice = getIndiceItensCache();
+    var agora = new Date();
+    var bloqueados = {};
+    (itens || []).forEach(function(nome) {
+      var b = _bloqueioItem(indice, nome, "", agora, 1); // 1 = "se fosse uma saída"
+      if (b) bloqueados[nome.toString().trim().toUpperCase()] = b;
+    });
+    return { success: true, ativo: _bloqueioAtivo(), bloqueados: bloqueados };
+  } catch (e) {
+    Logger.log("verificarBloqueioItensWebApp: " + e);
+    return { success: false, bloqueados: {}, message: e.message };
+  }
+}
+
+/** verificarBloqueioItemWebApp: pré-checagem da tela (o servidor sempre revalida ao gravar). */
+function verificarBloqueioItemWebApp(item) {
+  try {
+    var bloqueio = _bloqueioItem(getIndiceItensCache(), item, "", new Date(), 1); // 1 = "se fosse uma saída"
+    return { success: true, ativo: _bloqueioAtivo(), bloqueado: !!bloqueio, bloqueio: bloqueio };
+  } catch (e) {
+    Logger.log("verificarBloqueioItemWebApp: " + e);
+    return { success: false, bloqueado: false, message: e.message };
+  }
 }
 
 /**
@@ -261,13 +412,22 @@ function buildIndiceItensInitial() {
     var itemKey = item.toString().trim().toUpperCase();
     var rowNum = i + 2;
 
+    // Última ATUALIZAÇÃO/ACERTO/ATUAL. SAIDA do item (coluna F = Obs, D = Data).
+    // As linhas são cronológicas: a última que qualifica sobrescreve as anteriores.
+    // Item sem nenhuma atualização começa com a data do 1º lançamento (item recém-criado não bloqueia).
+    var ultimaAtualizacao = indiceMap[itemKey] ? indiceMap[itemKey].ultimaAtualizacao : (data[i][3] || '');
+    if (_obsLiberaBloqueio(data[i][5]) && data[i][3]) {
+      ultimaAtualizacao = data[i][3];
+    }
+
     // Mantém sempre o ÚLTIMO registro de cada item
     indiceMap[itemKey] = {
       item: data[i][1],           // Item original (com case)
       saldo: data[i][9],          // Coluna J - Saldo
       data: data[i][3],           // Coluna D - Data
       grupo: data[i][0],          // Coluna A - Grupo
-      linha: rowNum
+      linha: rowNum,
+      ultimaAtualizacao: ultimaAtualizacao
     };
   }
 
@@ -285,24 +445,31 @@ function buildIndiceItensInitial() {
       item.data,
       item.grupo,
       item.linha,
-      now
+      now,
+      item.ultimaAtualizacao || ''
     ]);
   }
 
   // Limpa conteúdo anterior (mantém cabeçalho)
   var lastRowIndice = sheetIndice.getLastRow();
   if (lastRowIndice > 1) {
-    sheetIndice.getRange(2, 1, lastRowIndice - 1, 6).clear();
+    sheetIndice.getRange(2, 1, lastRowIndice - 1, COL_INDICE_ULT_ATUALIZACAO).clear();
   }
 
   // CORREÇÃO: garante texto na coluna Item antes de gravar (reconstrução completa)
   sheetIndice.getRange(2, 1, sheetIndice.getMaxRows() - 1, 1).setNumberFormat("@");
 
+  // Coluna G (última ATUALIZAÇÃO): cabeçalho + formato texto antes de gravar
+  _garantirColunaAtualizacaoIndice(sheetIndice);
+
   // Escreve TUDO de uma vez (muito mais rápido)
   if (indiceArray.length > 0) {
-    sheetIndice.getRange(2, 1, indiceArray.length, 6).setValues(indiceArray);
+    sheetIndice.getRange(2, 1, indiceArray.length, COL_INDICE_ULT_ATUALIZACAO).setValues(indiceArray);
     Logger.log("Índice escrito na aba ÍNDICE_ITENS: " + indiceArray.length + " linhas");
   }
+
+  // Índice agora tem a coluna G preenchida: liga o bloqueio por ATUALIZAÇÃO
+  PropertiesService.getScriptProperties().setProperty(PROP_BLOQUEIO_ATIVO, "1");
 
   // CRÍTICO: Invalida o cache para forçar reload imediato
   var cache = CacheService.getScriptCache();
@@ -355,7 +522,9 @@ function _loadIndiceItensFromSheet() {
   // corrompida para Data/Número pelo auto-detector do Sheets em alguma gravação
   // anterior. Também evita o problema de objetos Date quebrando o retorno de
   // google.script.run em getLastRegistrationFromIndex.
-  var data = sheetIndice.getRange(2, 1, lastRow - 1, 5).getDisplayValues();
+  // Coluna G (índice 6) = data da última ATUALIZAÇÃO; abas antigas podem não tê-la ainda.
+  var numCols = Math.min(COL_INDICE_ULT_ATUALIZACAO, sheetIndice.getMaxColumns());
+  var data = sheetIndice.getRange(2, 1, lastRow - 1, numCols).getDisplayValues();
   var indice = {};
 
   for (var i = 0; i < data.length; i++) {
@@ -368,7 +537,8 @@ function _loadIndiceItensFromSheet() {
       saldo: _parseNumeroSeguro(data[i][1], 0),
       data: data[i][2] || null,
       grupo: data[i][3],
-      linha: parseInt(data[i][4], 10) || 0
+      linha: parseInt(data[i][4], 10) || 0,
+      ua: (numCols >= COL_INDICE_ULT_ATUALIZACAO && data[i][6]) ? data[i][6].toString().split(' ')[0] : ''
     };
   }
 
@@ -381,7 +551,7 @@ function _loadIndiceItensFromSheet() {
  * Muito rápido: apenas 1 linha atualizada
  * @param {boolean} invalidateCache - Se deve invalidar cache (default: true). Use false em loops batch.
  */
-function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque, invalidateCache) {
+function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque, invalidateCache, obs) {
   // Default: invalida cache (compatibilidade com código existente)
   if (invalidateCache === undefined) {
     invalidateCache = true;
@@ -415,13 +585,22 @@ function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque, invalidate
     var now = new Date();
     var rowData = [itemName, saldo, data, grupo, linhaEstoque, now];
 
+    // Só uma obs de ATUALIZAÇÃO/ACERTO/ATUAL. SAIDA renova a coluna G; as demais preservam o valor.
+    // Item novo no índice começa com o primeiro lançamento como marco (relógio de 20 dias).
+    var agoraFmt = Utilities.formatDate(now, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss");
+    var dataAtualizacao = _obsLiberaBloqueio(obs) ? agoraFmt : '';
+
     if (itemRow > 0) {
-      // Atualiza linha existente
+      // Atualiza linha existente (A:F); G só é tocada quando há nova ATUALIZAÇÃO
       sheetIndice.getRange(itemRow, 1, 1, 6).setValues([rowData]);
+      if (dataAtualizacao) {
+        sheetIndice.getRange(itemRow, COL_INDICE_ULT_ATUALIZACAO).setNumberFormat("@").setValue(dataAtualizacao);
+      }
     } else {
       // Adiciona novo item
       var nextRow = memo.nextRow;
       sheetIndice.getRange(nextRow, 1, 1, 6).setValues([rowData]);
+      sheetIndice.getRange(nextRow, COL_INDICE_ULT_ATUALIZACAO).setNumberFormat("@").setValue(dataAtualizacao || agoraFmt);
       memo.mapa[itemKey] = nextRow;
       memo.nextRow = nextRow + 1;
     }
@@ -1127,6 +1306,13 @@ function processEstoqueWebApp(formData) {
       return { success: false, message: "Informe uma entrada ou saída" };
     }
 
+    // BLOQUEIO: SAÍDA de item sem ATUALIZAÇÃO nos últimos 20 dias só passa com obs ATUALIZAÇÃO/ACERTO/ATUAL. SAIDA
+    var bloqueioItem = _bloqueioItem(getIndiceItensCache(), formData.item, formData.obs, new Date(), saida);
+    if (bloqueioItem) {
+      Logger.log("processEstoqueWebApp: BLOQUEADO - " + formData.item + " - " + bloqueioItem.motivo);
+      return _respostaBloqueio([bloqueioItem]);
+    }
+
     // Chama a função original processEstoque
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheetEstoque = ss.getSheetByName("ESTOQUE");
@@ -1253,7 +1439,7 @@ function processEstoqueWebApp(formData) {
     }
 
     // OTIMIZAÇÃO: Atualiza o índice com o novo registro
-    updateIndiceItem(formData.item, newSaldo, now, formData.group, nextRow);
+    updateIndiceItem(formData.item, newSaldo, now, formData.group, nextRow, true, formData.obs);
     Logger.log("processEstoqueWebApp: Índice atualizado para item " + formData.item);
 
     // Invalida caches (padrão e otimizado)
@@ -1294,6 +1480,7 @@ function processMultipleEstoqueItems(itens) {
     var user = getLoggedUser();
     var processados = 0;
     var erros = [];
+    var bloqueados = [];
 
     PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
 
@@ -1309,6 +1496,13 @@ function processMultipleEstoqueItems(itens) {
 
       try {
         var itemKey = itemData.item.toString().trim().toUpperCase();
+
+        // BLOQUEIO: recusa só a SAÍDA de item sem ATUALIZAÇÃO nos últimos 20 dias
+        var bloqueioItem = _bloqueioItem(indice, itemData.item, itemData.obs, now, parseFloat(itemData.saida) || 0);
+        if (bloqueioItem) {
+          bloqueados.push(bloqueioItem);
+          continue;
+        }
 
         // OTIMIZAÇÃO: Busca no índice ao invés de ler planilha
         var grupoItem = '';
@@ -1344,7 +1538,8 @@ function processMultipleEstoqueItems(itens) {
           entrada: entrada,
           item: itemData.item,
           newSaldo: newSaldo,
-          grupo: grupoItem
+          grupo: grupoItem,
+          obs: itemData.obs
         });
 
         processados++;
@@ -1378,12 +1573,17 @@ function processMultipleEstoqueItems(itens) {
           now,
           rowsToInsert[i].grupo,
           currentRow,
-          false  // ✅ Não invalida cache aqui (batch)
+          false,  // ✅ Não invalida cache aqui (batch)
+          rowsToInsert[i].obs
         );
       }
     }
 
     PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
+
+    if (processados === 0 && erros.length === 0 && bloqueados.length > 0) {
+      return _respostaBloqueio(bloqueados);
+    }
 
     // Invalida caches UMA VEZ no final (OTIMIZADO!)
     invalidateCache();
@@ -1391,16 +1591,16 @@ function processMultipleEstoqueItems(itens) {
     backupEstoqueData();
 
     if (erros.length > 0) {
-      return {
+      return _anexarBloqueios({
         success: processados > 0,
         message: "Processados: " + processados + "/" + itens.length + ". Erros: " + erros.join("; ")
-      };
+      }, bloqueados);
     }
 
-    return {
+    return _anexarBloqueios({
       success: true,
       message: processados + " item(ns) inserido(s) com sucesso!"
-    };
+    }, bloqueados);
   } catch (error) {
     PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
     Logger.log("Erro processMultipleEstoqueItems: " + error);
@@ -1411,6 +1611,7 @@ function processMultipleEstoqueItems(itens) {
 /**
  * processMultipleEstoqueItemsWithGroup: Processa múltiplos itens de uma NF com grupo especificado
  * Para itens novos, usa o grupo enviado pelo cliente ao invés de buscar na base
+ * Entrada de NF NÃO passa pelo bloqueio por ATUALIZAÇÃO (o bloqueio vale só para saídas).
  * @param {Array} itens - Array de objetos com {item, unidade, nf, obs, entrada, saida, valorUnitario, grupo}
  */
 function processMultipleEstoqueItemsWithGroup(itens) {
@@ -1519,7 +1720,8 @@ function processMultipleEstoqueItemsWithGroup(itens) {
           background: backgroundColor,
           item: itemData.item,
           newSaldo: newSaldo,
-          grupo: grupoItem
+          grupo: grupoItem,
+          obs: itemData.obs
         });
 
         processados++;
@@ -1553,7 +1755,8 @@ function processMultipleEstoqueItemsWithGroup(itens) {
           now,
           rowsToInsert[i].grupo,
           currentRow,
-          false  // ✅ Não invalida cache aqui (batch)
+          false,  // ✅ Não invalida cache aqui (batch)
+          rowsToInsert[i].obs
         );
       }
     }
@@ -1611,6 +1814,7 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
 
     var processados = 0;
     var erros = [];
+    var bloqueados = [];
     var itensProcessados = [];
 
     PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
@@ -1625,6 +1829,14 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
       try {
         var nextRow = sheetEstoque.getLastRow() + 1;
         var itemKey = itemData.item.toString().trim().toUpperCase();
+
+        // BLOQUEIO: recusa só a SAÍDA de item sem ATUALIZAÇÃO nos últimos 20 dias (entrada de lote passa)
+        var bloqueioItem = _bloqueioItem(indice, itemData.item, itemData.obs, now, parseFloat(itemData.saida) || 0);
+        if (bloqueioItem) {
+          Logger.log("processMultipleEstoqueItemsWithSaldos: BLOQUEADO - " + itemData.item + " - " + bloqueioItem.motivo);
+          bloqueados.push(bloqueioItem);
+          continue;
+        }
 
         // OTIMIZAÇÃO: Busca no índice ao invés de ler planilha
         var grupoItem = '';
@@ -1723,7 +1935,8 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
           now,
           grupoItem,
           nextRow,
-          false  // ✅ Não invalida cache aqui (batch)
+          false,  // ✅ Não invalida cache aqui (batch)
+          itemData.obs
         );
 
         // Adiciona ao array de itens processados com os saldos
@@ -1745,6 +1958,10 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
     }
 
     PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
+
+    if (processados === 0 && erros.length === 0 && bloqueados.length > 0) {
+      return _respostaBloqueio(bloqueados);
+    }
 
     // Invalida caches
     invalidateCache();
@@ -1772,20 +1989,20 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
     }
 
     if (erros.length > 0) {
-      return {
+      return _anexarBloqueios({
         success: processados > 0,
         message: "Processados: " + processados + "/" + itens.length + ". Erros: " + erros.join("; "),
         itensProcessados: itensProcessados,
         historicos: historicos
-      };
+      }, bloqueados);
     }
 
-    return {
+    return _anexarBloqueios({
       success: true,
       message: processados + " item(ns) inserido(s) com sucesso!",
       itensProcessados: itensProcessados,
       historicos: historicos
-    };
+    }, bloqueados);
   } catch (error) {
     PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
     Logger.log("Erro processMultipleEstoqueItemsWithSaldos: " + error);
