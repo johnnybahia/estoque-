@@ -332,6 +332,26 @@ function _anexarBloqueios(resultado, bloqueados) {
   return resultado;
 }
 
+/**
+ * verificarBloqueioItensWebApp: pré-checagem em lote (várias linhas de uma vez).
+ * Retorna { bloqueados: { "NOME EM MAIÚSCULAS": {item, motivo, ...} } } só com os itens que teriam a saída recusada.
+ */
+function verificarBloqueioItensWebApp(itens) {
+  try {
+    var indice = getIndiceItensCache();
+    var agora = new Date();
+    var bloqueados = {};
+    (itens || []).forEach(function(nome) {
+      var b = _bloqueioItem(indice, nome, "", agora, 1); // 1 = "se fosse uma saída"
+      if (b) bloqueados[nome.toString().trim().toUpperCase()] = b;
+    });
+    return { success: true, ativo: _bloqueioAtivo(), bloqueados: bloqueados };
+  } catch (e) {
+    Logger.log("verificarBloqueioItensWebApp: " + e);
+    return { success: false, bloqueados: {}, message: e.message };
+  }
+}
+
 /** verificarBloqueioItemWebApp: pré-checagem da tela (o servidor sempre revalida ao gravar). */
 function verificarBloqueioItemWebApp(item) {
   try {
