@@ -2732,15 +2732,17 @@
       if (!aviso || !btn) return;
 
       const obs = document.getElementById('estoqueObs').value;
-      const bloqueia = bloqueioEstoque.bloqueado && !obsLiberaBloqueio(obs);
+      const saidaDigitada = parseFloat(document.getElementById('estoqueSaida').value) || 0;
+      // Só SAÍDA é bloqueada; entrada passa livre
+      const bloqueia = bloqueioEstoque.bloqueado && saidaDigitada > 0 && !obsLiberaBloqueio(obs);
 
       if (bloqueia) {
         const motivo = bloqueioEstoque.bloqueio && bloqueioEstoque.bloqueio.motivo
           ? escHtmlBloqueio(bloqueioEstoque.bloqueio.motivo) : 'sem ATUALIZAÇÃO nos últimos 20 dias';
         aviso.innerHTML =
-          '<strong>🚫 ITEM BLOQUEADO - ' + motivo + '</strong><br>' +
-          'Para lançar este item, selecione em Observação <strong>ATUALIZAÇÃO</strong>, <strong>ACERTO</strong> ou ' +
-          '<strong>ATUAL. SAIDA</strong> e informe a contagem física.';
+          '<strong>🚫 SAÍDA BLOQUEADA - ' + motivo + '</strong><br>' +
+          'O saldo deste item não está conferido. Para lançar a saída, selecione em Observação <strong>ATUALIZAÇÃO</strong>, ' +
+          '<strong>ACERTO</strong> ou <strong>ATUAL. SAIDA</strong> e informe a contagem física.';
         aviso.style.display = 'block';
         btn.disabled = true;
       } else {
@@ -2754,7 +2756,7 @@
     function htmlItensRecusados(bloqueados) {
       if (!bloqueados || bloqueados.length === 0) return '';
       return '<div style="margin-top: 10px; background: #ffebee; color: #c62828; border: 2px solid #f44336; border-radius: 6px; padding: 10px;">' +
-        '<strong>🚫 ' + bloqueados.length + ' ITEM(NS) RECUSADO(S) - sem ATUALIZAÇÃO nos últimos 20 dias</strong>' +
+        '<strong>🚫 ' + bloqueados.length + ' SAÍDA(S) RECUSADA(S) - item sem ATUALIZAÇÃO nos últimos 20 dias</strong>' +
         '<ul style="margin: 6px 0 0 18px;">' +
         bloqueados.map(function(b) {
           return '<li><strong>' + escHtmlBloqueio(b.item) + '</strong> - ' + escHtmlBloqueio(b.motivo) + '</li>';
@@ -3346,8 +3348,8 @@
       // Verifica se é item novo
       const nomeItemUpper = formData.item.trim().toUpperCase();
 
-      // Item bloqueado: só segue com ATUALIZAÇÃO / ACERTO / ATUAL. SAIDA (servidor revalida)
-      if (bloqueioEstoque.bloqueado && bloqueioEstoque.item.toUpperCase() === nomeItemUpper && !obsLiberaBloqueio(formData.obs)) {
+      // Saída de item bloqueado: só segue com ATUALIZAÇÃO / ACERTO / ATUAL. SAIDA (servidor revalida)
+      if (saida > 0 && bloqueioEstoque.bloqueado && bloqueioEstoque.item.toUpperCase() === nomeItemUpper && !obsLiberaBloqueio(formData.obs)) {
         aplicarBloqueioEstoque();
         return false;
       }
@@ -3858,17 +3860,12 @@
             document.getElementById('nfFormArea').style.display = 'none';
             document.getElementById('nfResultArea').style.display = 'block';
 
-            // Itens recusados por falta de ATUALIZAÇÃO não foram gravados: ficam fora da contagem e da tabela
-            const recusadosNF = new Set((result.bloqueados || []).map(function(b) { return String(b.item).trim().toUpperCase(); }));
-            const itensInseridosNF = itensParaEnviar.filter(function(it) { return !recusadosNF.has(String(it.item).trim().toUpperCase()); });
-
             // Mostra mensagem e tabela de itens inseridos
             document.getElementById('nfResultMessage').innerHTML =
-              '<strong>' + itensInseridosNF.length + '</strong> item(ns) inserido(s) com sucesso na NF <strong>' + escHtmlBloqueio(nfNumero) + '</strong>' +
-              htmlItensRecusados(result.bloqueados);
+              '<strong>' + itensParaEnviar.length + '</strong> item(ns) inserido(s) com sucesso na NF <strong>' + nfNumero + '</strong>';
 
             // Mostra tabela com os itens inseridos
-            mostrarTabelaItensInseridos(itensInseridosNF);
+            mostrarTabelaItensInseridos(itensParaEnviar);
 
             // Atualiza cache e autocomplete
             clearClientCache();
@@ -3876,8 +3873,6 @@
             loadAutocompleteData();
 
             showMessage('nfMessage', '', '');
-          } else if (result.bloqueado) {
-            mostrarRecusaPersistente('nfMessage', result.message);
           } else {
             showMessage('nfMessage', result.message || 'Erro ao inserir itens', 'error');
           }

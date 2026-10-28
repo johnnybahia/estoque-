@@ -225,9 +225,10 @@ function getOrCreateIndiceItensSheet() {
 }
 
 // ========================================
-// BLOQUEIO POR ATUALIZAÇÃO (validade de 20 dias)
-// O item só aceita lançamento se teve ATUALIZAÇÃO / ACERTO / ATUAL. SAIDA nos
-// últimos 20 dias — ou se o próprio lançamento é uma dessas observações.
+// BLOQUEIO POR ATUALIZAÇÃO (validade de 20 dias) — SÓ PARA SAÍDAS
+// A saída do item só é aceita se ele teve ATUALIZAÇÃO / ACERTO / ATUAL. SAIDA nos
+// últimos 20 dias — ou se a própria saída é uma dessas observações.
+// Entradas (NF, lote de entrada, entrada unitária) não são bloqueadas.
 // A data da última atualização fica na coluna G da aba ÍNDICE_ITENS.
 // A regra só passa a valer depois de rodar reconstruirIndiceCompleto()
 // (que preenche a coluna G e liga a flag BLOQUEIO_ATUALIZACAO_ATIVO).
@@ -287,9 +288,12 @@ function _diasDesde(dataStr, agora) {
 
 /**
  * _bloqueioItem: null se o lançamento pode seguir; objeto {item, ultimaAtualizacao, dias, motivo} se bloqueado.
+ * Só SAÍDAS são bloqueadas (consumo de pedido calculado sobre saldo não conferido).
+ * Entradas (NF, lote de entrada, entrada unitária) nunca são bloqueadas.
  * Item novo (sem entrada no índice) nunca é bloqueado.
  */
-function _bloqueioItem(indice, itemNome, obs, agora) {
+function _bloqueioItem(indice, itemNome, obs, agora, saida) {
+  if (!(saida > 0)) return null;
   if (!itemNome || !_bloqueioAtivo()) return null;
   var entrada = indice ? indice[itemNome.toString().trim().toUpperCase()] : null;
   if (!entrada) return null;
@@ -314,7 +318,7 @@ function _respostaBloqueio(bloqueados) {
     success: false,
     bloqueado: true,
     bloqueados: bloqueados,
-    message: "🚫 LANÇAMENTO RECUSADO (validade de " + DIAS_VALIDADE_ATUALIZACAO + " dias): " + nomes +
+    message: "🚫 SAÍDA RECUSADA (validade de " + DIAS_VALIDADE_ATUALIZACAO + " dias): " + nomes +
       ". Lance uma ATUALIZAÇÃO, ACERTO ou ATUAL. SAIDA para o item antes de continuar."
   };
 }
@@ -323,7 +327,7 @@ function _respostaBloqueio(bloqueados) {
 function _anexarBloqueios(resultado, bloqueados) {
   if (!bloqueados || bloqueados.length === 0) return resultado;
   resultado.bloqueados = bloqueados;
-  resultado.message += " | 🚫 RECUSADO(S) por falta de ATUALIZAÇÃO nos últimos " + DIAS_VALIDADE_ATUALIZACAO + " dias: " +
+  resultado.message += " | 🚫 SAÍDA(S) RECUSADA(S) por falta de ATUALIZAÇÃO nos últimos " + DIAS_VALIDADE_ATUALIZACAO + " dias: " +
     bloqueados.map(function(b) { return b.item; }).join(", ");
   return resultado;
 }
@@ -331,7 +335,7 @@ function _anexarBloqueios(resultado, bloqueados) {
 /** verificarBloqueioItemWebApp: pré-checagem da tela (o servidor sempre revalida ao gravar). */
 function verificarBloqueioItemWebApp(item) {
   try {
-    var bloqueio = _bloqueioItem(getIndiceItensCache(), item, "", new Date());
+    var bloqueio = _bloqueioItem(getIndiceItensCache(), item, "", new Date(), 1); // 1 = "se fosse uma saída"
     return { success: true, ativo: _bloqueioAtivo(), bloqueado: !!bloqueio, bloqueio: bloqueio };
   } catch (e) {
     Logger.log("verificarBloqueioItemWebApp: " + e);
@@ -1272,8 +1276,8 @@ function processEstoqueWebApp(formData) {
       return { success: false, message: "Informe uma entrada ou saída" };
     }
 
-    // BLOQUEIO: item sem ATUALIZAÇÃO nos últimos 20 dias só aceita lançamento de ATUALIZAÇÃO/ACERTO/ATUAL. SAIDA
-    var bloqueioItem = _bloqueioItem(getIndiceItensCache(), formData.item, formData.obs, new Date());
+    // BLOQUEIO: SAÍDA de item sem ATUALIZAÇÃO nos últimos 20 dias só passa com obs ATUALIZAÇÃO/ACERTO/ATUAL. SAIDA
+    var bloqueioItem = _bloqueioItem(getIndiceItensCache(), formData.item, formData.obs, new Date(), saida);
     if (bloqueioItem) {
       Logger.log("processEstoqueWebApp: BLOQUEADO - " + formData.item + " - " + bloqueioItem.motivo);
       return _respostaBloqueio([bloqueioItem]);
@@ -1463,8 +1467,8 @@ function processMultipleEstoqueItems(itens) {
       try {
         var itemKey = itemData.item.toString().trim().toUpperCase();
 
-        // BLOQUEIO: recusa só o item sem ATUALIZAÇÃO nos últimos 20 dias
-        var bloqueioItem = _bloqueioItem(indice, itemData.item, itemData.obs, now);
+        // BLOQUEIO: recusa só a SAÍDA de item sem ATUALIZAÇÃO nos últimos 20 dias
+        var bloqueioItem = _bloqueioItem(indice, itemData.item, itemData.obs, now, parseFloat(itemData.saida) || 0);
         if (bloqueioItem) {
           bloqueados.push(bloqueioItem);
           continue;
@@ -1577,6 +1581,7 @@ function processMultipleEstoqueItems(itens) {
 /**
  * processMultipleEstoqueItemsWithGroup: Processa múltiplos itens de uma NF com grupo especificado
  * Para itens novos, usa o grupo enviado pelo cliente ao invés de buscar na base
+ * Entrada de NF NÃO passa pelo bloqueio por ATUALIZAÇÃO (o bloqueio vale só para saídas).
  * @param {Array} itens - Array de objetos com {item, unidade, nf, obs, entrada, saida, valorUnitario, grupo}
  */
 function processMultipleEstoqueItemsWithGroup(itens) {
@@ -1591,7 +1596,6 @@ function processMultipleEstoqueItemsWithGroup(itens) {
     var user = getLoggedUser();
     var processados = 0;
     var erros = [];
-    var bloqueados = [];
 
     PropertiesService.getScriptProperties().setProperty("editingViaScript", "true");
 
@@ -1607,14 +1611,6 @@ function processMultipleEstoqueItemsWithGroup(itens) {
 
       try {
         var itemKey = itemData.item.toString().trim().toUpperCase();
-
-        // BLOQUEIO: recusa só o item sem ATUALIZAÇÃO nos últimos 20 dias
-        var bloqueioItem = _bloqueioItem(indice, itemData.item, itemData.obs, now);
-        if (bloqueioItem) {
-          Logger.log("processMultipleEstoqueItemsWithGroup: BLOQUEADO - " + itemData.item + " - " + bloqueioItem.motivo);
-          bloqueados.push(bloqueioItem);
-          continue;
-        }
 
         // Se o cliente enviou grupo, usa esse; senão, busca no índice
         var grupoItem = '';
@@ -1737,26 +1733,22 @@ function processMultipleEstoqueItemsWithGroup(itens) {
 
     PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
 
-    if (processados === 0 && erros.length === 0 && bloqueados.length > 0) {
-      return _respostaBloqueio(bloqueados);
-    }
-
     // Invalida caches UMA VEZ no final (OTIMIZADO!)
     invalidateCache();
     invalidateCacheOpt();
     backupEstoqueData();
 
     if (erros.length > 0) {
-      return _anexarBloqueios({
+      return {
         success: processados > 0,
         message: "Processados: " + processados + "/" + itens.length + ". Erros: " + erros.join("; ")
-      }, bloqueados);
+      };
     }
 
-    return _anexarBloqueios({
+    return {
       success: true,
       message: processados + " item(ns) inserido(s) com sucesso!"
-    }, bloqueados);
+    };
   } catch (error) {
     PropertiesService.getScriptProperties().deleteProperty("editingViaScript");
     Logger.log("Erro processMultipleEstoqueItemsWithGroup: " + error);
@@ -1808,8 +1800,8 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
         var nextRow = sheetEstoque.getLastRow() + 1;
         var itemKey = itemData.item.toString().trim().toUpperCase();
 
-        // BLOQUEIO: recusa só o item sem ATUALIZAÇÃO nos últimos 20 dias
-        var bloqueioItem = _bloqueioItem(indice, itemData.item, itemData.obs, now);
+        // BLOQUEIO: recusa só a SAÍDA de item sem ATUALIZAÇÃO nos últimos 20 dias (entrada de lote passa)
+        var bloqueioItem = _bloqueioItem(indice, itemData.item, itemData.obs, now, parseFloat(itemData.saida) || 0);
         if (bloqueioItem) {
           Logger.log("processMultipleEstoqueItemsWithSaldos: BLOQUEADO - " + itemData.item + " - " + bloqueioItem.motivo);
           bloqueados.push(bloqueioItem);
