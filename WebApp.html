@@ -2672,13 +2672,24 @@
 
     // ===== BLOQUEIO POR ATUALIZAÇÃO (validade de 20 dias) =====
     // O servidor é a autoridade; aqui só se antecipa o aviso e se trava o botão Confirmar.
-    var bloqueioEstoque = { item: '', bloqueado: false, bloqueio: null };
+    var BLOQUEIO_TTL_MS = 120000; // passou disso, a resposta do servidor é considerada velha e reconsultada
+    var bloqueioEstoque = { item: '', bloqueado: false, bloqueio: null, ts: 0 };
+
+    // Qualquer falha na parte de bloqueio é só registrada: nunca pode quebrar o lançamento
+    function tentarBloqueio(fn) {
+      try { fn(); } catch (e) { console.log('Bloqueio por atualização (ignorado):', e); }
+    }
+
+    function limparEstadoBloqueioEstoque() {
+      bloqueioEstoque = { item: '', bloqueado: false, bloqueio: null, ts: 0 };
+      tentarBloqueio(aplicarBloqueioEstoque);
+    }
 
     function normalizarObsBloqueio(obs) {
       return String(obs || '').toUpperCase()
-        .replace(/[À-Å]/g, 'A').replace(/Ç/g, 'C')
-        .replace(/[È-Ë]/g, 'E').replace(/[Ì-Ï]/g, 'I')
-        .replace(/[Ò-Ö]/g, 'O').replace(/[Ù-Ü]/g, 'U')
+        .replace(/[\u00C0-\u00C5]/g, 'A').replace(/\u00C7/g, 'C')
+        .replace(/[\u00C8-\u00CB]/g, 'E').replace(/[\u00CC-\u00CF]/g, 'I')
+        .replace(/[\u00D2-\u00D6]/g, 'O').replace(/[\u00D9-\u00DC]/g, 'U')
         .replace(/[^A-Z0-9]+/g, ' ').trim();
     }
 
@@ -2701,17 +2712,15 @@
     function verificarBloqueioEstoque(nomeItem) {
       const item = (nomeItem || '').trim();
       if (!item) {
-        bloqueioEstoque = { item: '', bloqueado: false, bloqueio: null };
+        limparEstadoBloqueioEstoque();
+        return;
+      }
+      if (bloqueioEstoque.item.toUpperCase() === item.toUpperCase() && (Date.now() - bloqueioEstoque.ts) < BLOQUEIO_TTL_MS) {
         aplicarBloqueioEstoque();
         return;
       }
-      if (bloqueioEstoque.item.toUpperCase() === item.toUpperCase()) {
-        aplicarBloqueioEstoque();
-        return;
-      }
-      // Item diferente do último consultado: some com o aviso antigo até a resposta chegar
-      bloqueioEstoque = { item: '', bloqueado: false, bloqueio: null };
-      aplicarBloqueioEstoque();
+      // Item diferente do último consultado (ou resposta velha): some com o aviso até a resposta chegar
+      limparEstadoBloqueioEstoque();
       google.script.run
         .withSuccessHandler(function(res) {
           // Ignora resposta atrasada se o usuário já trocou de item
@@ -2719,9 +2728,10 @@
           bloqueioEstoque = {
             item: item,
             bloqueado: !!(res && res.bloqueado),
-            bloqueio: (res && res.bloqueio) || null
+            bloqueio: (res && res.bloqueio) || null,
+            ts: Date.now()
           };
-          aplicarBloqueioEstoque();
+          tentarBloqueio(aplicarBloqueioEstoque);
         })
         .withFailureHandler(function(err) {
           console.log('Erro ao verificar bloqueio de atualização:', err);
@@ -2734,6 +2744,14 @@
       const aviso = document.getElementById('avisoBloqueioAtualizacao');
       const btn = document.getElementById('btnConfirmarEstoque');
       if (!aviso || !btn) return;
+
+      // Resposta velha (ex.: a atualização foi lançada por outro caminho): descarta e reconsulta
+      if (bloqueioEstoque.bloqueado && (Date.now() - bloqueioEstoque.ts) >= BLOQUEIO_TTL_MS) {
+        const itemAtual = document.getElementById('estoqueItem').value;
+        limparEstadoBloqueioEstoque();
+        verificarBloqueioEstoque(itemAtual);
+        return;
+      }
 
       const obs = document.getElementById('estoqueObs').value;
       const saidaDigitada = parseFloat(document.getElementById('estoqueSaida').value) || 0;
@@ -2775,14 +2793,13 @@
 
     // ===== Lote: aviso por linha ANTES do envio (a saída não é impedida, só sinalizada) =====
     var bloqueioLoteCache = {}; // NOME EM MAIÚSCULAS -> { bloqueado, bloqueio, ts }
-    const BLOQUEIO_LOTE_TTL_MS = 120000;
 
     // Consulta o servidor só para os itens ainda não conhecidos (ou com cache vencido)
     function consultarBloqueioLote(nomes, aoTerminar) {
       const agora = Date.now();
       const pendentes = nomes.filter(function(n) {
         const c = bloqueioLoteCache[n];
-        return n && (!c || (agora - c.ts) > BLOQUEIO_LOTE_TTL_MS);
+        return n && (!c || (agora - c.ts) > BLOQUEIO_TTL_MS);
       });
       if (pendentes.length === 0) {
         if (aoTerminar) aoTerminar();
@@ -2920,7 +2937,7 @@
         valorInput.value = ''; // Limpa o valor
       }
 
-      aplicarBloqueioEstoque();
+      tentarBloqueio(aplicarBloqueioEstoque);
     }
 
     // Timeout para verificação de item novo (evita disparar durante seleção do autocomplete)
@@ -2986,7 +3003,7 @@
           grupoContainer.style.background = '';
           grupoContainer.style.padding = '';
           grupoContainer.style.border = '';
-          verificarBloqueioEstoque('');
+          tentarBloqueio(function() { verificarBloqueioEstoque(''); });
           return;
         }
 
@@ -2994,7 +3011,7 @@
         preCarregarSaldo(itemInput.value.trim());
 
         // Avisa já na digitação se o item está bloqueado por falta de ATUALIZAÇÃO
-        verificarBloqueioEstoque(itemInput.value);
+        tentarBloqueio(function() { verificarBloqueioEstoque(itemInput.value); });
 
         // Verifica se item existe na lista de autocomplete
         const itemExiste = autocompleteData && autocompleteData.items &&
@@ -3386,7 +3403,7 @@
           const item = this.value;
           if (item) {
             // Avisa na hora (seleção no autocomplete dispara 'change', não 'blur') se as saídas do item estão bloqueadas
-            verificarBloqueioEstoque(item);
+            tentarBloqueio(function() { verificarBloqueioEstoque(item); });
 
             google.script.run
               .withSuccessHandler(function(result) {
@@ -3482,8 +3499,9 @@
       const nomeItemUpper = formData.item.trim().toUpperCase();
 
       // Saída de item bloqueado: só segue com ATUALIZAÇÃO / ACERTO / ATUAL. SAIDA (servidor revalida)
-      if (saida > 0 && bloqueioEstoque.bloqueado && bloqueioEstoque.item.toUpperCase() === nomeItemUpper && !obsLiberaBloqueio(formData.obs)) {
-        aplicarBloqueioEstoque();
+      if (saida > 0 && bloqueioEstoque.bloqueado && (Date.now() - bloqueioEstoque.ts) < BLOQUEIO_TTL_MS &&
+          bloqueioEstoque.item.toUpperCase() === nomeItemUpper && !obsLiberaBloqueio(formData.obs)) {
+        tentarBloqueio(aplicarBloqueioEstoque);
         return false;
       }
       const isItemNovo = !(autocompleteData && autocompleteData.items &&
@@ -3576,9 +3594,10 @@
             bloqueioEstoque = {
               item: formData.item.trim(),
               bloqueado: true,
-              bloqueio: (result.bloqueados && result.bloqueados[0]) || null
+              bloqueio: (result.bloqueados && result.bloqueados[0]) || null,
+              ts: Date.now()
             };
-            aplicarBloqueioEstoque();
+            tentarBloqueio(aplicarBloqueioEstoque);
             mostrarRecusaPersistente('estoqueMessage', result.message);
           } else {
             showMessage('estoqueMessage', result.message || 'Erro ao inserir estoque', 'error');
@@ -3624,9 +3643,8 @@
       document.getElementById('estoqueHistorico').style.display = 'none';
 
       // Limpa o estado de bloqueio por ATUALIZAÇÃO (religa o botão Confirmar)
-      bloqueioEstoque = { item: '', bloqueado: false, bloqueio: null };
       bloqueioLoteCache = {}; // um lançamento pode ter renovado a ATUALIZAÇÃO de algum item
-      aplicarBloqueioEstoque();
+      limparEstadoBloqueioEstoque();
 
       // Limpa avisos de item novo
       document.getElementById('avisoItemNovoEstoque').style.display = 'none';
@@ -3994,6 +4012,7 @@
             document.getElementById('nfFormArea').style.display = 'none';
             document.getElementById('nfResultArea').style.display = 'block';
 
+            limparEstadoBloqueioEstoque(); // a NF pode ter sido lançada com obs de atualização
             // Mostra mensagem e tabela de itens inseridos
             document.getElementById('nfResultMessage').innerHTML =
               '<strong>' + itensParaEnviar.length + '</strong> item(ns) inserido(s) com sucesso na NF <strong>' + nfNumero + '</strong>';
@@ -4172,7 +4191,7 @@
 
         if (!nomeItem) {
           avisoNovo.style.display = 'none';
-          aplicarBloqueioLote();
+          tentarBloqueio(aplicarBloqueioLote);
           return;
         }
 
@@ -4186,7 +4205,7 @@
         }
 
         // Sinaliza na linha se a saída deste item será recusada por falta de ATUALIZAÇÃO
-        consultarBloqueioLote([nomeItem], aplicarBloqueioLote);
+        tentarBloqueio(function() { consultarBloqueioLote([nomeItem], aplicarBloqueioLote); });
       }, 400);
     }
 
@@ -4196,7 +4215,7 @@
       if (itemDiv) {
         itemDiv.remove();
       }
-      aplicarBloqueioLote();
+      tentarBloqueio(aplicarBloqueioLote);
     }
 
     // Limpa formulário do lote
@@ -4209,7 +4228,7 @@
       document.getElementById('loteItensContainer').innerHTML = '';
       loteItemCounter = 0;
       bloqueioLoteCache = {};
-      aplicarBloqueioLote();
+      tentarBloqueio(aplicarBloqueioLote);
       showMessage('estoqueLoteMessage', '', '');
     }
 
@@ -4338,13 +4357,17 @@
       document.getElementById('modalConfirmacaoLote').classList.add('show');
 
       // Marca no modal as saídas que serão recusadas (depois da lista pronta; consulta só o que não está em cache)
-      consultarBloqueioLote(
-        itensParaConfirmarLote.map(function(it) { return String(it.item).trim().toUpperCase(); }),
-        function() {
-          marcarBloqueadosModalLote(obs);
-          aplicarBloqueioLote();
-        }
-      );
+      tentarBloqueio(function() {
+        consultarBloqueioLote(
+          itensParaConfirmarLote.map(function(it) { return String(it.item).trim().toUpperCase(); }),
+          function() {
+            tentarBloqueio(function() {
+              marcarBloqueadosModalLote(obs);
+              aplicarBloqueioLote();
+            });
+          }
+        );
+      });
 
       // Busca saldos de todos os itens
       carregarSaldosLote(operacao);
@@ -4463,6 +4486,7 @@
             document.getElementById('estoqueLoteResultArea').style.display = 'block';
 
             bloqueioLoteCache = {}; // atualizações gravadas neste lote renovam o prazo dos itens
+            limparEstadoBloqueioEstoque();
             const tipoOp = operacao === 'entrada' ? 'ENTRADAS' : 'SAÍDAS';
             // Só conta o que foi gravado (itens recusados por falta de ATUALIZAÇÃO ficam de fora)
             const qtdInseridosLote = (result.itensProcessados || itensParaEnviar).length;

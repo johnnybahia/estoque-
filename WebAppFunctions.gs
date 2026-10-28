@@ -244,6 +244,9 @@ var COL_INDICE_ULT_ATUALIZACAO = 7;
  * Texto puro evita o Sheets reinterpretar "dd/MM/yyyy HH:mm:ss" conforme o locale.
  */
 function _garantirColunaAtualizacaoIndice(sheet) {
+  if (sheet.getMaxColumns() < COL_INDICE_ULT_ATUALIZACAO) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), COL_INDICE_ULT_ATUALIZACAO - sheet.getMaxColumns());
+  }
   var cab = sheet.getRange(1, COL_INDICE_ULT_ATUALIZACAO);
   cab.setValue("Últ. ATUALIZAÇÃO (Obs)");
   cab.setFontWeight("bold").setBackground("#4285f4").setFontColor("white");
@@ -259,9 +262,9 @@ function _garantirColunaAtualizacaoIndice(sheet) {
  */
 function _normalizarObs(obs) {
   return String(obs === null || obs === undefined ? "" : obs).toUpperCase()
-    .replace(/[À-Å]/g, "A").replace(/Ç/g, "C")
-    .replace(/[È-Ë]/g, "E").replace(/[Ì-Ï]/g, "I")
-    .replace(/[Ò-Ö]/g, "O").replace(/[Ù-Ü]/g, "U")
+    .replace(/[\u00C0-\u00C5]/g, "A").replace(/\u00C7/g, "C")
+    .replace(/[\u00C8-\u00CB]/g, "E").replace(/[\u00CC-\u00CF]/g, "I")
+    .replace(/[\u00D2-\u00D6]/g, "O").replace(/[\u00D9-\u00DC]/g, "U")
     .replace(/[^A-Z0-9]+/g, " ").replace(/^ +| +$/g, "");
 }
 
@@ -293,22 +296,29 @@ function _diasDesde(dataStr, agora) {
  * Item novo (sem entrada no índice) nunca é bloqueado.
  */
 function _bloqueioItem(indice, itemNome, obs, agora, saida) {
-  if (!(saida > 0)) return null;
-  if (!itemNome || !_bloqueioAtivo()) return null;
-  var entrada = indice ? indice[itemNome.toString().trim().toUpperCase()] : null;
-  if (!entrada) return null;
-  if (_obsLiberaBloqueio(obs)) return null;
+  try {
+    if (!(saida > 0)) return null;
+    if (!itemNome || !_bloqueioAtivo()) return null;
+    var entrada = indice ? indice[itemNome.toString().trim().toUpperCase()] : null;
+    if (!entrada) return null;
+    if (_obsLiberaBloqueio(obs)) return null;
 
-  var ult = entrada.ultimaAtualizacao ? entrada.ultimaAtualizacao.toString() : "";
-  var dias = ult ? _diasDesde(ult, agora) : null;
-  if (dias !== null && dias <= DIAS_VALIDADE_ATUALIZACAO) return null;
+    // "ua" = data (dd/mm/aaaa) da última atualização; nome curto para o índice em cache caber no limite de 100 KB
+    var ult = entrada.ua ? entrada.ua.toString() : "";
+    var dias = ult ? _diasDesde(ult, agora) : null;
+    if (dias !== null && dias <= DIAS_VALIDADE_ATUALIZACAO) return null;
 
-  var motivo;
-  if (!ult) motivo = "sem ATUALIZAÇÃO registrada";
-  else if (dias === null) motivo = "data da última ATUALIZAÇÃO inválida (" + ult + ")";
-  else motivo = "sem ATUALIZAÇÃO há " + dias + " dias (desde " + ult.split(" ")[0] + ")";
+    var motivo;
+    if (!ult) motivo = "sem ATUALIZAÇÃO registrada";
+    else if (dias === null) motivo = "data da última ATUALIZAÇÃO inválida (" + ult + ")";
+    else motivo = "sem ATUALIZAÇÃO há " + dias + " dias (desde " + ult.split(" ")[0] + ")";
 
-  return { item: itemNome, ultimaAtualizacao: ult ? ult.split(" ")[0] : null, dias: dias, motivo: motivo };
+    return { item: itemNome, ultimaAtualizacao: ult ? ult.split(" ")[0] : null, dias: dias, motivo: motivo };
+  } catch (e) {
+    // Falha na regra NUNCA pode impedir um lançamento: libera e registra no log
+    Logger.log("_bloqueioItem: ERRO (lançamento liberado): " + e);
+    return null;
+  }
 }
 
 /** _respostaBloqueio: resposta padrão quando nenhum item do pedido pôde ser gravado. */
@@ -528,7 +538,7 @@ function _loadIndiceItensFromSheet() {
       data: data[i][2] || null,
       grupo: data[i][3],
       linha: parseInt(data[i][4], 10) || 0,
-      ultimaAtualizacao: (numCols >= COL_INDICE_ULT_ATUALIZACAO && data[i][6]) ? data[i][6] : ''
+      ua: (numCols >= COL_INDICE_ULT_ATUALIZACAO && data[i][6]) ? data[i][6].toString().split(' ')[0] : ''
     };
   }
 
