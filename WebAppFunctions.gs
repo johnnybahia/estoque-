@@ -236,6 +236,10 @@ function getOrCreateIndiceItensSheet() {
 // ========================================
 var DIAS_VALIDADE_ATUALIZACAO = 20;
 var OBS_LIBERA_BLOQUEIO = ["ATUALIZACAO", "ACERTO", "ATUAL SAIDA"];
+// Só itens cujo Grupo (coluna D da ÍNDICE_ITENS) está aqui são bloqueados.
+// Demais grupos (químico, peça, embalagem, consumo...) seguem apenas com a sinalização de desatualizado.
+// Texto já normalizado (maiúsculas, sem acento): "MATÉRIA PRIMA" -> "MATERIA PRIMA".
+var GRUPOS_BLOQUEIA = ["MATERIA PRIMA"];
 var PROP_BLOQUEIO_ATIVO = "BLOQUEIO_ATUALIZACAO_ATIVO";
 var COL_INDICE_ULT_ATUALIZACAO = 7;
 
@@ -273,6 +277,11 @@ function _obsLiberaBloqueio(obs) {
   return OBS_LIBERA_BLOQUEIO.indexOf(_normalizarObs(obs)) >= 0;
 }
 
+/** _grupoSujeitoBloqueio: true só se o Grupo do item estiver em GRUPOS_BLOQUEIA (vazio/desconhecido = livre). */
+function _grupoSujeitoBloqueio(grupo) {
+  return GRUPOS_BLOQUEIA.indexOf(_normalizarObs(grupo)) >= 0;
+}
+
 /** _bloqueioAtivo: lê a flag uma vez por execução. */
 function _bloqueioAtivo() {
   if (_bloqueioAtivo._v === undefined) {
@@ -294,6 +303,7 @@ function _diasDesde(dataStr, agora) {
  * Só SAÍDAS são bloqueadas (consumo de pedido calculado sobre saldo não conferido).
  * Entradas (NF, lote de entrada, entrada unitária) nunca são bloqueadas.
  * Item novo (sem entrada no índice) nunca é bloqueado.
+ * Só itens de grupo em GRUPOS_BLOQUEIA (MATÉRIA PRIMA) são bloqueados; os demais só recebem a sinalização.
  */
 function _bloqueioItem(indice, itemNome, obs, agora, saida) {
   try {
@@ -301,6 +311,10 @@ function _bloqueioItem(indice, itemNome, obs, agora, saida) {
     if (!itemNome || !_bloqueioAtivo()) return null;
     var entrada = indice ? indice[itemNome.toString().trim().toUpperCase()] : null;
     if (!entrada) return null;
+    if (!_grupoSujeitoBloqueio(entrada.grupo)) {
+      if (!String(entrada.grupo || "").trim()) Logger.log("_bloqueioItem: item sem grupo no índice, liberado: " + itemNome);
+      return null;
+    }
     if (_obsLiberaBloqueio(obs)) return null;
 
     // "ua" = data (dd/mm/aaaa) da última atualização; nome curto para o índice em cache caber no limite de 100 KB
