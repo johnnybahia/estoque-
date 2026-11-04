@@ -235,6 +235,8 @@ function getOrCreateIndiceItensSheet() {
 // Para desligar: apague essa propriedade do script.
 // ========================================
 var DIAS_VALIDADE_ATUALIZACAO = 20;
+// Sinalização (linha vermelha + aviso "DESATUALIZADO"): independe do bloqueio e dispara antes dele.
+var DIAS_SINALIZACAO_DESATUALIZADO = 15;
 var OBS_LIBERA_BLOQUEIO = ["ATUALIZACAO", "ACERTO", "ATUAL SAIDA"];
 // Só itens cujo Grupo (coluna D da ÍNDICE_ITENS) está aqui são bloqueados.
 // Demais grupos (químico, peça, embalagem, consumo...) seguem apenas com a sinalização de desatualizado.
@@ -242,6 +244,50 @@ var OBS_LIBERA_BLOQUEIO = ["ATUALIZACAO", "ACERTO", "ATUAL SAIDA"];
 var GRUPOS_BLOQUEIA = ["MATERIA PRIMA"];
 var PROP_BLOQUEIO_ATIVO = "BLOQUEIO_ATUALIZACAO_ATIVO";
 var COL_INDICE_ULT_ATUALIZACAO = 7;
+// Coluna H da ÍNDICE_ITENS = data da última entrada (>0, ACERTO conta): "dd/MM/yyyy HH:mm:ss";
+// "NAO" = item só teve saídas; vazio ou "SIM" (formato antigo, sem data) = desconhecido e continua bloqueando.
+var COL_INDICE_ULT_ENTRADA = 8;
+
+/**
+ * _garantirColunaEntradaIndice: cabeçalho, largura e formato texto da coluna H (idempotente, 1x por execução).
+ */
+function _garantirColunaEntradaIndice(sheet) {
+  if (_garantirColunaEntradaIndice._ok) return;
+  if (sheet.getMaxColumns() < COL_INDICE_ULT_ENTRADA) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), COL_INDICE_ULT_ENTRADA - sheet.getMaxColumns());
+  }
+  var cab = sheet.getRange(1, COL_INDICE_ULT_ENTRADA);
+  if (cab.getValue() !== "Últ. Entrada (Data)") {
+    cab.setValue("Últ. Entrada (Data)");
+    cab.setFontWeight("bold").setBackground("#4285f4").setFontColor("white");
+    sheet.setColumnWidth(COL_INDICE_ULT_ENTRADA, 150);
+    if (sheet.getMaxRows() > 1) {
+      sheet.getRange(2, COL_INDICE_ULT_ENTRADA, sheet.getMaxRows() - 1, 1).setNumberFormat("@");
+    }
+  }
+  _garantirColunaEntradaIndice._ok = true;
+}
+
+/**
+ * _ultimaEntradaItem: texto da coluna H do item na ÍNDICE_ITENS ("" se desconhecido).
+ * Lê as colunas A e H uma única vez por execução e só é chamada quando o item seria bloqueado.
+ */
+function _ultimaEntradaItem(itemNome) {
+  if (!_ultimaEntradaItem._mapa) {
+    var mapa = {};
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("ÍNDICE_ITENS");
+    var last = sheet ? sheet.getLastRow() : 0;
+    if (last > 1 && sheet.getMaxColumns() >= COL_INDICE_ULT_ENTRADA) {
+      var nomes = sheet.getRange(2, 1, last - 1, 1).getDisplayValues();
+      var vals = sheet.getRange(2, COL_INDICE_ULT_ENTRADA, last - 1, 1).getDisplayValues();
+      for (var i = 0; i < nomes.length; i++) {
+        if (nomes[i][0]) mapa[nomes[i][0].toString().trim().toUpperCase()] = vals[i][0].toString().trim();
+      }
+    }
+    _ultimaEntradaItem._mapa = mapa;
+  }
+  return _ultimaEntradaItem._mapa[itemNome.toString().trim().toUpperCase()] || "";
+}
 
 /**
  * _garantirColunaAtualizacaoIndice: cabeçalho, largura e formato texto da coluna G.
@@ -304,6 +350,7 @@ function _diasDesde(dataStr, agora) {
  * Entradas (NF, lote de entrada, entrada unitária) nunca são bloqueadas.
  * Item novo (sem entrada no índice) nunca é bloqueado.
  * Só itens de grupo em GRUPOS_BLOQUEIA (MATÉRIA PRIMA) são bloqueados; os demais só recebem a sinalização.
+ * Também não bloqueia item que nunca teve entrada (coluna H = "NAO") nem item com última entrada em até 20 dias.
  */
 function _bloqueioItem(indice, itemNome, obs, agora, saida) {
   try {
@@ -321,6 +368,12 @@ function _bloqueioItem(indice, itemNome, obs, agora, saida) {
     var ult = entrada.ua ? entrada.ua.toString() : "";
     var dias = ult ? _diasDesde(ult, agora) : null;
     if (dias !== null && dias <= DIAS_VALIDADE_ATUALIZACAO) return null;
+
+    // Só teve saídas (nunca teve entrada): não há o que atualizar. Entrada recente (<= 20 dias): saldo ainda confiável.
+    var ultEntrada = _ultimaEntradaItem(itemNome);
+    if (_normalizarObs(ultEntrada) === "NAO") return null;
+    var diasEntrada = ultEntrada ? _diasDesde(ultEntrada, agora) : null;
+    if (diasEntrada !== null && diasEntrada <= DIAS_VALIDADE_ATUALIZACAO) return null;
 
     var motivo;
     if (!ult) motivo = "sem ATUALIZAÇÃO registrada";
@@ -434,6 +487,12 @@ function buildIndiceItensInitial() {
       ultimaAtualizacao = data[i][3];
     }
 
+    // Coluna H (índice 7) = Entrada. Qualquer linha com entrada > 0 (inclusive ACERTO) guarda a data da última entrada.
+    var ultimaEntrada = indiceMap[itemKey] ? indiceMap[itemKey].ultimaEntrada : '';
+    if (_parseNumeroSeguro(data[i][7], 0) > 0) {
+      ultimaEntrada = data[i][3] || "SIM";
+    }
+
     // Mantém sempre o ÚLTIMO registro de cada item
     indiceMap[itemKey] = {
       item: data[i][1],           // Item original (com case)
@@ -441,7 +500,8 @@ function buildIndiceItensInitial() {
       data: data[i][3],           // Coluna D - Data
       grupo: data[i][0],          // Coluna A - Grupo
       linha: rowNum,
-      ultimaAtualizacao: ultimaAtualizacao
+      ultimaAtualizacao: ultimaAtualizacao,
+      ultimaEntrada: ultimaEntrada
     };
   }
 
@@ -460,14 +520,18 @@ function buildIndiceItensInitial() {
       item.grupo,
       item.linha,
       now,
-      item.ultimaAtualizacao || ''
+      item.ultimaAtualizacao || '',
+      item.ultimaEntrada || "NAO"
     ]);
   }
+
+  // Coluna H (Últ. Entrada): garante cabeçalho/formato antes de limpar e gravar
+  _garantirColunaEntradaIndice(sheetIndice);
 
   // Limpa conteúdo anterior (mantém cabeçalho)
   var lastRowIndice = sheetIndice.getLastRow();
   if (lastRowIndice > 1) {
-    sheetIndice.getRange(2, 1, lastRowIndice - 1, COL_INDICE_ULT_ATUALIZACAO).clear();
+    sheetIndice.getRange(2, 1, lastRowIndice - 1, COL_INDICE_ULT_ENTRADA).clear();
   }
 
   // CORREÇÃO: garante texto na coluna Item antes de gravar (reconstrução completa)
@@ -478,7 +542,7 @@ function buildIndiceItensInitial() {
 
   // Escreve TUDO de uma vez (muito mais rápido)
   if (indiceArray.length > 0) {
-    sheetIndice.getRange(2, 1, indiceArray.length, COL_INDICE_ULT_ATUALIZACAO).setValues(indiceArray);
+    sheetIndice.getRange(2, 1, indiceArray.length, COL_INDICE_ULT_ENTRADA).setValues(indiceArray);
     Logger.log("Índice escrito na aba ÍNDICE_ITENS: " + indiceArray.length + " linhas");
   }
 
@@ -565,7 +629,7 @@ function _loadIndiceItensFromSheet() {
  * Muito rápido: apenas 1 linha atualizada
  * @param {boolean} invalidateCache - Se deve invalidar cache (default: true). Use false em loops batch.
  */
-function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque, invalidateCache, obs) {
+function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque, invalidateCache, obs, entrada) {
   // Default: invalida cache (compatibilidade com código existente)
   if (invalidateCache === undefined) {
     invalidateCache = true;
@@ -573,7 +637,9 @@ function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque, invalidate
 
   try {
     var sheetIndice = getOrCreateIndiceItensSheet();
+    _garantirColunaEntradaIndice(sheetIndice);
     var itemKey = itemName.toString().trim().toUpperCase();
+    var teveEntradaAgora = _parseNumeroSeguro(entrada, 0) > 0; // grava a data da entrada na coluna H
 
     // OTIMIZAÇÃO BATCH: lê a coluna de itens do índice UMA VEZ por execução.
     // Antes, um lote de 20 itens fazia 20 leituras completas da coluna.
@@ -610,11 +676,16 @@ function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque, invalidate
       if (dataAtualizacao) {
         sheetIndice.getRange(itemRow, COL_INDICE_ULT_ATUALIZACAO).setNumberFormat("@").setValue(dataAtualizacao);
       }
+      // Coluna H: cada entrada renova a data; sem entrada preserva o valor (vazio = desconhecido, "NAO" = só saídas)
+      if (teveEntradaAgora) {
+        sheetIndice.getRange(itemRow, COL_INDICE_ULT_ENTRADA).setNumberFormat("@").setValue(agoraFmt);
+      }
     } else {
       // Adiciona novo item
       var nextRow = memo.nextRow;
       sheetIndice.getRange(nextRow, 1, 1, 6).setValues([rowData]);
       sheetIndice.getRange(nextRow, COL_INDICE_ULT_ATUALIZACAO).setNumberFormat("@").setValue(dataAtualizacao || agoraFmt);
+      sheetIndice.getRange(nextRow, COL_INDICE_ULT_ENTRADA).setNumberFormat("@").setValue(teveEntradaAgora ? agoraFmt : "NAO");
       memo.mapa[itemKey] = nextRow;
       memo.nextRow = nextRow + 1;
     }
@@ -1393,7 +1464,7 @@ function processEstoqueWebApp(formData) {
 
     var warningMessage = null;
 
-    // Verifica se passou mais de 20 dias desde a última data de registro
+    // Verifica se passou mais de 15 dias desde a última data de registro
     if (lastReg.lastDate) {
       // CORREÇÃO: Usa parseDateString para converter corretamente datas em formato brasileiro
       var lastDate = parseDateString(lastReg.lastDate);
@@ -1412,26 +1483,26 @@ function processEstoqueWebApp(formData) {
       Logger.log("processEstoqueWebApp: DEBUG - lastDate é válido? " + !isNaN(lastDate.getTime()));
       Logger.log("processEstoqueWebApp: DEBUG - Data atual: " + now);
       Logger.log("processEstoqueWebApp: DEBUG - Diferença de dias: " + diffDays + " dias");
-      Logger.log("processEstoqueWebApp: DEBUG - diffDays > 20? " + (diffDays > 20));
+      Logger.log("processEstoqueWebApp: DEBUG - diffDays > limite? " + (diffDays > DIAS_SINALIZACAO_DESATUALIZADO));
       Logger.log("processEstoqueWebApp: ========================================");
 
-      if (diffDays > 20) {
-        // NOVA LÓGICA: Verifica se ALGUMA entrada ANTERIOR nos últimos 20 dias contém "ATUALIZAÇÃO"
-        // Calcula a data inicial (20 dias antes do novo lançamento)
-        var startDate = new Date(now.getTime() - (20 * 24 * 60 * 60 * 1000));
+      if (diffDays > DIAS_SINALIZACAO_DESATUALIZADO) {
+        // NOVA LÓGICA: Verifica se ALGUMA entrada ANTERIOR nos últimos 15 dias contém "ATUALIZAÇÃO"
+        // Calcula a data inicial (15 dias antes do novo lançamento)
+        var startDate = new Date(now.getTime() - (DIAS_SINALIZACAO_DESATUALIZADO * 24 * 60 * 60 * 1000));
 
         Logger.log("processEstoqueWebApp: Verificando entradas anteriores entre " + startDate + " e " + now);
 
-        // Busca por "ATUALIZAÇÃO" nas entradas ANTERIORES dentro do período de 20 dias
+        // Busca por "ATUALIZAÇÃO" nas entradas ANTERIORES dentro do período de 15 dias
         var temAtualizacaoAnterior = hasAtualizacaoInPreviousEntries(formData.item, startDate, now, nextRow);
         Logger.log("processEstoqueWebApp: Encontrou 'ATUALIZAÇÃO' em entradas anteriores? " + temAtualizacaoAnterior);
 
-        // Se NÃO houver "ATUALIZAÇÃO" em NENHUMA entrada anterior nos últimos 20 dias, pinta de vermelho
+        // Se NÃO houver "ATUALIZAÇÃO" em NENHUMA entrada anterior nos últimos 15 dias, pinta de vermelho
         if (!temAtualizacaoAnterior) {
           var lastColumn = sheetEstoque.getLastColumn();
           sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("red");
-          warningMessage = "⚠️ PRODUTO DESATUALIZADO (ÚLTIMA ATUALIZAÇÃO HÁ MAIS DE 20 DIAS). POR FAVOR, ATUALIZAR URGENTE.";
-          Logger.log("processEstoqueWebApp: Linha pintada de VERMELHO - produto desatualizado (sem ATUALIZAÇÃO nas entradas anteriores dos últimos 20 dias)");
+          warningMessage = "⚠️ PRODUTO DESATUALIZADO (ÚLTIMA ATUALIZAÇÃO HÁ MAIS DE " + DIAS_SINALIZACAO_DESATUALIZADO + " DIAS). POR FAVOR, ATUALIZAR URGENTE.";
+          Logger.log("processEstoqueWebApp: Linha pintada de VERMELHO - produto desatualizado (sem ATUALIZAÇÃO nas entradas anteriores dos últimos 15 dias)");
         } else {
           Logger.log("processEstoqueWebApp: Linha NÃO pintada de vermelho - há ATUALIZAÇÃO em entradas anteriores");
         }
@@ -1453,7 +1524,7 @@ function processEstoqueWebApp(formData) {
     }
 
     // OTIMIZAÇÃO: Atualiza o índice com o novo registro
-    updateIndiceItem(formData.item, newSaldo, now, formData.group, nextRow, true, formData.obs);
+    updateIndiceItem(formData.item, newSaldo, now, formData.group, nextRow, true, formData.obs, entrada);
     Logger.log("processEstoqueWebApp: Índice atualizado para item " + formData.item);
 
     // Invalida caches (padrão e otimizado)
@@ -1588,7 +1659,8 @@ function processMultipleEstoqueItems(itens) {
           rowsToInsert[i].grupo,
           currentRow,
           false,  // ✅ Não invalida cache aqui (batch)
-          rowsToInsert[i].obs
+          rowsToInsert[i].obs,
+          rowsToInsert[i].entrada
         );
       }
     }
@@ -1698,7 +1770,7 @@ function processMultipleEstoqueItemsWithGroup(itens) {
         // Determina cor da linha ANTES de inserir
         var backgroundColor = null;
 
-        // Verifica se passou mais de 20 dias desde a última data de registro
+        // Verifica se passou mais de 15 dias desde a última data de registro
         if (lastDate) {
           var parsedLastDate = parseDateString(lastDate);
 
@@ -1710,9 +1782,9 @@ function processMultipleEstoqueItemsWithGroup(itens) {
           var diffDays = (now.getTime() - parsedLastDate.getTime()) / (1000 * 3600 * 24);
           Logger.log("processMultipleEstoqueItemsWithGroup: Item " + itemData.item + " - Diferença: " + diffDays.toFixed(2) + " dias");
 
-          if (diffDays > 20) {
+          if (diffDays > DIAS_SINALIZACAO_DESATUALIZADO) {
             // NOTA: hasAtualizacaoInPreviousEntries ainda lê ESTOQUE, mas só quando necessário
-            var startDate = new Date(now.getTime() - (20 * 24 * 60 * 60 * 1000));
+            var startDate = new Date(now.getTime() - (DIAS_SINALIZACAO_DESATUALIZADO * 24 * 60 * 60 * 1000));
             var temAtualizacaoAnterior = hasAtualizacaoInPreviousEntries(itemData.item, startDate, now, 999999);
             Logger.log("processMultipleEstoqueItemsWithGroup: Item " + itemData.item + " - Encontrou 'ATUALIZAÇÃO'? " + temAtualizacaoAnterior);
 
@@ -1732,6 +1804,7 @@ function processMultipleEstoqueItemsWithGroup(itens) {
         rowsToInsert.push({
           data: rowData,
           background: backgroundColor,
+          entrada: entrada,
           item: itemData.item,
           newSaldo: newSaldo,
           grupo: grupoItem,
@@ -1770,7 +1843,8 @@ function processMultipleEstoqueItemsWithGroup(itens) {
           rowsToInsert[i].grupo,
           currentRow,
           false,  // ✅ Não invalida cache aqui (batch)
-          rowsToInsert[i].obs
+          rowsToInsert[i].obs,
+          rowsToInsert[i].entrada
         );
       }
     }
@@ -1898,7 +1972,7 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
 
         var itemWarning = null;
 
-        // Verifica se passou mais de 20 dias desde a última data de registro
+        // Verifica se passou mais de 15 dias desde a última data de registro
         if (lastDate) {
           // CORREÇÃO: Usa parseDateString para converter corretamente datas em formato brasileiro
           var parsedLastDate = parseDateString(lastDate);
@@ -1912,22 +1986,22 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
           var diffDays = (now.getTime() - parsedLastDate.getTime()) / (1000 * 3600 * 24);
           Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - Diferença: " + diffDays + " dias");
 
-          if (diffDays > 20) {
-            // NOVA LÓGICA: Verifica se ALGUMA entrada ANTERIOR nos últimos 20 dias contém "ATUALIZAÇÃO"
-            // Calcula a data inicial (20 dias antes do novo lançamento)
-            var startDate = new Date(now.getTime() - (20 * 24 * 60 * 60 * 1000));
+          if (diffDays > DIAS_SINALIZACAO_DESATUALIZADO) {
+            // NOVA LÓGICA: Verifica se ALGUMA entrada ANTERIOR nos últimos 15 dias contém "ATUALIZAÇÃO"
+            // Calcula a data inicial (15 dias antes do novo lançamento)
+            var startDate = new Date(now.getTime() - (DIAS_SINALIZACAO_DESATUALIZADO * 24 * 60 * 60 * 1000));
 
             Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - Verificando entradas anteriores entre " + startDate + " e " + now);
 
-            // Busca por "ATUALIZAÇÃO" nas entradas ANTERIORES dentro do período de 20 dias
+            // Busca por "ATUALIZAÇÃO" nas entradas ANTERIORES dentro do período de 15 dias
             var temAtualizacaoAnterior = hasAtualizacaoInPreviousEntries(itemData.item, startDate, now, nextRow);
             Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - Encontrou 'ATUALIZAÇÃO' em entradas anteriores? " + temAtualizacaoAnterior);
 
-            // Se NÃO houver "ATUALIZAÇÃO" em NENHUMA entrada anterior nos últimos 20 dias, pinta de vermelho
+            // Se NÃO houver "ATUALIZAÇÃO" em NENHUMA entrada anterior nos últimos 15 dias, pinta de vermelho
             if (!temAtualizacaoAnterior) {
               sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("red");
-              itemWarning = "DESATUALIZADO (+20 dias)";
-              Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - VERMELHO (sem ATUALIZAÇÃO nas entradas anteriores dos últimos 20 dias)");
+              itemWarning = "DESATUALIZADO (+" + DIAS_SINALIZACAO_DESATUALIZADO + " dias)";
+              Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - VERMELHO (sem ATUALIZAÇÃO nas entradas anteriores dos últimos 15 dias)");
             } else {
               Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - NÃO pintado (há ATUALIZAÇÃO em entradas anteriores)");
             }
@@ -1950,7 +2024,8 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
           grupoItem,
           nextRow,
           false,  // ✅ Não invalida cache aqui (batch)
-          itemData.obs
+          itemData.obs,
+          entrada
         );
 
         // Adiciona ao array de itens processados com os saldos
@@ -2202,7 +2277,7 @@ function gerarRelatorioEstoqueWebApp(dataInicio, dataFim) {
         if (bg.indexOf("yellow") >= 0 || bg === "#ffff00" || bg === "#ffff") {
           motivo = "⚠️ ENTRADA - Atualizar estoque";
         } else if (bg.indexOf("red") >= 0 || bg === "#ff0000" || bg.indexOf("#f00") >= 0) {
-          motivo = "🔴 DESATUALIZADO (+20 dias)";
+          motivo = "🔴 DESATUALIZADO (+" + DIAS_SINALIZACAO_DESATUALIZADO + " dias)";
         } else {
           motivo = "OK";
         }

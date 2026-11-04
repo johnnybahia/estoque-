@@ -398,7 +398,7 @@ function processEstoque(formData) {
   var avisoTipo = null;
   var avisoMensagem = "";
 
-  // Verifica se passou mais de 20 dias desde a última data de registro
+  // Verifica se passou mais de 15 dias desde a última data de registro
   if (lastReg.lastDate) {
     // CORREÇÃO: Usa parseDateString para converter corretamente datas em formato brasileiro
     var lastDate = parseDateString(lastReg.lastDate);
@@ -412,29 +412,29 @@ function processEstoque(formData) {
     var diffDays = (now.getTime() - lastDate.getTime()) / (1000 * 3600 * 24);
     Logger.log("processEstoque: Diferença de dias desde último registro: " + diffDays + " dias");
 
-    if (diffDays > 20) {
-      // NOVA LÓGICA: Verifica se ALGUMA entrada ANTERIOR nos últimos 20 dias contém "ATUALIZAÇÃO"
-      // Calcula a data inicial (20 dias antes do novo lançamento)
-      var startDate = new Date(now.getTime() - (20 * 24 * 60 * 60 * 1000));
+    if (diffDays > DIAS_SINALIZACAO_DESATUALIZADO) {
+      // NOVA LÓGICA: Verifica se ALGUMA entrada ANTERIOR nos últimos 15 dias contém "ATUALIZAÇÃO"
+      // Calcula a data inicial (15 dias antes do novo lançamento)
+      var startDate = new Date(now.getTime() - (DIAS_SINALIZACAO_DESATUALIZADO * 24 * 60 * 60 * 1000));
 
       Logger.log("processEstoque: Verificando entradas anteriores entre " + startDate + " e " + now);
 
-      // Busca por "ATUALIZAÇÃO" nas entradas ANTERIORES dentro do período de 20 dias
+      // Busca por "ATUALIZAÇÃO" nas entradas ANTERIORES dentro do período de 15 dias
       var temAtualizacaoAnterior = hasAtualizacaoInPreviousEntries(formData.item, startDate, now, nextRow);
       Logger.log("processEstoque: Encontrou 'ATUALIZAÇÃO' em entradas anteriores? " + temAtualizacaoAnterior);
 
-      // Se NÃO houver "ATUALIZAÇÃO" em NENHUMA entrada anterior nos últimos 20 dias, pinta de vermelho
+      // Se NÃO houver "ATUALIZAÇÃO" em NENHUMA entrada anterior nos últimos 15 dias, pinta de vermelho
       if (!temAtualizacaoAnterior) {
         var lastColumn = sheetEstoque.getLastColumn();
         sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("red");
         avisoTipo = "DESATUALIZADO";
-        avisoMensagem = "⚠️ PRODUTO DESATUALIZADO (ÚLTIMA ATUALIZAÇÃO HÁ MAIS DE 20 DIAS). POR FAVOR, ATUALIZAR URGENTE.";
-        Logger.log("processEstoque: Linha pintada de VERMELHO - produto desatualizado (sem ATUALIZAÇÃO nas entradas anteriores dos últimos 20 dias)");
+        avisoMensagem = "⚠️ PRODUTO DESATUALIZADO (ÚLTIMA ATUALIZAÇÃO HÁ MAIS DE " + DIAS_SINALIZACAO_DESATUALIZADO + " DIAS). POR FAVOR, ATUALIZAR URGENTE.";
+        Logger.log("processEstoque: Linha pintada de VERMELHO - produto desatualizado (sem ATUALIZAÇÃO nas entradas anteriores dos últimos 15 dias)");
       } else {
         Logger.log("processEstoque: Linha NÃO pintada de vermelho - há ATUALIZAÇÃO em entradas anteriores");
       }
     } else {
-      Logger.log("processEstoque: Produto dentro dos 20 dias - NÃO verifica keyword");
+      Logger.log("processEstoque: Produto dentro dos 15 dias - NÃO verifica keyword");
     }
   } else {
     Logger.log("processEstoque: Primeiro registro do item - sem verificação de dias");
@@ -1489,9 +1489,9 @@ function getLastRegistration(item, currentRow) {
 
 /**
  * hasAtualizacaoInPreviousEntries: Verifica se há alguma entrada com "ATUALIZAÇÃO"
- * nas últimas entradas do item dentro do período especificado (últimos 20 dias antes do novo lançamento).
+ * nas últimas entradas do item dentro do período especificado (últimos 15 dias antes do novo lançamento).
  * @param {string} item - Nome do item
- * @param {Date} startDate - Data inicial (20 dias antes do novo lançamento)
+ * @param {Date} startDate - Data inicial (15 dias antes do novo lançamento)
  * @param {Date} endDate - Data final (data do último registro antes do novo lançamento)
  * @param {number} currentRow - Linha atual para excluir da busca
  * @return {boolean} - true se encontrou "ATUALIZAÇÃO" ou "ACERTO", false caso contrário
@@ -1566,7 +1566,7 @@ function hasAtualizacaoInPreviousEntries(item, startDate, endDate, currentRow) {
       var dataRegistro = parseDateString(dataRegistroStr);
       if (!dataRegistro) continue;
 
-      // Verifica se está dentro do período de 20 dias
+      // Verifica se está dentro do período de 15 dias
       if (dataRegistro >= startDate && dataRegistro <= endDate) {
         encontrados++;
         var obs = data[i][5]; // Coluna F (Obs)
@@ -1783,7 +1783,7 @@ function gerarRelatorioEstoque(dataInicio, dataFim) {
     if (bg.indexOf("yellow") >= 0 || bg === "#ffff00" || bg === "#ffff") {
       motivo = "⚠️ ENTRADA - Atualizar estoque";
     } else if (bg.indexOf("red") >= 0 || bg === "#ff0000" || bg.indexOf("#f00") >= 0) {
-      motivo = "🔴 DESATUALIZADO (+20 dias)";
+      motivo = "🔴 DESATUALIZADO (+" + DIAS_SINALIZACAO_DESATUALIZADO + " dias)";
     } else {
       motivo = "OK";
     }
