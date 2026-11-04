@@ -235,6 +235,8 @@ function getOrCreateIndiceItensSheet() {
 // Para desligar: apague essa propriedade do script.
 // ========================================
 var DIAS_VALIDADE_ATUALIZACAO = 20;
+// Sinalização (linha vermelha + aviso "DESATUALIZADO"): independe do bloqueio e dispara antes dele.
+var DIAS_SINALIZACAO_DESATUALIZADO = 15;
 var OBS_LIBERA_BLOQUEIO = ["ATUALIZACAO", "ACERTO", "ATUAL SAIDA"];
 // Só itens cujo Grupo (coluna D da ÍNDICE_ITENS) está aqui são bloqueados.
 // Demais grupos (químico, peça, embalagem, consumo...) seguem apenas com a sinalização de desatualizado.
@@ -1462,7 +1464,7 @@ function processEstoqueWebApp(formData) {
 
     var warningMessage = null;
 
-    // Verifica se passou mais de 20 dias desde a última data de registro
+    // Verifica se passou mais de 15 dias desde a última data de registro
     if (lastReg.lastDate) {
       // CORREÇÃO: Usa parseDateString para converter corretamente datas em formato brasileiro
       var lastDate = parseDateString(lastReg.lastDate);
@@ -1481,26 +1483,26 @@ function processEstoqueWebApp(formData) {
       Logger.log("processEstoqueWebApp: DEBUG - lastDate é válido? " + !isNaN(lastDate.getTime()));
       Logger.log("processEstoqueWebApp: DEBUG - Data atual: " + now);
       Logger.log("processEstoqueWebApp: DEBUG - Diferença de dias: " + diffDays + " dias");
-      Logger.log("processEstoqueWebApp: DEBUG - diffDays > 20? " + (diffDays > 20));
+      Logger.log("processEstoqueWebApp: DEBUG - diffDays > limite? " + (diffDays > DIAS_SINALIZACAO_DESATUALIZADO));
       Logger.log("processEstoqueWebApp: ========================================");
 
-      if (diffDays > 20) {
-        // NOVA LÓGICA: Verifica se ALGUMA entrada ANTERIOR nos últimos 20 dias contém "ATUALIZAÇÃO"
-        // Calcula a data inicial (20 dias antes do novo lançamento)
-        var startDate = new Date(now.getTime() - (20 * 24 * 60 * 60 * 1000));
+      if (diffDays > DIAS_SINALIZACAO_DESATUALIZADO) {
+        // NOVA LÓGICA: Verifica se ALGUMA entrada ANTERIOR nos últimos 15 dias contém "ATUALIZAÇÃO"
+        // Calcula a data inicial (15 dias antes do novo lançamento)
+        var startDate = new Date(now.getTime() - (DIAS_SINALIZACAO_DESATUALIZADO * 24 * 60 * 60 * 1000));
 
         Logger.log("processEstoqueWebApp: Verificando entradas anteriores entre " + startDate + " e " + now);
 
-        // Busca por "ATUALIZAÇÃO" nas entradas ANTERIORES dentro do período de 20 dias
+        // Busca por "ATUALIZAÇÃO" nas entradas ANTERIORES dentro do período de 15 dias
         var temAtualizacaoAnterior = hasAtualizacaoInPreviousEntries(formData.item, startDate, now, nextRow);
         Logger.log("processEstoqueWebApp: Encontrou 'ATUALIZAÇÃO' em entradas anteriores? " + temAtualizacaoAnterior);
 
-        // Se NÃO houver "ATUALIZAÇÃO" em NENHUMA entrada anterior nos últimos 20 dias, pinta de vermelho
+        // Se NÃO houver "ATUALIZAÇÃO" em NENHUMA entrada anterior nos últimos 15 dias, pinta de vermelho
         if (!temAtualizacaoAnterior) {
           var lastColumn = sheetEstoque.getLastColumn();
           sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("red");
-          warningMessage = "⚠️ PRODUTO DESATUALIZADO (ÚLTIMA ATUALIZAÇÃO HÁ MAIS DE 20 DIAS). POR FAVOR, ATUALIZAR URGENTE.";
-          Logger.log("processEstoqueWebApp: Linha pintada de VERMELHO - produto desatualizado (sem ATUALIZAÇÃO nas entradas anteriores dos últimos 20 dias)");
+          warningMessage = "⚠️ PRODUTO DESATUALIZADO (ÚLTIMA ATUALIZAÇÃO HÁ MAIS DE " + DIAS_SINALIZACAO_DESATUALIZADO + " DIAS). POR FAVOR, ATUALIZAR URGENTE.";
+          Logger.log("processEstoqueWebApp: Linha pintada de VERMELHO - produto desatualizado (sem ATUALIZAÇÃO nas entradas anteriores dos últimos 15 dias)");
         } else {
           Logger.log("processEstoqueWebApp: Linha NÃO pintada de vermelho - há ATUALIZAÇÃO em entradas anteriores");
         }
@@ -1768,7 +1770,7 @@ function processMultipleEstoqueItemsWithGroup(itens) {
         // Determina cor da linha ANTES de inserir
         var backgroundColor = null;
 
-        // Verifica se passou mais de 20 dias desde a última data de registro
+        // Verifica se passou mais de 15 dias desde a última data de registro
         if (lastDate) {
           var parsedLastDate = parseDateString(lastDate);
 
@@ -1780,9 +1782,9 @@ function processMultipleEstoqueItemsWithGroup(itens) {
           var diffDays = (now.getTime() - parsedLastDate.getTime()) / (1000 * 3600 * 24);
           Logger.log("processMultipleEstoqueItemsWithGroup: Item " + itemData.item + " - Diferença: " + diffDays.toFixed(2) + " dias");
 
-          if (diffDays > 20) {
+          if (diffDays > DIAS_SINALIZACAO_DESATUALIZADO) {
             // NOTA: hasAtualizacaoInPreviousEntries ainda lê ESTOQUE, mas só quando necessário
-            var startDate = new Date(now.getTime() - (20 * 24 * 60 * 60 * 1000));
+            var startDate = new Date(now.getTime() - (DIAS_SINALIZACAO_DESATUALIZADO * 24 * 60 * 60 * 1000));
             var temAtualizacaoAnterior = hasAtualizacaoInPreviousEntries(itemData.item, startDate, now, 999999);
             Logger.log("processMultipleEstoqueItemsWithGroup: Item " + itemData.item + " - Encontrou 'ATUALIZAÇÃO'? " + temAtualizacaoAnterior);
 
@@ -1970,7 +1972,7 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
 
         var itemWarning = null;
 
-        // Verifica se passou mais de 20 dias desde a última data de registro
+        // Verifica se passou mais de 15 dias desde a última data de registro
         if (lastDate) {
           // CORREÇÃO: Usa parseDateString para converter corretamente datas em formato brasileiro
           var parsedLastDate = parseDateString(lastDate);
@@ -1984,22 +1986,22 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
           var diffDays = (now.getTime() - parsedLastDate.getTime()) / (1000 * 3600 * 24);
           Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - Diferença: " + diffDays + " dias");
 
-          if (diffDays > 20) {
-            // NOVA LÓGICA: Verifica se ALGUMA entrada ANTERIOR nos últimos 20 dias contém "ATUALIZAÇÃO"
-            // Calcula a data inicial (20 dias antes do novo lançamento)
-            var startDate = new Date(now.getTime() - (20 * 24 * 60 * 60 * 1000));
+          if (diffDays > DIAS_SINALIZACAO_DESATUALIZADO) {
+            // NOVA LÓGICA: Verifica se ALGUMA entrada ANTERIOR nos últimos 15 dias contém "ATUALIZAÇÃO"
+            // Calcula a data inicial (15 dias antes do novo lançamento)
+            var startDate = new Date(now.getTime() - (DIAS_SINALIZACAO_DESATUALIZADO * 24 * 60 * 60 * 1000));
 
             Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - Verificando entradas anteriores entre " + startDate + " e " + now);
 
-            // Busca por "ATUALIZAÇÃO" nas entradas ANTERIORES dentro do período de 20 dias
+            // Busca por "ATUALIZAÇÃO" nas entradas ANTERIORES dentro do período de 15 dias
             var temAtualizacaoAnterior = hasAtualizacaoInPreviousEntries(itemData.item, startDate, now, nextRow);
             Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - Encontrou 'ATUALIZAÇÃO' em entradas anteriores? " + temAtualizacaoAnterior);
 
-            // Se NÃO houver "ATUALIZAÇÃO" em NENHUMA entrada anterior nos últimos 20 dias, pinta de vermelho
+            // Se NÃO houver "ATUALIZAÇÃO" em NENHUMA entrada anterior nos últimos 15 dias, pinta de vermelho
             if (!temAtualizacaoAnterior) {
               sheetEstoque.getRange(nextRow, 1, 1, lastColumn).setBackground("red");
-              itemWarning = "DESATUALIZADO (+20 dias)";
-              Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - VERMELHO (sem ATUALIZAÇÃO nas entradas anteriores dos últimos 20 dias)");
+              itemWarning = "DESATUALIZADO (+" + DIAS_SINALIZACAO_DESATUALIZADO + " dias)";
+              Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - VERMELHO (sem ATUALIZAÇÃO nas entradas anteriores dos últimos 15 dias)");
             } else {
               Logger.log("processMultipleEstoqueItemsWithSaldos: Item " + itemData.item + " - NÃO pintado (há ATUALIZAÇÃO em entradas anteriores)");
             }
@@ -2275,7 +2277,7 @@ function gerarRelatorioEstoqueWebApp(dataInicio, dataFim) {
         if (bg.indexOf("yellow") >= 0 || bg === "#ffff00" || bg === "#ffff") {
           motivo = "⚠️ ENTRADA - Atualizar estoque";
         } else if (bg.indexOf("red") >= 0 || bg === "#ff0000" || bg.indexOf("#f00") >= 0) {
-          motivo = "🔴 DESATUALIZADO (+20 dias)";
+          motivo = "🔴 DESATUALIZADO (+" + DIAS_SINALIZACAO_DESATUALIZADO + " dias)";
         } else {
           motivo = "OK";
         }
