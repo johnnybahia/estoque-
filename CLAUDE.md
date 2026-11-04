@@ -29,6 +29,7 @@
 - Responder em português, direto. Para alteração: entendimento, plano, riscos e casos extremos, perguntar; depois código só dos blocos alterados.
 - Validar: copiar o `.gs` para `.js` no scratchpad e rodar `node --check`; testar a regra com simulação (mock) quando possível.
 - Commit e push só na branch designada da sessão. Não abrir PR sem pedido.
+- **Toda alteração de código ou de regra** vira uma entrada no topo de `CHANGELOG.md` (data, o que mudou, arquivos, ação manual) no mesmo commit. Se uma regra de negócio mudou, atualizar também a seção "Regras de negócio" deste arquivo.
 
 ## Pendências conhecidas
 - Aba `Credenciais` guarda senhas em texto puro; migrar para hash ou `PropertiesService`.
