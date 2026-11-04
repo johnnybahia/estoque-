@@ -242,6 +242,52 @@ var OBS_LIBERA_BLOQUEIO = ["ATUALIZACAO", "ACERTO", "ATUAL SAIDA"];
 var GRUPOS_BLOQUEIA = ["MATERIA PRIMA"];
 var PROP_BLOQUEIO_ATIVO = "BLOQUEIO_ATUALIZACAO_ATIVO";
 var COL_INDICE_ULT_ATUALIZACAO = 7;
+// Coluna H da ÍNDICE_ITENS: "SIM" = item já teve alguma entrada (>0, ACERTO conta); "NAO" = só teve saídas;
+// vazio = desconhecido (índice ainda não reconstruído) e tratado como "SIM", ou seja, continua bloqueando.
+var COL_INDICE_TEVE_ENTRADA = 8;
+
+/**
+ * _garantirColunaEntradaIndice: cabeçalho, largura e formato texto da coluna H (idempotente, 1x por execução).
+ */
+function _garantirColunaEntradaIndice(sheet) {
+  if (_garantirColunaEntradaIndice._ok) return;
+  if (sheet.getMaxColumns() < COL_INDICE_TEVE_ENTRADA) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), COL_INDICE_TEVE_ENTRADA - sheet.getMaxColumns());
+  }
+  var cab = sheet.getRange(1, COL_INDICE_TEVE_ENTRADA);
+  if (cab.getValue() !== "Teve Entrada") {
+    cab.setValue("Teve Entrada");
+    cab.setFontWeight("bold").setBackground("#4285f4").setFontColor("white");
+    sheet.setColumnWidth(COL_INDICE_TEVE_ENTRADA, 110);
+    if (sheet.getMaxRows() > 1) {
+      sheet.getRange(2, COL_INDICE_TEVE_ENTRADA, sheet.getMaxRows() - 1, 1).setNumberFormat("@");
+    }
+  }
+  _garantirColunaEntradaIndice._ok = true;
+}
+
+/**
+ * _itemNuncaTeveEntrada: true só se a coluna H do item na ÍNDICE_ITENS for "NAO".
+ * Lê as colunas A e H uma única vez por execução e só é chamada quando o item seria bloqueado.
+ */
+function _itemNuncaTeveEntrada(itemNome) {
+  if (!_itemNuncaTeveEntrada._set) {
+    var set = {};
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("ÍNDICE_ITENS");
+    var last = sheet ? sheet.getLastRow() : 0;
+    if (last > 1 && sheet.getMaxColumns() >= COL_INDICE_TEVE_ENTRADA) {
+      var nomes = sheet.getRange(2, 1, last - 1, 1).getDisplayValues();
+      var flags = sheet.getRange(2, COL_INDICE_TEVE_ENTRADA, last - 1, 1).getDisplayValues();
+      for (var i = 0; i < nomes.length; i++) {
+        if (nomes[i][0] && _normalizarObs(flags[i][0]) === "NAO") {
+          set[nomes[i][0].toString().trim().toUpperCase()] = true;
+        }
+      }
+    }
+    _itemNuncaTeveEntrada._set = set;
+  }
+  return _itemNuncaTeveEntrada._set[itemNome.toString().trim().toUpperCase()] === true;
+}
 
 /**
  * _garantirColunaAtualizacaoIndice: cabeçalho, largura e formato texto da coluna G.
@@ -321,6 +367,9 @@ function _bloqueioItem(indice, itemNome, obs, agora, saida) {
     var ult = entrada.ua ? entrada.ua.toString() : "";
     var dias = ult ? _diasDesde(ult, agora) : null;
     if (dias !== null && dias <= DIAS_VALIDADE_ATUALIZACAO) return null;
+
+    // Item que só teve saídas (nunca teve entrada) não tem como ser atualizado: lança normalmente
+    if (_itemNuncaTeveEntrada(itemNome)) return null;
 
     var motivo;
     if (!ult) motivo = "sem ATUALIZAÇÃO registrada";
@@ -434,6 +483,9 @@ function buildIndiceItensInitial() {
       ultimaAtualizacao = data[i][3];
     }
 
+    // Coluna H (índice 7) = Entrada. Qualquer linha com entrada > 0 (inclusive ACERTO) marca o item como "SIM".
+    var teveEntrada = (indiceMap[itemKey] && indiceMap[itemKey].teveEntrada) || _parseNumeroSeguro(data[i][7], 0) > 0;
+
     // Mantém sempre o ÚLTIMO registro de cada item
     indiceMap[itemKey] = {
       item: data[i][1],           // Item original (com case)
@@ -441,7 +493,8 @@ function buildIndiceItensInitial() {
       data: data[i][3],           // Coluna D - Data
       grupo: data[i][0],          // Coluna A - Grupo
       linha: rowNum,
-      ultimaAtualizacao: ultimaAtualizacao
+      ultimaAtualizacao: ultimaAtualizacao,
+      teveEntrada: teveEntrada
     };
   }
 
@@ -460,14 +513,18 @@ function buildIndiceItensInitial() {
       item.grupo,
       item.linha,
       now,
-      item.ultimaAtualizacao || ''
+      item.ultimaAtualizacao || '',
+      item.teveEntrada ? "SIM" : "NAO"
     ]);
   }
+
+  // Coluna H (Teve Entrada): garante cabeçalho/formato antes de limpar e gravar
+  _garantirColunaEntradaIndice(sheetIndice);
 
   // Limpa conteúdo anterior (mantém cabeçalho)
   var lastRowIndice = sheetIndice.getLastRow();
   if (lastRowIndice > 1) {
-    sheetIndice.getRange(2, 1, lastRowIndice - 1, COL_INDICE_ULT_ATUALIZACAO).clear();
+    sheetIndice.getRange(2, 1, lastRowIndice - 1, COL_INDICE_TEVE_ENTRADA).clear();
   }
 
   // CORREÇÃO: garante texto na coluna Item antes de gravar (reconstrução completa)
@@ -478,7 +535,7 @@ function buildIndiceItensInitial() {
 
   // Escreve TUDO de uma vez (muito mais rápido)
   if (indiceArray.length > 0) {
-    sheetIndice.getRange(2, 1, indiceArray.length, COL_INDICE_ULT_ATUALIZACAO).setValues(indiceArray);
+    sheetIndice.getRange(2, 1, indiceArray.length, COL_INDICE_TEVE_ENTRADA).setValues(indiceArray);
     Logger.log("Índice escrito na aba ÍNDICE_ITENS: " + indiceArray.length + " linhas");
   }
 
@@ -565,7 +622,7 @@ function _loadIndiceItensFromSheet() {
  * Muito rápido: apenas 1 linha atualizada
  * @param {boolean} invalidateCache - Se deve invalidar cache (default: true). Use false em loops batch.
  */
-function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque, invalidateCache, obs) {
+function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque, invalidateCache, obs, entrada) {
   // Default: invalida cache (compatibilidade com código existente)
   if (invalidateCache === undefined) {
     invalidateCache = true;
@@ -573,7 +630,9 @@ function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque, invalidate
 
   try {
     var sheetIndice = getOrCreateIndiceItensSheet();
+    _garantirColunaEntradaIndice(sheetIndice);
     var itemKey = itemName.toString().trim().toUpperCase();
+    var teveEntradaAgora = _parseNumeroSeguro(entrada, 0) > 0;
 
     // OTIMIZAÇÃO BATCH: lê a coluna de itens do índice UMA VEZ por execução.
     // Antes, um lote de 20 itens fazia 20 leituras completas da coluna.
@@ -610,11 +669,16 @@ function updateIndiceItem(itemName, saldo, data, grupo, linhaEstoque, invalidate
       if (dataAtualizacao) {
         sheetIndice.getRange(itemRow, COL_INDICE_ULT_ATUALIZACAO).setNumberFormat("@").setValue(dataAtualizacao);
       }
+      // Coluna H: a 1ª entrada marca "SIM" e nunca volta para "NAO"; sem entrada preserva o valor (vazio = desconhecido)
+      if (teveEntradaAgora) {
+        sheetIndice.getRange(itemRow, COL_INDICE_TEVE_ENTRADA).setNumberFormat("@").setValue("SIM");
+      }
     } else {
       // Adiciona novo item
       var nextRow = memo.nextRow;
       sheetIndice.getRange(nextRow, 1, 1, 6).setValues([rowData]);
       sheetIndice.getRange(nextRow, COL_INDICE_ULT_ATUALIZACAO).setNumberFormat("@").setValue(dataAtualizacao || agoraFmt);
+      sheetIndice.getRange(nextRow, COL_INDICE_TEVE_ENTRADA).setNumberFormat("@").setValue(teveEntradaAgora ? "SIM" : "NAO");
       memo.mapa[itemKey] = nextRow;
       memo.nextRow = nextRow + 1;
     }
@@ -1453,7 +1517,7 @@ function processEstoqueWebApp(formData) {
     }
 
     // OTIMIZAÇÃO: Atualiza o índice com o novo registro
-    updateIndiceItem(formData.item, newSaldo, now, formData.group, nextRow, true, formData.obs);
+    updateIndiceItem(formData.item, newSaldo, now, formData.group, nextRow, true, formData.obs, entrada);
     Logger.log("processEstoqueWebApp: Índice atualizado para item " + formData.item);
 
     // Invalida caches (padrão e otimizado)
@@ -1588,7 +1652,8 @@ function processMultipleEstoqueItems(itens) {
           rowsToInsert[i].grupo,
           currentRow,
           false,  // ✅ Não invalida cache aqui (batch)
-          rowsToInsert[i].obs
+          rowsToInsert[i].obs,
+          rowsToInsert[i].entrada
         );
       }
     }
@@ -1732,6 +1797,7 @@ function processMultipleEstoqueItemsWithGroup(itens) {
         rowsToInsert.push({
           data: rowData,
           background: backgroundColor,
+          entrada: entrada,
           item: itemData.item,
           newSaldo: newSaldo,
           grupo: grupoItem,
@@ -1770,7 +1836,8 @@ function processMultipleEstoqueItemsWithGroup(itens) {
           rowsToInsert[i].grupo,
           currentRow,
           false,  // ✅ Não invalida cache aqui (batch)
-          rowsToInsert[i].obs
+          rowsToInsert[i].obs,
+          rowsToInsert[i].entrada
         );
       }
     }
@@ -1950,7 +2017,8 @@ function processMultipleEstoqueItemsWithSaldos(itens) {
           grupoItem,
           nextRow,
           false,  // ✅ Não invalida cache aqui (batch)
-          itemData.obs
+          itemData.obs,
+          entrada
         );
 
         // Adiciona ao array de itens processados com os saldos
